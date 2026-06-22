@@ -1,27 +1,24 @@
-# Plan: PWA Installability and Custom Installation UI
+# Plan: Add Profile Navigation on Mobile View
 
 ## Objective
-Verify the current PWA configuration, ensure it is fully compliant with browser installability requirements, and implement a premium custom install prompt for the user.
+Enable mobile users to easily view their logged-in Nostr profile. On mobile view, the bottom tab navigation currently shows "Settings" but has no link to the user's profile. We will replace "Settings" with "Profile" in the mobile bottom navigation bar. Since settings are already accessible via the profile page ("Edit profile settings" button and top-right header options button), this maintains access to settings while aligning with standard mobile social app layouts.
 
 ## Strategy
-1. **Audit existing configuration**: Check current manifest settings, service worker registration, and icons.
-2. **Standardize assets**: Ensure high-compatibility PNG icons are configured alongside SVG.
-3. **Implement custom install UX**: Capture the `beforeinstallprompt` event and render a beautifully designed install button in the user interface (e.g., in a settings sidebar or floating action banner).
-4. **Enable Dev Mode PWA testing**: Enable PWA in development mode in `vite.config.ts` if needed, and verify with a build.
+1. **Define Mobile Nav Items**: In MainLayout.tsx, define a `mobileNavItems` array that replaces the Settings route (`/settings`) with the Profile route (`/profile/me`). (Done)
+2. **Update Mobile Bottom Nav Bars**: Replace the mapping of `navItems` with `mobileNavItems` in both the immersive mobile bottom navigation bar and the standard mobile bottom navigation bar. (Done)
+3. **Verify Layout & Functionality**: Verify that the bottom nav displays the Profile icon (`User` icon from lucide-react) and links to `/profile/me` on mobile devices/simulated screens.
+4. **Build and Validate**: Build the application to ensure typescript compiles clean and look for any regressions.
 
 ## Tasks
 
-### 1. Research & Audit
-- [x] Task 1.1: Verify if the current SVG icon is sufficient or if PNG icons are required.
-- [x] Task 1.2: Check if service worker is loaded correctly during build/preview.
-- [x] Task 1.3: Enable `devOptions` in `vite.config.ts` to allow debugging the PWA behavior locally.
+### 1. Planning & Design Audit
+- [x] Task 1.1: Verify how the mobile layout is constructed and determine where bottom nav elements are rendered.
+- [x] Task 1.2: Check if profile pages are accessible and if settings are reachable from the profile page.
 
 ### 2. Implementation
-- [x] Task 2.1: Add standard PNG icons (192x192, 512x512) to the public folder and update `vite.config.ts`. (Using modern SVG parameters for full cross-platform compatibility).
-- [x] Task 2.2: Implement a `usePWAInstall` React hook to manage the `beforeinstallprompt` event.
-- [x] Task 2.3: Integrate a beautiful custom "Install App" button into the main UI navigation or a settings panel.
+- [x] Task 2.1: Add `mobileNavItems` with Profile route in MainLayout.tsx.
+- [x] Task 2.2: Update the immersive and standard mobile navigation menus to map over `mobileNavItems`.
 
-### 3. Verification & Hardening
-- [x] Task 3.1: Build and preview the production build locally.
-- [x] Task 3.2: Verify the manifest and PWA installability using Chrome DevTools Lighthouse or Application tab.
-- [x] Task 3.3: Final linting and clean-up.
+### 3. Verification & Cleanup
+- [x] Task 3.1: Build the code locally with `npm run build` or similar scripts to ensure there are no compilation/typescript errors.
+- [x] Task 3.2: Confirm changes are clean and run formatting/linting if necessary.

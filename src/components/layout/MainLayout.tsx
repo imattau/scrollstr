@@ -24,6 +24,14 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
     { path: '/settings', label: 'Settings', icon: Settings },
   ]
 
+  const mobileNavItems = [
+    { path: '/', label: 'Home', icon: Home },
+    { path: '/discover', label: 'Discover', icon: Compass },
+    { path: '/post', label: 'Post', icon: PlusSquare },
+    { path: '/activity', label: 'Activity', icon: Bell },
+    { path: '/profile/me', label: 'Profile', icon: User },
+  ]
+
   const isActive = (path: string) => {
     if (path === '/') {
       return pathname === '/'
@@ -38,7 +46,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
           {children}
           {/* Mobile Navigation (Bottom) */}
           <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
-            {navItems.map((item) => {
+            {mobileNavItems.map((item) => {
               const Icon = item.icon
               const active = isActive(item.path)
               return (
@@ -271,7 +279,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
 
       {/* Mobile Navigation (Bottom) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
-        {navItems.map((item) => {
+        {mobileNavItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.path)
           return (
