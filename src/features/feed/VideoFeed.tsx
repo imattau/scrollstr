@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
@@ -92,6 +92,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [rxNostr, session?.pubkey])
 
   // Parse events to local format, filter, and enrich with live reaction counts from EventStore
+  // Removed eventStore from deps to prevent recalc on every event. Reactions update via eventStore queries below.
   const videos = useMemo(() => {
     const sortedRawEvents = [...rawVideoEvents].sort((a: any, b: any) => {
       if (a.id === LOCAL_PREVIEW_ID) return -1
@@ -138,7 +139,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         hasZapped,
       }
     })
-  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session, eventStore])
+  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session])
 
   useEffect(() => {
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
@@ -181,6 +182,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [activeIndex, isFetchingOlder, rxNostr, videos.length, relayUrls])
 
   // Prefetch comments, likes, boosts, and zaps for the active video and the next upcoming video
+  // Only trigger on activeIndex change, not on entire videos array change (prevents cascading re-subscriptions)
   useEffect(() => {
     if (videos.length === 0) return
     const activeVideo = videos[activeIndex]
@@ -223,6 +225,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [videos, initialVideoId])
 
   // Track active index on vertical scroll snap
+  // Removed videos from deps and use ref to avoid re-registering listener on every video change
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -231,7 +234,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       const scrollPos = container.scrollTop
       const height = container.clientHeight
       const newIndex = Math.round(scrollPos / height)
-      
+
       if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
         setActiveIndex(newIndex)
       }
@@ -241,7 +244,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     return () => {
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [activeIndex, videos])
+  }, [activeIndex])
 
   // Propagate active video to parent
   useEffect(() => {
@@ -250,10 +253,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, videos, onVideoChange])
 
-  const handleActionClick = (action: string, videoId: string, videoKind?: number) => {
+  const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
     const video = videos.find((v) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
-  }
+  }, [videos, onActionTrigger])
 
   if (videos.length === 0) {
     return (
