@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
 import { LoginSheet } from '../features/auth/LoginSheet'
 import { CommentsSheet } from '../features/comments/CommentsSheet'
+import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost } from '../nostr/events/reactions'
 
@@ -10,6 +11,7 @@ function AppContent() {
   const { ndk, session } = useNostr()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
+  const [isZapOpen, setIsZapOpen] = useState(false)
   
   // Scoped video variables for active sheets
   const [activeVideoId, setActiveVideoId] = useState('')
@@ -35,6 +37,8 @@ function AppContent() {
     // Authenticated actions execution
     if (actionType === 'comment') {
       setIsCommentsOpen(true)
+    } else if (actionType === 'zap') {
+      setIsZapOpen(true)
     } else if (actionType === 'like') {
       try {
         await publishLike(ndk, videoId, creatorPubkey || '')
@@ -89,6 +93,14 @@ function AppContent() {
           videoId={activeVideoId}
           creatorPubkey={activeCreatorPubkey}
           onClose={() => setIsCommentsOpen(false)}
+        />
+
+        {/* Zap bottom sheet */}
+        <ZapSheet
+          isOpen={isZapOpen}
+          videoId={activeVideoId}
+          creatorPubkey={activeCreatorPubkey}
+          onClose={() => setIsZapOpen(false)}
         />
       </div>
     </BrowserRouter>
