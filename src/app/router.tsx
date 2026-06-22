@@ -1,5 +1,5 @@
 import React from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, useLocation, useSearchParams } from 'react-router-dom'
 import { MainLayout } from '../components/layout/MainLayout'
 import { VideoFeed } from '../features/feed/VideoFeed'
 import { DiscoverPage } from '../features/discovery/DiscoverPage'
@@ -10,19 +10,28 @@ import { SettingsPage } from '../features/settings/SettingsPage'
 import { DesktopCommentsPanel } from '../features/comments/DesktopCommentsPanel'
 
 interface RouterProps {
-  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
+  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
   activeVideo: any
   onVideoChange: (video: any) => void
   isMuted: boolean
 }
 
 export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo, onVideoChange, isMuted }) => {
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const feedType = searchParams.get('feed') || 'explore'
+
   return (
     <Routes>
       <Route
         path="/"
         element={
-          <MainLayout immersive rightPanel={<DesktopCommentsPanel video={activeVideo} />}>
+          <MainLayout
+            immersive
+            rightPanel={<DesktopCommentsPanel video={activeVideo} />}
+            pathname={location.pathname}
+            feedType={feedType}
+          >
             <VideoFeed onActionTrigger={onActionTrigger} onVideoChange={onVideoChange} isMuted={isMuted} />
           </MainLayout>
         }
@@ -30,7 +39,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/discover"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <DiscoverPage />
           </MainLayout>
         }
@@ -38,7 +47,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/post"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <PostWizard />
           </MainLayout>
         }
@@ -46,7 +55,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/activity"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <ActivityPage />
           </MainLayout>
         }
@@ -54,7 +63,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/profile/:pubkey"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <ProfilePage />
           </MainLayout>
         }
@@ -62,7 +71,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/profile/me"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <ProfilePage />
           </MainLayout>
         }
@@ -70,7 +79,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo,
       <Route
         path="/settings"
         element={
-          <MainLayout>
+          <MainLayout pathname={location.pathname} feedType={feedType}>
             <SettingsPage />
           </MainLayout>
         }

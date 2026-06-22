@@ -9,6 +9,7 @@ import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { createRxForwardReq } from 'rx-nostr'
 import { publishFollow } from '../../nostr/events/reactions'
+import { useUserRelayUrls } from '../../nostr/relays'
 
 const EMPTY_VIDEOS: any[] = []
 const EMPTY_EVENTS: any[] = []
@@ -17,6 +18,7 @@ export const ProfilePage: React.FC = () => {
   const { session, rxNostr, signEvent, eventStore } = useNostr()
   const { pubkey } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
+  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
   const [activeTab, setActiveTab] = useState<'videos' | 'boosts' | 'about'>('videos')
 
@@ -28,9 +30,9 @@ export const ProfilePage: React.FC = () => {
   const displayName = profile.displayName || profile.name || 'Nostr User'
   const creatorLabel = `@${profile.name}`
 
-  // Retrieve raw kind:22 and kind:34236 video events authored by target pubkey
+  // Retrieve raw short-video events authored by target pubkey
   const rawVideoEvents = use$(
-    () => getEventsQuery$({ kinds: [22, 34236], authors: targetPubkey ? [targetPubkey] : [] }),
+    () => getEventsQuery$({ kinds: [21, 22, 34236], authors: targetPubkey ? [targetPubkey] : [] }),
     [targetPubkey]
   ) ?? EMPTY_VIDEOS
 
@@ -85,7 +87,7 @@ export const ProfilePage: React.FC = () => {
     if (!targetPubkey) return
     console.log(`Subscribing to contact lists for stats of pubkey: ${targetPubkey}`)
     const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq).subscribe()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     
     // Subscribe to target's following (authored by targetPubkey)
     rxReq.emit({ kinds: [3], authors: [targetPubkey], limit: 1 })
@@ -96,7 +98,7 @@ export const ProfilePage: React.FC = () => {
     return () => {
       sub.unsubscribe()
     }
-  }, [rxNostr, targetPubkey])
+  }, [rxNostr, targetPubkey, relayUrls])
 
   const handleEditProfile = () => {
     navigate('/settings')

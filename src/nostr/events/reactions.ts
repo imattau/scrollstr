@@ -3,7 +3,8 @@ export const publishLike = async (
   signEvent: (eventTemplate: any) => Promise<any>,
   rxNostr: any,
   targetEventId: string,
-  targetAuthorPubkey: string
+  targetAuthorPubkey: string,
+  targetEventKind = 22
 ): Promise<any> => {
   const eventTemplate = {
     kind: 7,
@@ -11,7 +12,7 @@ export const publishLike = async (
     tags: [
       ['e', targetEventId],
       ['p', targetAuthorPubkey],
-      ['k', '22'], // Target kind is kind 22 (short video)
+      ['k', String(targetEventKind)], // Target kind is the short-video kind on the target event
     ],
   }
 
@@ -30,7 +31,8 @@ export const publishBoost = async (
   signEvent: (eventTemplate: any) => Promise<any>,
   rxNostr: any,
   targetEventId: string,
-  targetAuthorPubkey: string
+  targetAuthorPubkey: string,
+  targetEventKind = 22
 ): Promise<any> => {
   const eventTemplate = {
     kind: 16, // Generic repost kind
@@ -38,7 +40,7 @@ export const publishBoost = async (
     tags: [
       ['e', targetEventId, '', 'mention'],
       ['p', targetAuthorPubkey],
-      ['k', '22'], // Target kind is 22
+      ['k', String(targetEventKind)], // Target kind is the short-video kind on the target event
     ],
   }
 

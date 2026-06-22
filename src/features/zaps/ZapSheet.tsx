@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNostr } from '../../app/providers'
 import { createRxForwardReq } from 'rx-nostr'
 import { useProfile } from '../../nostr/profile'
+import { useUserRelayUrls } from '../../nostr/relays'
 
 interface ZapSheetProps {
   isOpen: boolean
@@ -14,6 +15,7 @@ const PRESETS = [21, 100, 500, 1000]
 
 export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
   const { rxNostr, eventStore, session, signEvent } = useNostr()
+  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
   const profile = useProfile(creatorPubkey)
   const [amount, setAmount] = useState<number>(100)
   const [comment, setComment] = useState('Great video!')
@@ -48,7 +50,7 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
         console.log(`Lud16 not found in cache for ${creatorPubkey}, querying profile from relays...`)
         const rxReq = createRxForwardReq()
         const promise = new Promise<any>((resolve) => {
-          const sub = rxNostr.use(rxReq).subscribe((packet) => {
+          const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe((packet) => {
             if (packet.event.kind === 0 && packet.event.pubkey === creatorPubkey) {
               resolve(packet.event)
             }

@@ -18,7 +18,7 @@ export const parseImetaTag = (imetaTag: string[]): Record<string, string> => {
   return data
 }
 
-// Convert a Nostr kind:22 or kind:34236 event into our local VideoItemData format
+// Convert a Nostr kind:21, kind:22, or kind:34236 event into our local VideoItemData format
 export const parseVideoEvent = (event: any): VideoItemData | null => {
   try {
     const titleTag = event.tags.find((t: any) => t[0] === 'title')
@@ -51,6 +51,8 @@ export const parseVideoEvent = (event: any): VideoItemData | null => {
 
     return {
       id: event.id,
+      kind: event.kind,
+      createdAt: event.created_at,
       title,
       description: event.content || alt,
       url,
@@ -81,7 +83,7 @@ export const publishVideoEvent = async (
   hashtags: string[]
 ): Promise<any> => {
   const eventTemplate = {
-    kind: 22, // immutable kind:22 video event
+    kind: 22, // immutable short-video publish kind
     content: description,
     tags: [
       ['title', title],

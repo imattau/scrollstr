@@ -1,3 +1,5 @@
+import { loadSettings, saveSettings } from '../../db/local-preferences'
+
 // Publish kind:10002 relay list metadata
 export const publishRelayList = async (
   signEvent: (eventTemplate: any) => Promise<any>,
@@ -27,6 +29,17 @@ export const publishRelayList = async (
   } catch (err) {
     console.warn('Failed to broadcast relay list to relays:', err)
   }
+
+  try {
+    const current = loadSettings()
+    saveSettings({
+      ...current,
+      relays: relays.map((relay) => relay.url),
+    })
+  } catch (err) {
+    console.warn('Failed to persist local relay list settings:', err)
+  }
+
   return signed
 }
 

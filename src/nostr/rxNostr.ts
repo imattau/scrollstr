@@ -40,7 +40,28 @@ eventStore.getReplaceable = ((kind: number, pubkey: string) => {
 // Seed EventStore with default high-quality mock video events to ensure content loads immediately
 const MOCK_EVENTS = [
   {
-    kind: 22,
+    kind: 21,
+    id: 'local-preview-neon-mascot',
+    pubkey: '8459424242424242424242424242424242424242424242424242424242424242',
+    created_at: Math.floor(Date.now() / 1000),
+    content: 'The Neon Mascot loop, bundled locally so the feed has instant motion while relays connect.',
+    tags: [
+      ['title', 'The Neon Mascot'],
+      ['published_at', Math.floor(Date.now() / 1000).toString()],
+      ['alt', 'The Neon Mascot'],
+      ['t', 'neon'],
+      ['t', 'mascot'],
+      ['t', 'scrollstr'],
+      [
+        'imeta',
+        'url /videos/The_Neon_Mascot_A_short_loop.mp4',
+        'm video/mp4',
+      ],
+    ],
+    sig: 'local-preview-sig',
+  },
+  {
+    kind: 21,
     id: "mock-video-1",
     pubkey: "8459424242424242424242424242424242424242424242424242424242424242",
     created_at: Math.floor(Date.now() / 1000) - 3600,
@@ -62,7 +83,7 @@ const MOCK_EVENTS = [
     sig: "mock-sig-1"
   },
   {
-    kind: 22,
+    kind: 21,
     id: "mock-video-2",
     pubkey: "9283928392839283928392839283928392839283928392839283928392839283",
     created_at: Math.floor(Date.now() / 1000) - 7200,
@@ -84,7 +105,7 @@ const MOCK_EVENTS = [
     sig: "mock-sig-2"
   },
   {
-    kind: 22,
+    kind: 21,
     id: "mock-video-3",
     pubkey: "7362736273627362736273627362736273627362736273627362736273627362",
     created_at: Math.floor(Date.now() / 1000) - 10800,

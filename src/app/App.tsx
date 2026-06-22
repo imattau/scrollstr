@@ -17,12 +17,14 @@ function AppContent() {
   // Scoped video variables for active sheets
   const [activeVideoId, setActiveVideoId] = useState('')
   const [activeCreatorPubkey, setActiveCreatorPubkey] = useState('')
-  const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string } | null>(null)
+  const [activeVideoKind, setActiveVideoKind] = useState<number | null>(null)
+  const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string; videoKind?: number } | null>(null)
   const [activeVideo, setActiveVideo] = useState<any>(null)
   const [isMuted, setIsMuted] = useState(true)
 
-  const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string) => {
+  const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => {
     setActiveVideoId(videoId)
+    setActiveVideoKind(videoKind ?? null)
     if (creatorPubkey) {
       setActiveCreatorPubkey(creatorPubkey)
     }
@@ -32,7 +34,7 @@ function AppContent() {
 
     if (requiresAuth && !session) {
       console.log(`Action '${actionType}' requires login. Opening Login Sheet.`)
-      setPendingAction({ type: actionType, videoId })
+      setPendingAction({ type: actionType, videoId, videoKind })
       setIsLoginOpen(true)
       return
     }
@@ -44,7 +46,7 @@ function AppContent() {
       setIsZapOpen(true)
     } else if (actionType === 'like') {
       try {
-        const signed = await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '')
+        const signed = await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         eventStore.add(signed)
       } catch (err) {
         console.error('Like failed:', err)
@@ -52,7 +54,7 @@ function AppContent() {
       }
     } else if (actionType === 'boost') {
       try {
-        const signed = await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '')
+        const signed = await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         eventStore.add(signed)
       } catch (err) {
         console.error('Boost failed:', err)
@@ -109,11 +111,11 @@ function AppContent() {
     setIsLoginOpen(false)
     // Resume pending action if present
     if (pendingAction) {
-      const { type, videoId } = pendingAction
+      const { type, videoId, videoKind } = pendingAction
       setPendingAction(null)
       // Small timeout to let sheet close before launching next step
       setTimeout(() => {
-        handleActionTrigger(type, videoId, activeCreatorPubkey)
+        handleActionTrigger(type, videoId, activeCreatorPubkey, videoKind)
       }, 300)
     }
   }

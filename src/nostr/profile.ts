@@ -5,6 +5,7 @@ import { createRxForwardReq } from 'rx-nostr'
 import { useNostr } from '../app/providers'
 import { use$ } from 'applesauce-react/hooks'
 import { CreatorProfile } from '../features/feed/VideoFeedItem'
+import { useUserRelayUrls } from './relays'
 
 // Query the eventStore for replaceable kind:0 event for a pubkey
 export const getProfileQuery$ = (eventStore: any, pubkey: string) => {
@@ -51,20 +52,21 @@ export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorP
 
 // React hook to fetch creator profile reactively and cache it
 export const useProfile = (pubkey: string): CreatorProfile => {
-  const { rxNostr, eventStore } = useNostr()
+  const { rxNostr, eventStore, session } = useNostr()
+  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
   const profileEvent = use$(() => getProfileQuery$(eventStore, pubkey), [pubkey])
 
   useEffect(() => {
     if (!profileEvent && pubkey) {
       console.log(`Profile event not cached for ${pubkey}, fetching from relays...`)
       const rxReq = createRxForwardReq()
-      const sub = rxNostr.use(rxReq).subscribe()
+      const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
       rxReq.emit({ kinds: [0], authors: [pubkey], limit: 1 })
       return () => {
         sub.unsubscribe()
       }
     }
-  }, [pubkey, profileEvent, rxNostr])
+  }, [pubkey, profileEvent, rxNostr, relayUrls])
 
   return parseProfileContent(profileEvent, pubkey)
 }

@@ -16,6 +16,8 @@ export interface CreatorProfile {
 
 export interface VideoItemData {
   id: string
+  kind?: number
+  createdAt?: number
   title?: string
   description?: string
   url: string
@@ -37,7 +39,7 @@ interface VideoFeedItemProps {
   video: VideoItemData
   isActive: boolean
   isMuted: boolean
-  onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'follow' | 'mute', videoId: string) => void
+  onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'follow' | 'mute', videoId: string, videoKind?: number) => void
 }
 
 function ActionPill({
@@ -87,7 +89,7 @@ export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, i
           poster={video.poster}
           isActive={isActive}
           isMuted={isMuted}
-          onLike={() => onActionClick('like', video.id)}
+          onLike={() => onActionClick('like', video.id, video.kind)}
           showControls={false}
         />
       </div>
@@ -97,7 +99,7 @@ export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, i
       <div className="absolute right-4 top-[220px] z-20 flex flex-col items-center gap-[13px] md:right-[-1px] md:top-[260px]">
         <button
           type="button"
-          onClick={() => onActionClick('follow', video.id)}
+          onClick={() => onActionClick('follow', video.id, video.kind)}
           className="flex size-[44px] overflow-hidden items-center justify-center rounded-full bg-[#60a5fa] text-[15px] font-bold text-white transition-transform duration-150 active:scale-95"
           aria-label="Creator"
         >
@@ -112,34 +114,34 @@ export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, i
           icon={<Heart size={18} className={video.hasLiked ? 'fill-red-500 text-red-500' : ''} />}
           iconColor={video.hasLiked ? 'text-red-500' : 'text-[#f7f7f8]'}
           label={video.likesCount >= 1000 ? `${(video.likesCount / 1000).toFixed(video.likesCount % 1000 === 0 ? 0 : 1)}k` : `${video.likesCount}`}
-          onClick={() => onActionClick('like', video.id)}
+          onClick={() => onActionClick('like', video.id, video.kind)}
         />
         <ActionPill
           icon={<MessageCircle size={18} />}
           label={video.commentsCount >= 1000 ? `${(video.commentsCount / 1000).toFixed(video.commentsCount % 1000 === 0 ? 0 : 1)}k` : `${video.commentsCount}`}
-          onClick={() => onActionClick('comment', video.id)}
+          onClick={() => onActionClick('comment', video.id, video.kind)}
         />
         <ActionPill
           icon={<Repeat2 size={18} className={video.hasBoosted ? 'text-green-500' : ''} />}
           iconColor={video.hasBoosted ? 'text-green-500' : 'text-[#f7f7f8]'}
           label={video.boostsCount >= 1000 ? `${(video.boostsCount / 1000).toFixed(video.boostsCount % 1000 === 0 ? 0 : 1)}k` : `${video.boostsCount}`}
-          onClick={() => onActionClick('boost', video.id)}
+          onClick={() => onActionClick('boost', video.id, video.kind)}
         />
         <ActionPill
           icon={<Zap size={18} className="fill-current" />}
           label={video.zapsCount >= 1000 ? `${(video.zapsCount / 1000).toFixed(video.zapsCount % 1000 === 0 ? 0 : 1)}k` : `${video.zapsCount}`}
           labelColor="text-[#f7f7f8]"
           iconColor={video.hasZapped ? 'text-yellow-500' : 'text-[#f5b942]'}
-          onClick={() => onActionClick('zap', video.id)}
+          onClick={() => onActionClick('zap', video.id, video.kind)}
         />
         <ActionPill
           icon={isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
           label={isMuted ? 'Muted' : 'Unmuted'}
-          onClick={() => onActionClick('mute', video.id)}
+          onClick={() => onActionClick('mute', video.id, video.kind)}
         />
         <ActionPill
           icon={<Share2 size={18} />}
-          onClick={() => onActionClick('share', video.id)}
+          onClick={() => onActionClick('share', video.id, video.kind)}
         />
       </div>
 

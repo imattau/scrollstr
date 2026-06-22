@@ -2,16 +2,20 @@ import React, { useEffect, useRef, useState, useMemo } from 'react'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
-import { createRxForwardReq } from 'rx-nostr'
+import { createRxBackwardReq, createRxForwardReq } from 'rx-nostr'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
 
 import { useSearchParams } from 'react-router-dom'
 
 const EMPTY_VIDEOS: any[] = []
+const PAGE_SIZE = 20
+const LOAD_MORE_THRESHOLD = 3
+const LOCAL_PREVIEW_ID = 'local-preview-neon-mascot'
 
 interface VideoFeedProps {
-  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
+  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
   onVideoChange?: (video: VideoItemData) => void
   isMuted: boolean
 }
@@ -24,10 +28,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const feedType = searchParams.get('feed') || 'explore'
   
   const [activeIndex, setActiveIndex] = useState(0)
+  const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const lastOlderFetchAtRef = useRef(0)
+  const oldestLoadedCreatedAtRef = useRef<number | null>(null)
+  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
-  // Query kind:22 and kind:34236 events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) ?? EMPTY_VIDEOS
+  // Query short-video events from Applesauce EventStore
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [21, 22, 34236] }), []) ?? EMPTY_VIDEOS
 
   // Query kind 3 replaceable contacts list event for the logged in user
   const contactListEvent = use$(
@@ -42,31 +50,53 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Subscribe to real-time events from relays
   useEffect(() => {
-    console.log('Subscribing to Nostr kind:22 and kind:34236 events via rx-nostr...')
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq).subscribe()
-    rxReq.emit({ kinds: [22, 34236], limit: 40 })
+    console.log('Loading initial video backlog from relays...')
+    const rxReq = createRxBackwardReq()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
+    rxReq.emit({ kinds: [21, 22, 34236], limit: 40 })
 
     return () => {
       sub.unsubscribe()
     }
-  }, [rxNostr])
+  }, [rxNostr, relayUrls])
+
+  // Subscribe to future video events after the initial backlog load
+  useEffect(() => {
+    console.log('Subscribing to live Nostr video events...')
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
+    rxReq.emit({ kinds: [21, 22, 34236] })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, relayUrls])
 
   // Subscribe to user's NIP-02 contact list (kind 3)
   useEffect(() => {
     if (!session?.pubkey) return
     console.log(`Subscribing to contact list for ${session.pubkey}...`)
     const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq).subscribe()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     rxReq.emit({ kinds: [3], authors: [session.pubkey], limit: 1 })
     return () => {
       sub.unsubscribe()
     }
-  }, [rxNostr, session?.pubkey])
+  }, [rxNostr, session?.pubkey, relayUrls])
 
   // Parse events to local format, filter, and enrich with live reaction counts from EventStore
   const videos = useMemo(() => {
-    let list = rawVideoEvents
+    const sortedRawEvents = [...rawVideoEvents].sort((a: any, b: any) => {
+      if (a.id === LOCAL_PREVIEW_ID) return -1
+      if (b.id === LOCAL_PREVIEW_ID) return 1
+
+      const createdAtDiff = (b.created_at ?? 0) - (a.created_at ?? 0)
+      if (createdAtDiff !== 0) return createdAtDiff
+
+      return String(a.id).localeCompare(String(b.id))
+    })
+
+    let list = sortedRawEvents
       .map((ev: any) => parseVideoEvent(ev))
       .filter((v: any): v is VideoItemData => v !== null)
 
@@ -103,6 +133,46 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     })
   }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session, eventStore])
 
+  useEffect(() => {
+    oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
+  }, [videos])
+
+  useEffect(() => {
+    if (videos.length === 0) return
+    if (activeIndex < videos.length - LOAD_MORE_THRESHOLD) return
+    if (isFetchingOlder) return
+
+    const oldestCreatedAt = oldestLoadedCreatedAtRef.current
+    if (!oldestCreatedAt) return
+
+    const now = Date.now()
+    if (now - lastOlderFetchAtRef.current < 1500) return
+    lastOlderFetchAtRef.current = now
+    setIsFetchingOlder(true)
+
+    console.log(`Loading older videos before ${oldestCreatedAt}...`)
+    const rxReq = createRxBackwardReq()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe({
+      complete: () => {
+        setIsFetchingOlder(false)
+      },
+      error: (error) => {
+        console.error('Failed to load older videos:', error)
+        setIsFetchingOlder(false)
+      },
+    })
+
+    rxReq.emit({
+      kinds: [21, 22, 34236],
+      limit: PAGE_SIZE,
+      until: oldestCreatedAt - 1,
+    })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [activeIndex, isFetchingOlder, rxNostr, videos.length, relayUrls])
+
   // Prefetch comments, likes, boosts, and zaps for the active video and the next upcoming video
   useEffect(() => {
     if (videos.length === 0) return
@@ -117,13 +187,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
     console.log(`Prefetching reactions and comments for videos:`, videoIdsToFetch)
     const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq).subscribe()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     rxReq.emit({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 
     return () => {
       sub.unsubscribe()
     }
-  }, [rxNostr, activeIndex, videos])
+  }, [rxNostr, activeIndex, videos, relayUrls])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
@@ -173,9 +243,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, videos, onVideoChange])
 
-  const handleActionClick = (action: string, videoId: string) => {
+  const handleActionClick = (action: string, videoId: string, videoKind?: number) => {
     const video = videos.find((v) => v.id === videoId)
-    onActionTrigger(action, videoId, video?.creator.pubkey)
+    onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
   }
 
   if (videos.length === 0) {
@@ -194,19 +264,24 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="feed-container relative h-dvh w-full md:h-full"
-    >
-      {videos.map((video, idx) => (
+      <div
+        ref={containerRef}
+        className="feed-container relative h-dvh w-full md:h-full"
+      >
+        {videos.map((video, idx) => (
         <VideoFeedItem
           key={video.id}
           video={video}
           isActive={idx === activeIndex}
           isMuted={isMuted}
           onActionClick={handleActionClick}
-        />
-      ))}
-    </div>
-  )
-}
+          />
+        ))}
+        {isFetchingOlder ? (
+          <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]">
+            <p className="text-[14px]">Loading older videos...</p>
+          </div>
+        ) : null}
+      </div>
+    )
+  }

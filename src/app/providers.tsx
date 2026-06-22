@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react'
+import React, { useContext, useEffect, useState } from 'react'
 import { RxNostr } from 'rx-nostr'
 import { EventStore } from 'applesauce-core'
 import { rxNostr, eventStore } from '../nostr/rxNostr'
@@ -11,27 +11,7 @@ import {
   clearPasskeyIdentity
 } from 'nostr-passkey'
 import { PasskeySigner } from 'nostr-passkey/applesauce'
-
-export interface UserSession {
-  pubkey: string
-  method: 'nip07' | 'nip46' | 'readonly' | 'passkey'
-  signer?: any // PasskeySigner, or window.nostr (NIP-07)
-}
-
-interface NostrContextProps {
-  rxNostr: RxNostr
-  eventStore: EventStore
-  isConnected: boolean
-  session: UserSession | null
-  loginWithNip07: () => Promise<string>
-  loginReadOnly: (pubkey: string) => void
-  loginWithPasskey: () => Promise<string>
-  registerPasskey: () => Promise<string>
-  logout: () => void
-  signEvent: (eventTemplate: any) => Promise<any>
-}
-
-const NostrContext = createContext<NostrContextProps | undefined>(undefined)
+import { NostrContext, type UserSession } from './nostrContext'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)

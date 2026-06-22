@@ -1,18 +1,16 @@
 import React from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Home, Compass, PlusSquare, Bell, User, Settings } from 'lucide-react'
 
 interface MainLayoutProps {
   children: React.ReactNode
   rightPanel?: React.ReactNode
   immersive?: boolean
+  pathname: string
+  feedType?: string
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false }) => {
-  const location = useLocation()
-  const [searchParams] = useSearchParams()
-  const feedType = searchParams.get('feed') || 'explore'
-
+export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false, pathname, feedType = 'explore' }) => {
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/discover', label: 'Discover', icon: Compass },
@@ -23,9 +21,9 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
 
   const isActive = (path: string) => {
     if (path === '/') {
-      return location.pathname === '/'
+      return pathname === '/'
     }
-    return location.pathname.startsWith(path)
+    return pathname.startsWith(path)
   }
 
   if (immersive) {

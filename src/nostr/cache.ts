@@ -77,7 +77,7 @@ export async function saveEventToCache(event: any): Promise<void> {
   const last_accessed_at = Date.now()
 
   // We only cache specific events of interest
-  const isVideo = kind === 22 || kind === 34236
+  const isVideo = kind === 21 || kind === 22 || kind === 34236
   const isReactionOrComment = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
   const isProfileOrContact = kind === 0 || kind === 3
 
@@ -110,11 +110,11 @@ export async function saveEventToCache(event: any): Promise<void> {
 }
 
 /**
- * Prunes video events (kind 22, 34236) to MAX_VIDEOS,
+ * Prunes video events (kind 21, 22, 34236) to MAX_VIDEOS,
  * and performs cascading delete on reactions/comments for pruned videos.
  */
 async function pruneVideos(): Promise<void> {
-  const videos = await getLeastRecentlyUsedRecords([22, 34236])
+  const videos = await getLeastRecentlyUsedRecords([21, 22, 34236])
 
   if (videos.length > MAX_VIDEOS) {
     const overflowCount = videos.length - MAX_VIDEOS
