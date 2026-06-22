@@ -241,6 +241,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [videos, initialVideoId])
 
+  const itemHeight = typeof window !== 'undefined' ? window.innerHeight : 800
+
   // Track scroll position and snap to nearest video
   const handleListScroll = useCallback(({ scrollOffset }: any) => {
     const newIndex = Math.round(scrollOffset / itemHeight)
@@ -275,8 +277,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       </div>
     )
   }
-
-  const itemHeight = typeof window !== 'undefined' ? window.innerHeight : 800
 
   return (
       <div
