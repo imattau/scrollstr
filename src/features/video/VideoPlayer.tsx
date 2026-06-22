@@ -16,6 +16,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
 
+  const [isPaused, setIsPaused] = useState(true)
+
   // Detect if source is HLS (.m3u8)
   useEffect(() => {
     if (url.includes('.m3u8') || url.includes('/hls/')) {
@@ -75,6 +77,26 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       }
     }
   }, [url, isHls])
+
+  // Track actual play/pause events
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handlePlay = () => setIsPaused(false)
+    const handlePause = () => setIsPaused(true)
+
+    video.addEventListener('play', handlePlay)
+    video.addEventListener('pause', handlePause)
+
+    // Set initial state
+    setIsPaused(video.paused)
+
+    return () => {
+      video.removeEventListener('play', handlePlay)
+      video.removeEventListener('pause', handlePause)
+    }
+  }, [isActive])
 
   // Gestures: Single Tap (Play/Pause), Double Tap (Like), Press and Hold (Pause)
   const handleSingleClick = (e: React.MouseEvent) => {
@@ -145,6 +167,16 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           onTouchStart={handlePressStart}
           onTouchEnd={handlePressEnd}
         />
+        {isPaused && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
+            <div
+              className="flex size-[62px] items-center justify-center rounded-full bg-[#18181d]/80 text-[19px] text-[#f7f7f8] shadow-[0_8px_24px_rgba(0,0,0,0.28)] backdrop-blur-sm"
+              aria-hidden="true"
+            >
+              <span className="ml-[3px]">▶</span>
+            </div>
+          </div>
+        )}
         {showControls && (
           <MediaControlBar className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex gap-4 items-center">
             <MediaPlayButton className="text-white hover:text-purple-400 bg-transparent border-0" />

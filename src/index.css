@@ -15,7 +15,7 @@ body {
 
 @layer utilities {
   .feed-container {
-    height: 100dvh;
+    height: 100%;
     overflow-y: auto;
     scroll-snap-type: y mandatory;
     overscroll-behavior-y: contain;
@@ -27,7 +27,7 @@ body {
   }
 
   .feed-item {
-    height: 100dvh;
+    height: 100%;
     scroll-snap-align: start;
     scroll-snap-stop: always;
   }

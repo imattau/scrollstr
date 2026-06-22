@@ -29,7 +29,28 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
   if (immersive) {
     return (
       <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
-        <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327]">{children}</div>
+        <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327] relative pb-16">
+          {children}
+          {/* Mobile Navigation (Bottom) */}
+          <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
+            {navItems.map((item) => {
+              const Icon = item.icon
+              const active = isActive(item.path)
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
+                    active ? 'text-purple-400' : 'text-neutral-400'
+                  }`}
+                >
+                  <Icon className="w-5 h-5" />
+                  <span className="text-[10px] mt-1">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
 
         <div className="hidden md:flex min-h-screen justify-center overflow-hidden bg-[#09090b]">
           <div className="flex h-screen w-full max-w-[1440px] overflow-hidden rounded-none">
