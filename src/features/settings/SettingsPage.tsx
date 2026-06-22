@@ -1,18 +1,413 @@
-import React from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
+import { useNostr } from '../../app/providers'
+import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { use$ } from 'applesauce-react/hooks'
+import { createRxForwardReq } from 'rx-nostr'
+import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { publishRelayList, publishBlossomList, publishMuteList } from '../../nostr/events/settings'
 
 export const SettingsPage: React.FC = () => {
-  const rows = [
-    ['Identity and signer', 'NIP-46 remote signer'],
-    ['Wallet', 'NWC connected'],
-    ['Read relays', '5 relays'],
-    ['Write relays', '3 relays'],
-    ['Blossom servers', '2 media servers'],
-    ['Autoplay and data', 'Wi‑Fi only'],
-    ['Muted users and tags', '12 entries'],
-    ['Content warnings', 'Blur sensitive media'],
-    ['Cache and storage', '318 MB used'],
-  ]
+  const { session, rxNostr, signEvent, eventStore } = useNostr()
+  const userPubkey = session?.pubkey
 
+  const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'mute'>('main')
+  const [saving, setSaving] = useState(false)
+
+  // Local state overrides for draft editing before publishing
+  const [localRelays, setLocalRelays] = useState<{ url: string; read: boolean; write: boolean }[]>([])
+  const [localBlossom, setLocalBlossom] = useState<string[]>([])
+  const [localMutePubkeys, setLocalMutePubkeys] = useState<string[]>([])
+  const [localMuteTags, setLocalMuteTags] = useState<string[]>([])
+
+  // Input states for adding new entries
+  const [newRelayUrl, setNewRelayUrl] = useState('')
+  const [newRelayRead, setNewRelayRead] = useState(true)
+  const [newRelayWrite, setNewRelayWrite] = useState(true)
+  const [newBlossomUrl, setNewBlossomUrl] = useState('')
+  const [newMutePubkey, setNewMutePubkey] = useState('')
+  const [newMuteTag, setNewMuteTag] = useState('')
+
+  // Query events in EventStore
+  const relayListEvent = use$(() => getEventsQuery$({ kinds: [10002], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
+  const blossomListEvent = use$(() => getEventsQuery$({ kinds: [10063], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
+  const muteListEvent = use$(() => getEventsQuery$({ kinds: [10000], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
+
+  // Subscribe to real-time events on mount if logged in
+  useEffect(() => {
+    if (!userPubkey) return
+    console.log(`Subscribing to Nostr lists for pubkey ${userPubkey}...`)
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq).subscribe()
+    rxReq.emit({ kinds: [10000, 10002, 10063], authors: [userPubkey], limit: 10 })
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, userPubkey])
+
+  // Synchronize local states when store events update
+  useEffect(() => {
+    if (relayListEvent) {
+      const parsed = relayListEvent.tags
+        .filter((t: any) => t[0] === 'r')
+        .map((t: any) => {
+          const url = t[1]
+          const type = t[2]
+          return {
+            url,
+            read: !type || type === 'read',
+            write: !type || type === 'write',
+          }
+        })
+      setLocalRelays(parsed)
+    } else {
+      setLocalRelays([
+        { url: 'wss://nos.lol', read: true, write: true },
+        { url: 'wss://relay.damus.io', read: true, write: true },
+        { url: 'wss://relay.snort.social', read: true, write: true },
+      ])
+    }
+  }, [relayListEvent])
+
+  useEffect(() => {
+    if (blossomListEvent) {
+      const parsed = blossomListEvent.tags
+        .filter((t: any) => t[0] === 'server' || t[0] === 'r')
+        .map((t: any) => t[1])
+      setLocalBlossom(parsed)
+    } else {
+      setLocalBlossom(['https://cdn.nostr.build', 'https://void.cat'])
+    }
+  }, [blossomListEvent])
+
+  useEffect(() => {
+    if (muteListEvent) {
+      const pubkeys = muteListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+      const tags = muteListEvent.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
+      setLocalMutePubkeys(pubkeys)
+      setLocalMuteTags(tags)
+    } else {
+      setLocalMutePubkeys([])
+      setLocalMuteTags([])
+    }
+  }, [muteListEvent])
+
+  // Handlers for Relays
+  const handleAddRelay = () => {
+    if (!newRelayUrl.trim()) return
+    const formattedUrl = newRelayUrl.trim().startsWith('ws') ? newRelayUrl.trim() : `wss://${newRelayUrl.trim()}`
+    if (localRelays.some((r) => r.url === formattedUrl)) {
+      alert('Relay already in list')
+      return
+    }
+    setLocalRelays([...localRelays, { url: formattedUrl, read: newRelayRead, write: newRelayWrite }])
+    setNewRelayUrl('')
+  }
+
+  const handleRemoveRelay = (url: string) => {
+    setLocalRelays(localRelays.filter((r) => r.url !== url))
+  }
+
+  const handleSaveRelays = async () => {
+    if (!session) return
+    setSaving(true)
+    try {
+      const ev = await publishRelayList(signEvent, rxNostr, localRelays)
+      eventStore.add(ev)
+      alert('Relay list published to relays!')
+    } catch (e) {
+      console.error(e)
+      alert('Failed to publish: ' + e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Handlers for Blossom
+  const handleAddBlossom = () => {
+    if (!newBlossomUrl.trim()) return
+    const formattedUrl = newBlossomUrl.trim().startsWith('http') ? newBlossomUrl.trim() : `https://${newBlossomUrl.trim()}`
+    if (localBlossom.includes(formattedUrl)) {
+      alert('Server already in list')
+      return
+    }
+    setLocalBlossom([...localBlossom, formattedUrl])
+    setNewBlossomUrl('')
+  }
+
+  const handleRemoveBlossom = (url: string) => {
+    setLocalBlossom(localBlossom.filter((s) => s !== url))
+  }
+
+  const handleSaveBlossom = async () => {
+    if (!session) return
+    setSaving(true)
+    try {
+      const ev = await publishBlossomList(signEvent, rxNostr, localBlossom)
+      eventStore.add(ev)
+      alert('Blossom media servers published!')
+    } catch (e) {
+      console.error(e)
+      alert('Failed to publish: ' + e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Handlers for Mutes
+  const handleAddMutePubkey = () => {
+    if (!newMutePubkey.trim()) return
+    const pk = newMutePubkey.trim()
+    if (localMutePubkeys.includes(pk)) return
+    setLocalMutePubkeys([...localMutePubkeys, pk])
+    setNewMutePubkey('')
+  }
+
+  const handleAddMuteTag = () => {
+    if (!newMuteTag.trim()) return
+    const tag = newMuteTag.trim().toLowerCase()
+    if (localMuteTags.includes(tag)) return
+    setLocalMuteTags([...localMuteTags, tag])
+    setNewMuteTag('')
+  }
+
+  const handleRemoveMutePubkey = (pk: string) => {
+    setLocalMutePubkeys(localMutePubkeys.filter((p) => p !== pk))
+  }
+
+  const handleRemoveMuteTag = (tag: string) => {
+    setLocalMuteTags(localMuteTags.filter((t) => t !== tag))
+  }
+
+  const handleSaveMutes = async () => {
+    if (!session) return
+    setSaving(true)
+    try {
+      const ev = await publishMuteList(signEvent, rxNostr, localMutePubkeys, localMuteTags)
+      eventStore.add(ev)
+      alert('Mute list successfully published!')
+    } catch (e) {
+      console.error(e)
+      alert('Failed to publish: ' + e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!session) {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8] items-center justify-center">
+        <p className="text-[14px] text-[#a1a1aa] mb-4">Please log in to manage your Nostr settings lists.</p>
+      </div>
+    )
+  }
+
+  // Render Sub-view layouts
+  if (activeSubView === 'relays') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">Nostr Relays</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Manage the read/write relays for syncing your content feed.</p>
+
+        <div className="flex flex-col gap-3 mb-6 bg-[#111115] p-4 rounded-xl border border-neutral-900">
+          <input
+            value={newRelayUrl}
+            onChange={(e) => setNewRelayUrl(e.target.value)}
+            placeholder="e.g. relay.damus.io"
+            className="w-full bg-[#18181d] px-3 py-2 rounded-lg text-[13px] outline-none text-[#f7f7f8] placeholder:text-[#71717a]"
+          />
+          <div className="flex justify-between items-center text-[12px] px-1">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={newRelayRead} onChange={(e) => setNewRelayRead(e.target.checked)} />
+              Read
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" checked={newRelayWrite} onChange={(e) => setNewRelayWrite(e.target.checked)} />
+              Write
+            </label>
+            <button
+              onClick={handleAddRelay}
+              className="flex items-center gap-1 bg-[#8b5cf6] text-white px-3 py-1.5 rounded-lg text-[12px] font-bold"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto max-h-[350px] mb-6 pr-1">
+          {localRelays.map((relay) => (
+            <div key={relay.url} className="flex items-center justify-between p-3 bg-[#18181d] rounded-xl text-[13px]">
+              <div className="overflow-hidden mr-3">
+                <p className="font-medium text-[#f7f7f8] truncate">{relay.url}</p>
+                <p className="text-[10px] text-[#a1a1aa]">
+                  {relay.read ? 'Read' : ''} {relay.read && relay.write ? '/' : ''} {relay.write ? 'Write' : ''}
+                </p>
+              </div>
+              <button onClick={() => handleRemoveRelay(relay.url)} className="text-neutral-500 hover:text-red-400 p-1">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleSaveRelays}
+          disabled={saving}
+          className="w-full bg-[#8b5cf6] text-white py-3 rounded-xl text-[13px] font-bold disabled:opacity-50"
+        >
+          {saving ? 'Publishing list...' : 'Save and Publish List'}
+        </button>
+      </div>
+    )
+  }
+
+  if (activeSubView === 'blossom') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">Blossom Servers</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Configure Blossom media servers for uploading your video clips.</p>
+
+        <div className="flex items-center gap-2 mb-6 bg-[#111115] p-3 rounded-xl border border-neutral-900">
+          <input
+            value={newBlossomUrl}
+            onChange={(e) => setNewBlossomUrl(e.target.value)}
+            placeholder="e.g. cdn.nostr.build"
+            className="flex-1 bg-[#18181d] px-3 py-2 rounded-lg text-[13px] outline-none text-[#f7f7f8] placeholder:text-[#71717a]"
+          />
+          <button
+            onClick={handleAddBlossom}
+            className="bg-[#8b5cf6] text-white p-2 rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto max-h-[350px] mb-6 pr-1">
+          {localBlossom.map((url) => (
+            <div key={url} className="flex items-center justify-between p-3 bg-[#18181d] rounded-xl text-[13px]">
+              <p className="font-medium text-[#f7f7f8] truncate mr-3">{url}</p>
+              <button onClick={() => handleRemoveBlossom(url)} className="text-neutral-500 hover:text-red-400 p-1">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleSaveBlossom}
+          disabled={saving}
+          className="w-full bg-[#8b5cf6] text-white py-3 rounded-xl text-[13px] font-bold disabled:opacity-50"
+        >
+          {saving ? 'Publishing servers...' : 'Save and Publish Servers'}
+        </button>
+      </div>
+    )
+  }
+
+  if (activeSubView === 'mute') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">Mute Moderation</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Mute specific public keys or hashtags to filter your feed.</p>
+
+        <div className="space-y-4 mb-6">
+          <div className="bg-[#111115] p-3 rounded-xl border border-neutral-900">
+            <p className="text-[11px] font-semibold text-[#a1a1aa] mb-2">Mute User Pubkey</p>
+            <div className="flex items-center gap-2">
+              <input
+                value={newMutePubkey}
+                onChange={(e) => setNewMutePubkey(e.target.value)}
+                placeholder="Nostr pubkey hex..."
+                className="flex-1 bg-[#18181d] px-3 py-2 rounded-lg text-[13px] outline-none text-[#f7f7f8]"
+              />
+              <button onClick={handleAddMutePubkey} className="bg-[#8b5cf6] text-white p-2 rounded-lg">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-[#111115] p-3 rounded-xl border border-neutral-900">
+            <p className="text-[11px] font-semibold text-[#a1a1aa] mb-2">Mute Hashtag / Word</p>
+            <div className="flex items-center gap-2">
+              <input
+                value={newMuteTag}
+                onChange={(e) => setNewMuteTag(e.target.value)}
+                placeholder="e.g. clickbait"
+                className="flex-1 bg-[#18181d] px-3 py-2 rounded-lg text-[13px] outline-none text-[#f7f7f8]"
+              />
+              <button onClick={handleAddMuteTag} className="bg-[#8b5cf6] text-white p-2 rounded-lg">
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto max-h-[250px] mb-6 space-y-4 pr-1">
+          {localMutePubkeys.length > 0 && (
+            <div>
+              <h4 className="text-[12px] font-bold text-[#a1a1aa] mb-1.5">Muted Users</h4>
+              <div className="space-y-1.5">
+                {localMutePubkeys.map((pk) => (
+                  <div key={pk} className="flex items-center justify-between p-2.5 bg-[#18181d] rounded-lg text-[12px]">
+                    <p className="font-mono text-[#f7f7f8] truncate mr-3">{pk.slice(0, 16)}...</p>
+                    <button onClick={() => handleRemoveMutePubkey(pk)} className="text-neutral-500 hover:text-red-400 p-0.5">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {localMuteTags.length > 0 && (
+            <div>
+              <h4 className="text-[12px] font-bold text-[#a1a1aa] mb-1.5">Muted Tags</h4>
+              <div className="space-y-1.5">
+                {localMuteTags.map((tag) => (
+                  <div key={tag} className="flex items-center justify-between p-2.5 bg-[#18181d] rounded-lg text-[12px]">
+                    <p className="font-medium text-[#f7f7f8]">#{tag}</p>
+                    <button onClick={() => handleRemoveMuteTag(tag)} className="text-neutral-500 hover:text-red-400 p-0.5">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={handleSaveMutes}
+          disabled={saving}
+          className="w-full bg-[#8b5cf6] text-white py-3 rounded-xl text-[13px] font-bold disabled:opacity-50"
+        >
+          {saving ? 'Publishing mute list...' : 'Save and Publish Mutes'}
+        </button>
+      </div>
+    )
+  }
+
+  // Render Main Settings Menu
   return (
     <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
       <div className="flex h-[56px] items-center">
@@ -20,15 +415,64 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div className="flex flex-1 flex-col">
-        {rows.map(([title, subtitle]) => (
-          <div key={title} className="flex items-start justify-between py-[18px]">
-            <div>
-              <p className="text-[14px] font-medium text-[#f7f7f8]">{title}</p>
-              <p className="text-[11px] font-normal text-[#a1a1aa]">{subtitle}</p>
-            </div>
-            <span className="text-[22px] leading-none text-[#71717a]">›</span>
+        {/* Read/Write Relays */}
+        <div
+          onClick={() => setActiveSubView('relays')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div>
+            <p className="text-[14px] font-medium text-[#f7f7f8]">Nostr Relays</p>
+            <p className="text-[11px] font-normal text-[#a1a1aa]">
+              {localRelays.length} relays configured
+            </p>
           </div>
-        ))}
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* Blossom Servers */}
+        <div
+          onClick={() => setActiveSubView('blossom')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div>
+            <p className="text-[14px] font-medium text-[#f7f7f8]">Blossom Media Servers</p>
+            <p className="text-[11px] font-normal text-[#a1a1aa]">
+              {localBlossom.length} media servers
+            </p>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* Muted Users and Tags */}
+        <div
+          onClick={() => setActiveSubView('mute')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div>
+            <p className="text-[14px] font-medium text-[#f7f7f8]">Muted Users and Tags</p>
+            <p className="text-[11px] font-normal text-[#a1a1aa]">
+              {localMutePubkeys.length} users, {localMuteTags.length} tags muted
+            </p>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* Read-only Placeholder settings */}
+        <div className="flex items-center justify-between py-[18px] px-2 opacity-50">
+          <div>
+            <p className="text-[14px] font-medium text-[#f7f7f8]">Identity and signer</p>
+            <p className="text-[11px] font-normal text-[#a1a1aa]">NIP-46 remote signer</p>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        <div className="flex items-center justify-between py-[18px] px-2 opacity-50">
+          <div>
+            <p className="text-[14px] font-medium text-[#f7f7f8]">Wallet Connection</p>
+            <p className="text-[11px] font-normal text-[#a1a1aa]">NWC connected</p>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
       </div>
     </div>
   )
