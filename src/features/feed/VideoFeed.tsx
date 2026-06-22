@@ -32,6 +32,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const containerRef = useRef<HTMLDivElement>(null)
   const lastOlderFetchAtRef = useRef(0)
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
+  const userMetadataSubscribedRef = useRef<string | null>(null)
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
   // Query short-video events from Applesauce EventStore
@@ -72,17 +73,23 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [rxNostr, relayUrls])
 
-  // Subscribe to user's NIP-02 contact list (kind 3)
+  // Subscribe once per pubkey to user's contact list and relay list (kinds 3, 10002)
+  // Only re-subscribe if pubkey changes, not on relayUrls changes to avoid circular dependency
   useEffect(() => {
     if (!session?.pubkey) return
-    console.log(`Subscribing to contact list for ${session.pubkey}...`)
+    if (userMetadataSubscribedRef.current === session.pubkey) return
+
+    console.log(`Subscribing to user metadata for ${session.pubkey}...`)
+    userMetadataSubscribedRef.current = session.pubkey
+
     const rxReq = createRxForwardReq()
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [3], authors: [session.pubkey], limit: 1 })
+    rxReq.emit({ kinds: [3, 10002], authors: [session.pubkey], limit: 1 })
+
     return () => {
       sub.unsubscribe()
     }
-  }, [rxNostr, session?.pubkey, relayUrls])
+  }, [rxNostr, session?.pubkey])
 
   // Parse events to local format, filter, and enrich with live reaction counts from EventStore
   const videos = useMemo(() => {
