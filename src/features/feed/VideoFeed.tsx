@@ -70,7 +70,7 @@ const MOCK_VIDEOS: VideoItemData[] = [
 ]
 
 interface VideoFeedProps {
-  onActionTrigger: (actionType: string) => void
+  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
@@ -139,20 +139,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
     }
   }, [activeIndex, videos])
 
-  const handleActionClick = (action: string, videoId: string) => {
-    console.log(`Action: ${action} triggered on video: ${videoId}`)
-    
-    // Check if authorization is required
-    const requiresAuth = ['like', 'comment', 'boost', 'zap', 'follow'].includes(action)
-    if (requiresAuth) {
-      onActionTrigger(action)
-    } else {
-      alert(`Triggered ${action} on video ${videoId}`)
-    }
-  }
-
   // Fallback to MOCK_VIDEOS if we have not loaded any real ones yet
   const displayedVideos = videos.length > 0 ? videos : MOCK_VIDEOS
+
+  const handleActionClick = (action: string, videoId: string) => {
+    const video = displayedVideos.find((v) => v.id === videoId)
+    onActionTrigger(action, videoId, video?.creator.pubkey)
+  }
 
   return (
     <div

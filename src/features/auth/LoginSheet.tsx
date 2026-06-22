@@ -1,13 +1,15 @@
 import React, { useState } from 'react'
-import { X, Key, ShieldCheck, UserCheck, Eye } from 'lucide-react'
+import { X, ShieldCheck, Key, Eye } from 'lucide-react'
+import { useNostr } from '../../app/providers'
 
 interface LoginSheetProps {
   isOpen: boolean
   onClose: () => void
-  onLoginSuccess: (method: string, data?: string) => void
+  onLoginSuccess: () => void
 }
 
 export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+  const { loginWithNip07, loginReadOnly } = useNostr()
   const [npub, setNpub] = useState('')
   const [nip46Address, setNip46Address] = useState('')
   const [error, setError] = useState('')
@@ -16,34 +18,37 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
 
   const handleNip07Login = async () => {
     setError('')
-    if (window.nostr) {
-      try {
-        const pubkey = await window.nostr.getPublicKey()
-        onLoginSuccess('nip07', pubkey)
-      } catch (err: any) {
-        setError(err.message || 'NIP-07 Login cancelled')
-      }
-    } else {
-      setError('NIP-07 extension (like Alby/Nos2x) not detected. Install it or try another method.')
+    try {
+      await loginWithNip07()
+      onLoginSuccess()
+    } catch (err: any) {
+      setError(err.message || 'NIP-07 Login failed')
     }
   }
 
   const handleNip46Login = () => {
     setError('')
     if (!nip46Address.trim()) {
-      setError('Please enter a remote signer address / bunker connection')
+      setError('Please enter a remote signer address')
       return
     }
-    onLoginSuccess('nip46', nip46Address)
+    // Simulate connection for Bunker/NIP-46
+    alert('NIP-46 Connect simulated for bunker: ' + nip46Address)
+    onLoginSuccess()
   }
 
   const handleReadOnlyLogin = () => {
     setError('')
-    if (!npub.startsWith('npub1') || npub.length < 10) {
-      setError('Please enter a valid npub key starting with npub1')
+    if (!npub.trim()) {
+      setError('Please enter an npub key or hex pubkey')
       return
     }
-    onLoginSuccess('readonly', npub)
+    try {
+      loginReadOnly(npub)
+      onLoginSuccess()
+    } catch (err: any) {
+      setError('Failed to load read-only profile: ' + err.message)
+    }
   }
 
   return (
@@ -76,7 +81,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
 
         <div className="space-y-4">
           
-          {/* Method 1: NIP-07 Browser Extension */}
+          {/* NIP-07 Browser Extension */}
           <button
             onClick={handleNip07Login}
             className="w-full flex items-center gap-3 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-xl transition-all duration-200 shadow-lg shadow-purple-600/20"
@@ -94,7 +99,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
             <div className="flex-grow border-t border-neutral-800"></div>
           </div>
 
-          {/* Method 2: NIP-46 Remote Signer */}
+          {/* NIP-46 Remote Signer */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">
               NIP-46 Remote Signer / Bunker
@@ -116,7 +121,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
             </div>
           </div>
 
-          {/* Method 3: Read-only npub */}
+          {/* Read-only npub */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">
               Read-Only npub
@@ -150,13 +155,4 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
       </div>
     </div>
   )
-}
-
-declare global {
-  interface Window {
-    nostr?: {
-      getPublicKey: () => Promise<string>
-      signEvent: (event: any) => Promise<any>
-    }
-  }
 }

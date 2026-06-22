@@ -9,7 +9,7 @@ import { ProfilePage } from '../features/profile/ProfilePage'
 import { SettingsPage } from '../features/settings/SettingsPage'
 
 interface RouterProps {
-  onActionTrigger: (actionType: string) => void
+  onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
 }
 
 export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger }) => {

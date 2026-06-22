@@ -2,42 +2,103 @@ import React, { useState } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
 import { LoginSheet } from '../features/auth/LoginSheet'
-import { NostrProvider } from './providers'
+import { CommentsSheet } from '../features/comments/CommentsSheet'
+import { NostrProvider, useNostr } from './providers'
+import { publishLike, publishBoost } from '../nostr/events/reactions'
 
-function App() {
+function AppContent() {
+  const { ndk, session } = useNostr()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
-  const [userSession, setUserSession] = useState<{ method: string; pubkey?: string } | null>(null)
+  const [isCommentsOpen, setIsCommentsOpen] = useState(false)
+  
+  // Scoped video variables for active sheets
+  const [activeVideoId, setActiveVideoId] = useState('')
+  const [activeCreatorPubkey, setActiveCreatorPubkey] = useState('')
+  const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string } | null>(null)
 
-  const handleActionTrigger = (actionType: string) => {
-    // If not logged in, trigger login modal
-    if (!userSession) {
+  const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string) => {
+    setActiveVideoId(videoId)
+    if (creatorPubkey) {
+      setActiveCreatorPubkey(creatorPubkey)
+    }
+
+    // List of actions requiring authentication
+    const requiresAuth = ['like', 'comment', 'boost', 'zap', 'follow'].includes(actionType)
+
+    if (requiresAuth && !session) {
       console.log(`Action '${actionType}' requires login. Opening Login Sheet.`)
+      setPendingAction({ type: actionType, videoId })
       setIsLoginOpen(true)
+      return
+    }
+
+    // Authenticated actions execution
+    if (actionType === 'comment') {
+      setIsCommentsOpen(true)
+    } else if (actionType === 'like') {
+      try {
+        await publishLike(ndk, videoId, creatorPubkey || '')
+        alert('Liked video on Nostr!')
+      } catch (err) {
+        console.error('Like failed:', err)
+        alert('Failed to publish Like: ' + err)
+      }
+    } else if (actionType === 'boost') {
+      try {
+        await publishBoost(ndk, videoId, creatorPubkey || '')
+        alert('Boosted video on Nostr (reposted kind:16)!')
+      } catch (err) {
+        console.error('Boost failed:', err)
+        alert('Failed to publish Boost: ' + err)
+      }
+    } else if (actionType === 'follow') {
+      alert(`Follow pubkey ${creatorPubkey} simulated!`)
     } else {
-      console.log(`User is already logged in with ${userSession.method}. Performing action: ${actionType}`)
+      console.log(`Triggered guest action: ${actionType}`)
     }
   }
 
-  const handleLoginSuccess = (method: string, data?: string) => {
-    console.log(`Login successful via ${method}: ${data}`)
-    setUserSession({ method, pubkey: data })
+  const handleLoginSuccess = () => {
     setIsLoginOpen(false)
+    // Resume pending action if present
+    if (pendingAction) {
+      const { type, videoId } = pendingAction
+      setPendingAction(null)
+      // Small timeout to let sheet close before launching next step
+      setTimeout(() => {
+        handleActionTrigger(type, videoId, activeCreatorPubkey)
+      }, 300)
+    }
   }
 
   return (
+    <BrowserRouter>
+      <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
+        <AppRouter onActionTrigger={handleActionTrigger} />
+        
+        {/* Auth Sheets / Dialogs */}
+        <LoginSheet
+          isOpen={isLoginOpen}
+          onClose={() => setIsLoginOpen(false)}
+          onLoginSuccess={handleLoginSuccess}
+        />
+
+        {/* Comments bottom sheet */}
+        <CommentsSheet
+          isOpen={isCommentsOpen}
+          videoId={activeVideoId}
+          creatorPubkey={activeCreatorPubkey}
+          onClose={() => setIsCommentsOpen(false)}
+        />
+      </div>
+    </BrowserRouter>
+  )
+}
+
+function App() {
+  return (
     <NostrProvider>
-      <BrowserRouter>
-        <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
-          <AppRouter onActionTrigger={handleActionTrigger} />
-          
-          {/* Auth Sheets / Dialogs */}
-          <LoginSheet
-            isOpen={isLoginOpen}
-            onClose={() => setIsLoginOpen(false)}
-            onLoginSuccess={handleLoginSuccess}
-          />
-        </div>
-      </BrowserRouter>
+      <AppContent />
     </NostrProvider>
   )
 }
