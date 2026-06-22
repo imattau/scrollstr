@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
 import { LoginSheet } from '../features/auth/LoginSheet'
+import { NostrProvider } from './providers'
 
 function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false)
@@ -24,18 +25,20 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
-        <AppRouter onActionTrigger={handleActionTrigger} />
-        
-        {/* Auth Sheets / Dialogs */}
-        <LoginSheet
-          isOpen={isLoginOpen}
-          onClose={() => setIsLoginOpen(false)}
-          onLoginSuccess={handleLoginSuccess}
-        />
-      </div>
-    </BrowserRouter>
+    <NostrProvider>
+      <BrowserRouter>
+        <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
+          <AppRouter onActionTrigger={handleActionTrigger} />
+          
+          {/* Auth Sheets / Dialogs */}
+          <LoginSheet
+            isOpen={isLoginOpen}
+            onClose={() => setIsLoginOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+          />
+        </div>
+      </BrowserRouter>
+    </NostrProvider>
   )
 }
 

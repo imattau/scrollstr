@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
+import { useNostr } from '../../app/providers'
+import { parseVideoEvent, fetchCreatorProfile } from '../../nostr/events/video'
 
 const MOCK_VIDEOS: VideoItemData[] = [
   {
@@ -72,9 +74,50 @@ interface VideoFeedProps {
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
+  const { ndk, isConnected } = useNostr()
+  const [videos, setVideos] = useState<VideoItemData[]>([])
   const [activeIndex, setActiveIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Fetch real kind:22 video events from Nostr relays
+  useEffect(() => {
+    if (!isConnected) return
+
+    console.log('Subscribing to Nostr kind:22 events...')
+    const sub = ndk.subscribe(
+      { kinds: [22], limit: 20 },
+      { closeOnEose: false }
+    )
+
+    sub.on('event', async (event) => {
+      const parsed = parseVideoEvent(event)
+      if (!parsed) return
+
+      setVideos((prev) => {
+        // Deduplicate
+        if (prev.some((v) => v.id === parsed.id)) return prev
+        return [...prev, parsed]
+      })
+
+      // Asynchronously fetch profile for the creator
+      const user = ndk.getUser({ pubkey: event.pubkey })
+      const profileDetails = await fetchCreatorProfile(user)
+
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.creator.pubkey === event.pubkey
+            ? { ...v, creator: { ...v.creator, ...profileDetails } }
+            : v
+        )
+      )
+    })
+
+    return () => {
+      sub.stop()
+    }
+  }, [ndk, isConnected])
+
+  // Track active index on vertical scroll snap
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -83,7 +126,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
       const scrollPos = container.scrollTop
       const height = container.clientHeight
       const newIndex = Math.round(scrollPos / height)
-      if (newIndex !== activeIndex && newIndex >= 0 && newIndex < MOCK_VIDEOS.length) {
+      
+      const feedLength = videos.length > 0 ? videos.length : MOCK_VIDEOS.length
+      if (newIndex !== activeIndex && newIndex >= 0 && newIndex < feedLength) {
         setActiveIndex(newIndex)
       }
     }
@@ -92,7 +137,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
     return () => {
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [activeIndex])
+  }, [activeIndex, videos])
 
   const handleActionClick = (action: string, videoId: string) => {
     console.log(`Action: ${action} triggered on video: ${videoId}`)
@@ -106,12 +151,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
     }
   }
 
+  // Fallback to MOCK_VIDEOS if we have not loaded any real ones yet
+  const displayedVideos = videos.length > 0 ? videos : MOCK_VIDEOS
+
   return (
     <div
       ref={containerRef}
       className="feed-container w-full h-full relative"
     >
-      {MOCK_VIDEOS.map((video, idx) => (
+      {displayedVideos.map((video, idx) => (
         <VideoFeedItem
           key={video.id}
           video={video}
