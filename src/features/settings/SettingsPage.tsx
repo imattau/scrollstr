@@ -3,20 +3,21 @@ import { useNostr } from '../../app/providers'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { createRxForwardReq } from 'rx-nostr'
-import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut } from 'lucide-react'
-import { publishRelayList, publishBlossomList, publishMuteList } from '../../nostr/events/settings'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud } from 'lucide-react'
+import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events/settings'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
 
 export const SettingsPage: React.FC = () => {
   const { session, rxNostr, signEvent, eventStore, logout } = useNostr()
   const userPubkey = session?.pubkey
 
-  const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'mute' | 'identity' | 'wallet'>('main')
+  const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'nip96' | 'mute' | 'identity' | 'wallet'>('main')
   const [saving, setSaving] = useState(false)
 
   // Local state overrides for draft editing before publishing
   const [localRelays, setLocalRelays] = useState<{ url: string; read: boolean; write: boolean }[]>([])
   const [localBlossom, setLocalBlossom] = useState<string[]>([])
+  const [localNip96, setLocalNip96] = useState<string[]>([])
   const [localMutePubkeys, setLocalMutePubkeys] = useState<string[]>([])
   const [localMuteTags, setLocalMuteTags] = useState<string[]>([])
   const [localWalletString, setLocalWalletString] = useState('')
@@ -26,12 +27,14 @@ export const SettingsPage: React.FC = () => {
   const [newRelayRead, setNewRelayRead] = useState(true)
   const [newRelayWrite, setNewRelayWrite] = useState(true)
   const [newBlossomUrl, setNewBlossomUrl] = useState('')
+  const [newNip96Url, setNewNip96Url] = useState('')
   const [newMutePubkey, setNewMutePubkey] = useState('')
   const [newMuteTag, setNewMuteTag] = useState('')
 
   // Query events in EventStore
   const relayListEvent = use$(() => getEventsQuery$({ kinds: [10002], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
   const blossomListEvent = use$(() => getEventsQuery$({ kinds: [10063], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
+  const nip96ListEvent = use$(() => getEventsQuery$({ kinds: [10096], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
   const muteListEvent = use$(() => getEventsQuery$({ kinds: [10000], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
 
   // Subscribe to real-time events on mount if logged in
@@ -40,7 +43,7 @@ export const SettingsPage: React.FC = () => {
     console.log(`Subscribing to Nostr lists for pubkey ${userPubkey}...`)
     const rxReq = createRxForwardReq()
     const sub = rxNostr.use(rxReq).subscribe()
-    rxReq.emit({ kinds: [10000, 10002, 10063], authors: [userPubkey], limit: 10 })
+    rxReq.emit({ kinds: [10000, 10002, 10063, 10096], authors: [userPubkey], limit: 10 })
     return () => {
       sub.unsubscribe()
     }
@@ -85,6 +88,17 @@ export const SettingsPage: React.FC = () => {
       setLocalBlossom(['https://cdn.nostr.build', 'https://void.cat'])
     }
   }, [blossomListEvent])
+
+  useEffect(() => {
+    if (nip96ListEvent) {
+      const parsed = nip96ListEvent.tags
+        .filter((t: any) => t[0] === 'server' || t[0] === 'r')
+        .map((t: any) => t[1])
+      setLocalNip96(parsed)
+    } else {
+      setLocalNip96(['https://nostr.build', 'https://void.cat'])
+    }
+  }, [nip96ListEvent])
 
   useEffect(() => {
     if (muteListEvent) {
@@ -152,6 +166,37 @@ export const SettingsPage: React.FC = () => {
       const ev = await publishBlossomList(signEvent, rxNostr, localBlossom)
       eventStore.add(ev)
       alert('Blossom media servers published!')
+    } catch (e) {
+      console.error(e)
+      alert('Failed to publish: ' + e)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Handlers for NIP-96
+  const handleAddNip96 = () => {
+    if (!newNip96Url.trim()) return
+    const formattedUrl = newNip96Url.trim().startsWith('http') ? newNip96Url.trim() : `https://${newNip96Url.trim()}`
+    if (localNip96.includes(formattedUrl)) {
+      alert('Server already in list')
+      return
+    }
+    setLocalNip96([...localNip96, formattedUrl])
+    setNewNip96Url('')
+  }
+
+  const handleRemoveNip96 = (url: string) => {
+    setLocalNip96(localNip96.filter((s) => s !== url))
+  }
+
+  const handleSaveNip96 = async () => {
+    if (!session) return
+    setSaving(true)
+    try {
+      const ev = await publishNip96List(signEvent, rxNostr, localNip96)
+      eventStore.add(ev)
+      alert('NIP-96 media servers published!')
     } catch (e) {
       console.error(e)
       alert('Failed to publish: ' + e)
@@ -419,6 +464,56 @@ export const SettingsPage: React.FC = () => {
     )
   }
 
+  if (activeSubView === 'nip96') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">NIP-96 Media Servers</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Configure NIP-96 compatible servers for uploading media clips.</p>
+
+        <div className="flex items-center gap-2 mb-6 bg-[#111115] p-3 rounded-xl border border-neutral-900">
+          <input
+            value={newNip96Url}
+            onChange={(e) => setNewNip96Url(e.target.value)}
+            placeholder="e.g. nostr.build"
+            className="flex-1 bg-[#18181d] px-3 py-2 rounded-lg text-[13px] outline-none text-[#f7f7f8] placeholder:text-[#71717a]"
+          />
+          <button
+            onClick={handleAddNip96}
+            className="bg-[#8b5cf6] text-white p-2 rounded-lg"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto max-h-[350px] mb-6 pr-1">
+          {localNip96.map((url) => (
+            <div key={url} className="flex items-center justify-between p-3 bg-[#18181d] rounded-xl text-[13px]">
+              <p className="font-medium text-[#f7f7f8] truncate mr-3">{url}</p>
+              <button onClick={() => handleRemoveNip96(url)} className="text-neutral-500 hover:text-red-400 p-1">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleSaveNip96}
+          disabled={saving}
+          className="w-full bg-[#8b5cf6] text-white py-3 rounded-xl text-[13px] font-bold disabled:opacity-50"
+        >
+          {saving ? 'Publishing servers...' : 'Save and Publish Servers'}
+        </button>
+      </div>
+    )
+  }
+
   if (activeSubView === 'mute') {
     return (
       <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
@@ -579,6 +674,23 @@ export const SettingsPage: React.FC = () => {
               <p className="text-[14px] font-medium text-[#f7f7f8]">Blossom Media Servers</p>
               <p className="text-[11px] font-normal text-[#a1a1aa]">
                 {localBlossom.length} media servers
+              </p>
+            </div>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* NIP-96 Servers */}
+        <div
+          onClick={() => setActiveSubView('nip96')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <UploadCloud className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">NIP-96 Upload Servers</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localNip96.length} NIP-96 servers
               </p>
             </div>
           </div>
