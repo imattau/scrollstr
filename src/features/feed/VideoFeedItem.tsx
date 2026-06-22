@@ -75,7 +75,7 @@ function ActionPill({
   )
 }
 
-export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, isMuted, onActionClick }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isMuted, onActionClick }) => {
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
 
@@ -163,3 +163,7 @@ export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, i
     </article>
   )
 }
+
+export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, nextProps) => {
+  return prevProps.video.id === nextProps.video.id && prevProps.isActive === nextProps.isActive && prevProps.isMuted === nextProps.isMuted
+})

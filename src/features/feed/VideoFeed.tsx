@@ -282,7 +282,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       <div
         ref={containerRef}
         className="feed-container relative w-full"
-        style={{ height: '100vh', overflow: 'hidden' }}
+        style={{ height: '100vh' }}
       >
         <List
           defaultHeight={itemHeight}
