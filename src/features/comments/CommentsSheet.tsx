@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react'
-import { X, Send } from 'lucide-react'
+import React, { useEffect, useState, useMemo } from 'react'
+import { X } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { fetchComments, publishComment } from '../../nostr/events/comments'
-import { NDKEvent } from '@nostr-dev-kit/ndk'
+import { publishComment } from '../../nostr/events/comments'
+import { createRxForwardReq } from 'rx-nostr'
+import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { use$ } from 'applesauce-react/hooks'
+import { useProfile } from '../../nostr/profile'
 
 interface CommentsSheetProps {
   isOpen: boolean
@@ -11,44 +14,81 @@ interface CommentsSheetProps {
   onClose: () => void
 }
 
-export const CommentsSheet: React.FC<CommentsSheetProps> = ({
-  isOpen,
-  videoId,
-  creatorPubkey,
-  onClose,
-}) => {
-  const { ndk, session } = useNostr()
-  const [comments, setComments] = useState<NDKEvent[]>([])
+const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
+  const profile = useProfile(comment.pubkey)
+  const avatarInitial = profile.displayName?.slice(0, 1).toUpperCase() || 'N'
+
+  return (
+    <div className="flex items-start gap-[10px] py-1.5 border-b border-[#23232a]/30">
+      <div
+        className="flex size-[36px] overflow-hidden shrink-0 items-center justify-center rounded-full bg-[#8b5cf6] text-[12px] font-bold text-white"
+      >
+        {profile.picture ? (
+          <img src={profile.picture} alt={profile.name} className="h-full w-full object-cover" />
+        ) : (
+          avatarInitial
+        )}
+      </div>
+      <div className="flex flex-col gap-1">
+        <p className="text-[12px] font-medium text-[#a1a1aa]">@{profile.displayName || profile.name}</p>
+        <p className="w-[285px] text-[13px] font-normal leading-normal text-[#f7f7f8] break-words">{comment.content}</p>
+        <p className="text-[11px] font-medium text-[#71717a]">
+          {new Date(comment.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
+  const { rxNostr, eventStore, session, signEvent } = useNostr()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Load comments when video or sheet state changes
+  // Query events in EventStore for kind:1111 referencing this videoId
+  const rawComments = use$(() => getEventsQuery$({
+    kinds: [1111],
+    '#e': [videoId]
+  }), [videoId]) || []
+
+  // Subscribe to real-time comments on relays
   useEffect(() => {
     if (!isOpen || !videoId) return
 
     setLoading(true)
-    fetchComments(ndk, videoId)
-      .then((fetched) => {
-        // Sort comments by timestamp (ascending)
-        const sorted = [...fetched].sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
-        setComments(sorted)
-      })
-      .catch((err) => console.error('Failed to load comments:', err))
-      .finally(() => setLoading(false))
-  }, [ndk, videoId, isOpen])
+    console.log(`Subscribing to comments for event ${videoId}...`)
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq).subscribe(() => {
+      setLoading(false)
+    })
+    rxReq.emit({ kinds: [1111], '#e': [videoId] })
+
+    // Hide loader after a brief timeout if no events are returned
+    const timer = setTimeout(() => setLoading(false), 2000)
+
+    return () => {
+      sub.unsubscribe()
+      clearTimeout(timer)
+    }
+  }, [rxNostr, videoId, isOpen])
+
+  // Sort comments chronologically
+  const sortedComments = useMemo(() => {
+    return [...rawComments].sort((a, b) => a.created_at - b.created_at)
+  }, [rawComments])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!inputText.trim()) return
-
     if (!session) {
       alert('Please connect your Nostr account to comment')
       return
     }
 
     try {
-      const newComment = await publishComment(ndk, videoId, creatorPubkey, inputText)
-      setComments((prev) => [...prev, newComment])
+      const newComment = await publishComment(signEvent, rxNostr, videoId, creatorPubkey, inputText)
+      // Add to store immediately for optimistic UI
+      eventStore.add(newComment)
       setInputText('')
     } catch (err) {
       console.error('Failed to post comment:', err)
@@ -59,68 +99,55 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 bg-neutral-900 border-t border-neutral-800 rounded-t-3xl h-[70vh] flex flex-col animate-in slide-in-from-bottom duration-250">
-      {/* Header */}
-      <div className="flex justify-between items-center p-4 border-b border-neutral-800 shrink-0">
-        <div>
-          <h3 className="font-bold text-sm text-neutral-100">Comments</h3>
-          <span className="text-[10px] text-neutral-500 font-semibold">{comments.length} responses</span>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/85 px-0 md:px-4">
+      <div className="flex h-[70vh] w-full max-w-[390px] flex-col overflow-hidden rounded-t-[28px] border border-[#2a2a31] bg-[#09090b]">
+        <div className="flex h-[310px] items-center justify-center bg-[#1b1327]">
+          <span className="text-[14px] font-medium text-[#a1a1aa]">Paused video</span>
         </div>
-        <button onClick={onClose} className="p-1 text-neutral-400 hover:text-white transition-colors">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
 
-      {/* Comment List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {loading ? (
-          <div className="flex justify-center items-center h-20 text-xs text-neutral-500">
-            Loading comment thread...
+        <div className="flex h-[506px] flex-col gap-[14px] overflow-hidden rounded-t-[24px] bg-[#111115] p-4">
+          <div className="h-1 w-[42px] rounded-full bg-[#71717a] self-center" />
+          <div className="flex items-start justify-between text-[#f7f7f8]">
+            <p className="text-[17px] font-semibold">
+              {loading && sortedComments.length === 0 ? 'Loading comments...' : `${sortedComments.length} comments`}
+            </p>
+            <button type="button" onClick={onClose} className="text-[22px] leading-none text-[#f7f7f8]">
+              ×
+            </button>
           </div>
-        ) : comments.length === 0 ? (
-          <div className="flex justify-center items-center h-20 text-xs text-neutral-500">
-            No comments yet. Be the first to reply!
-          </div>
-        ) : (
-          comments.map((comment) => (
-            <div key={comment.id} className="flex gap-2 items-start text-xs">
-              <img
-                src={'https://api.dicebear.com/7.x/bottts/svg?seed=' + comment.pubkey}
-                alt="user"
-                className="w-7 h-7 rounded-full border border-neutral-800 bg-neutral-950 shrink-0"
-              />
-              <div className="bg-neutral-950 p-3 rounded-2xl flex-1 border border-neutral-850">
-                <span className="font-bold text-[10px] text-purple-400 block mb-0.5">
-                  @{comment.pubkey.slice(0, 8)}
-                </span>
-                <p className="text-neutral-200 leading-relaxed break-words">{comment.content}</p>
-                <span className="text-[8px] text-neutral-500 mt-1 block">
-                  {comment.created_at ? new Date(comment.created_at * 1000).toLocaleTimeString() : ''}
-                </span>
+
+          <div className="flex flex-1 flex-col gap-[14px] overflow-y-auto pr-1">
+            {sortedComments.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-[#71717a]">
+                <p className="text-[13px]">No comments yet.</p>
+                <p className="text-[11px]">Be the first to reply!</p>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            ) : (
+              sortedComments.map((comment) => (
+                <CommentRow key={comment.id} comment={comment} />
+              ))
+            )}
+          </div>
 
-      {/* Input Box */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-neutral-800 bg-neutral-950 shrink-0 flex gap-2 items-center">
-        <input
-          type="text"
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          placeholder={session ? "Add comment..." : "Login to leave a comment"}
-          disabled={!session}
-          className="flex-grow bg-neutral-900 border border-neutral-850 rounded-xl px-4 py-2.5 text-xs text-neutral-200 focus:outline-none focus:border-purple-500 disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={!session || !inputText.trim()}
-          className="p-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl disabled:opacity-50 disabled:bg-neutral-800 transition-colors"
-        >
-          <Send className="w-4 h-4" />
-        </button>
-      </form>
+          <form onSubmit={handleSubmit} className="flex h-[36px] items-center justify-between rounded-[20px] bg-[#18181d] px-3 py-2 mt-2">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={session ? 'Add a comment…' : 'Login to leave a comment'}
+              disabled={!session}
+              className="w-full bg-transparent text-[13px] text-[#a1a1aa] outline-none placeholder:text-[#a1a1aa] disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!session || !inputText.trim()}
+              className="text-[13px] font-semibold text-[#8b5cf6] disabled:opacity-50"
+            >
+              Send
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
   )
 }

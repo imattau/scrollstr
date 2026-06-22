@@ -7,9 +7,10 @@ interface VideoPlayerProps {
   poster?: string
   isActive: boolean
   onLike?: () => void
+  showControls?: boolean
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, onLike }) => {
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, onLike, showControls = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isHls, setIsHls] = useState(false)
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null)
@@ -144,13 +145,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           onTouchStart={handlePressStart}
           onTouchEnd={handlePressEnd}
         />
-
-        {/* Media Chrome Custom Controls Overlay */}
-        <MediaControlBar className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex gap-4 items-center">
-          <MediaPlayButton className="text-white hover:text-purple-400 bg-transparent border-0" />
-          <MediaMuteButton className="text-white hover:text-purple-400 bg-transparent border-0" />
-          <MediaTimeRange className="flex-1 accent-purple-600 bg-transparent" />
-        </MediaControlBar>
+        {showControls && (
+          <MediaControlBar className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex gap-4 items-center">
+            <MediaPlayButton className="text-white hover:text-purple-400 bg-transparent border-0" />
+            <MediaMuteButton className="text-white hover:text-purple-400 bg-transparent border-0" />
+            <MediaTimeRange className="flex-1 accent-purple-600 bg-transparent" />
+          </MediaControlBar>
+        )}
       </MediaController>
     </div>
   )

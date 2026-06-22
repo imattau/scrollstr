@@ -1,20 +1,18 @@
 import React, { useState } from 'react'
-import { Upload, Film, CheckCircle2, ChevronRight } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { uploadToBlossom, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events/video'
 
-// Utility to generate a thumbnail jpeg from a video file at 1s timestamp
-const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> => {
-  return new Promise((resolve, reject) => {
+const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
+  new Promise((resolve, reject) => {
     const video = document.createElement('video')
     video.preload = 'metadata'
     video.src = URL.createObjectURL(videoFile)
     video.muted = true
     video.playsInline = true
-    
+
     video.onloadedmetadata = () => {
-      video.currentTime = 1 // grab frame at 1 second
+      video.currentTime = 1
     }
 
     video.onseeked = () => {
@@ -22,50 +20,41 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> => {
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
       const ctx = canvas.getContext('2d')
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(blob)
-          } else {
-            reject(new Error('Canvas blob extraction failed'))
-          }
-        }, 'image/jpeg', 0.85)
-      } else {
-        reject(new Error('Canvas 2D context not available'))
-      }
+      if (!ctx) return reject(new Error('Canvas 2D context not available'))
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob)
+        else reject(new Error('Canvas blob extraction failed'))
+      }, 'image/jpeg', 0.85)
     }
 
     video.onerror = (err) => reject(err)
   })
-}
 
 export const PostWizard: React.FC = () => {
-  const { ndk, session } = useNostr()
-  const [step, setStep] = useState(1)
+  const { rxNostr, signEvent, session } = useNostr()
+  const [step] = useState(2)
   const [videoFile, setVideoFile] = useState<File | null>(null)
-  const [videoPreview, setVideoPreview] = useState<string>('')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [hashtags, setHashtags] = useState('')
+  const [videoPreview, setVideoPreview] = useState('')
+  const [title, setTitle] = useState('Night walk in Melbourne')
+  const [description, setDescription] = useState('The city after rain.')
+  const [hashtags, setHashtags] = useState('#melbourne #nightwalk')
+  const [altText, setAltText] = useState('Wet city street reflecting lights at night')
   const [uploadProgress, setUploadProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
 
-  // Default Blossom upload host
   const DEFAULT_BLOSSOM_SERVER = 'https://blossom.damus.io'
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0]
-      if (!file.type.startsWith('video/')) {
-        alert('Please select a valid video file')
-        return
-      }
-      setVideoFile(file)
-      setVideoPreview(URL.createObjectURL(file))
-      setStep(2)
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('video/')) {
+      alert('Please select a valid video file')
+      return
     }
+    setVideoFile(file)
+    setVideoPreview(URL.createObjectURL(file))
   }
 
   const handlePublish = async () => {
@@ -76,24 +65,15 @@ export const PostWizard: React.FC = () => {
     }
 
     setError('')
-    setStep(3)
     setUploadProgress(10)
     setStatusMessage('Generating poster frame...')
-
     try {
-      // 1. Generate poster frame
-      const thumbnailBlob = await generateThumbnailFromVideo(videoFile).catch((err) => {
-        console.warn('Poster frame generation failed, continuing with placeholder poster', err)
-        return null
-      })
-      
-      setUploadProgress(30)
-      setStatusMessage('Uploading poster to Blossom...')
-
+      const thumbnailBlob = await generateThumbnailFromVideo(videoFile).catch(() => null)
       let posterUrl = ''
       if (thumbnailBlob) {
-        const uploadResult = await uploadToBlossom(ndk, thumbnailBlob, DEFAULT_BLOSSOM_SERVER)
-        posterUrl = uploadResult.url
+        setUploadProgress(30)
+        setStatusMessage('Uploading poster to Blossom...')
+        posterUrl = (await uploadToBlossom(signEvent, thumbnailBlob, DEFAULT_BLOSSOM_SERVER)).url
       }
 
       setUploadProgress(50)
@@ -101,153 +81,107 @@ export const PostWizard: React.FC = () => {
       const videoHash = await calculateSha256(videoFile)
 
       setUploadProgress(70)
-      setStatusMessage('Uploading video to Blossom (this may take a moment)...')
-      const videoUploadResult = await uploadToBlossom(ndk, videoFile, DEFAULT_BLOSSOM_SERVER)
+      setStatusMessage('Uploading video to Blossom...')
+      const videoUploadResult = await uploadToBlossom(signEvent, videoFile, DEFAULT_BLOSSOM_SERVER)
 
       setUploadProgress(90)
-      setStatusMessage('Broadcasting video event to relays...')
-
-      // Split hashtags comma-separated
+      setStatusMessage('Broadcasting video event...')
       const tagsArray = hashtags
-        .split(',')
+        .replaceAll('#', '')
+        .split(/[\s,]+/)
         .map((t) => t.trim())
-        .filter((t) => t.length > 0)
+        .filter(Boolean)
 
       await publishVideoEvent(
-        ndk,
+        signEvent,
+        rxNostr,
         videoUploadResult.url,
         videoHash,
         posterUrl,
         title || videoFile.name,
-        description,
+        `${description} ${altText}`.trim(),
         tagsArray
       )
 
       setUploadProgress(100)
-      setStep(4)
+      alert('Clip published!')
     } catch (err: any) {
       console.error('Publish pipeline failed:', err)
       setError(err.message || 'Publishing failed')
-      setStep(2) // return to form editing
     }
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center pb-4 border-b border-neutral-900">
-        <h2 className="text-xl font-bold">Publish Clip</h2>
-        <span className="text-xs text-neutral-400 font-semibold">Step {step} of 4</span>
+    <div className="flex min-h-full flex-col bg-[#09090b] text-[#f7f7f8]">
+      <div className="flex h-[56px] items-center justify-between px-4">
+        <h2 className="text-[18px] font-bold">Post video</h2>
+        <button className="text-[22px] leading-none">×</button>
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-500/10 border border-red-500/25 text-red-400 text-xs rounded-xl">
-          {error}
+      <div className="flex flex-1 flex-col gap-[17px] overflow-y-auto px-[18px] pb-[76px]">
+        {error && <div className="rounded-[12px] border border-red-500/25 bg-red-500/10 p-3 text-[12px] text-red-300">{error}</div>}
+
+        <div className="flex gap-[6px]">
+          <span className="rounded-[18px] bg-[#18181d] px-[13px] py-[7px] text-[12px] font-medium">1 Select</span>
+          <span className="rounded-[18px] bg-[#f7f7f8] px-[13px] py-[7px] text-[12px] font-semibold text-[#09090b]">2 Details</span>
+          <span className="rounded-[18px] bg-[#18181d] px-[13px] py-[7px] text-[12px] font-medium">3 Publish</span>
         </div>
-      )}
 
-      {step === 1 && (
-        <div className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-800 rounded-3xl p-10 bg-neutral-900/10 hover:bg-neutral-900/30 hover:border-purple-500/50 transition-all duration-300">
-          <Upload className="w-12 h-12 text-neutral-600 mb-4 animate-bounce" />
-          <h3 className="font-bold text-neutral-200">Select Video Clip</h3>
-          <p className="text-xs text-neutral-500 text-center mt-2 max-w-[240px]">
-            H.264 MP4 recommended. Local transcoding or recording is not supported.
-          </p>
-          <label className="mt-6 px-6 py-2.5 bg-purple-600 hover:bg-purple-700 font-semibold rounded-xl text-xs text-white cursor-pointer transition-colors shadow-lg shadow-purple-600/20">
-            Choose File
-            <input type="file" accept="video/mp4,video/x-m4v,video/*" className="hidden" onChange={handleFileChange} />
-          </label>
+        <label className="flex h-[350px] w-full flex-col items-center justify-center rounded-[18px] bg-[#21172e]">
+          {videoPreview ? (
+            <video src={videoPreview} className="h-full w-full rounded-[18px] object-cover" controls />
+          ) : (
+            <>
+              <span className="text-[14px] font-medium text-[#a1a1aa]">9:16 preview</span>
+              <input type="file" accept="video/mp4,video/*" className="hidden" onChange={handleFileChange} />
+            </>
+          )}
+        </label>
+
+        <div className="flex flex-col gap-[5px] rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+          <span className="text-[11px] font-medium text-[#a1a1aa]">Title</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="bg-transparent text-[13px] text-[#f7f7f8] outline-none" />
         </div>
-      )}
 
-      {step === 2 && (
-        <div className="space-y-4">
-          {/* Video Preview */}
-          <div className="aspect-[9/16] max-h-[300px] w-full rounded-2xl overflow-hidden bg-black border border-neutral-800">
-            <video src={videoPreview} controls className="w-full h-full object-cover" />
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Title</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter a catchy title..."
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 focus:outline-none focus:border-purple-500"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Add a detailed description..."
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 focus:outline-none focus:border-purple-500 h-20 resize-none"
-              />
-            </div>
-
-            <div>
-              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Hashtags</label>
-              <input
-                type="text"
-                value={hashtags}
-                onChange={(e) => setHashtags(e.target.value)}
-                placeholder="nostr, video, music (comma separated)"
-                className="w-full bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-2 text-xs text-neutral-200 focus:outline-none focus:border-purple-500"
-              />
-            </div>
-          </div>
-
-          <button
-            onClick={handlePublish}
-            disabled={!session}
-            className="w-full flex items-center justify-center gap-2 py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-xs transition-all shadow-lg shadow-purple-600/25 disabled:opacity-50"
-          >
-            <span>{session ? 'Publish to Blossom & Relays' : 'Connect Account to Publish'}</span>
-            <ChevronRight className="w-4 h-4" />
-          </button>
+        <div className="flex flex-col gap-[5px] rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+          <span className="text-[11px] font-medium text-[#a1a1aa]">Description</span>
+          <input value={description} onChange={(e) => setDescription(e.target.value)} className="bg-transparent text-[13px] text-[#f7f7f8] outline-none" />
         </div>
-      )}
 
-      {step === 3 && (
-        <div className="flex flex-col items-center justify-center py-10 space-y-6">
-          <Film className="w-12 h-12 text-purple-500 animate-spin" />
-          <div className="text-center">
-            <h3 className="font-bold text-neutral-200">Publishing Clip</h3>
-            <p className="text-xs text-neutral-500 mt-1">{statusMessage}</p>
-          </div>
-          <div className="w-full max-w-[200px] h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-            <div className="h-full bg-purple-500 transition-all duration-200" style={{ width: `${uploadProgress}%` }}></div>
-          </div>
-          <span className="text-[10px] font-bold text-neutral-400">{uploadProgress}%</span>
+        <div className="flex flex-col gap-[5px] rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+          <span className="text-[11px] font-medium text-[#a1a1aa]">Hashtags</span>
+          <input value={hashtags} onChange={(e) => setHashtags(e.target.value)} className="bg-transparent text-[13px] text-[#f7f7f8] outline-none" />
         </div>
-      )}
 
-      {step === 4 && (
-        <div className="flex flex-col items-center justify-center py-10 space-y-6 text-center">
-          <CheckCircle2 className="w-16 h-16 text-green-500 animate-bounce" />
-          <div>
-            <h3 className="text-lg font-bold text-neutral-200">Clip Published!</h3>
-            <p className="text-xs text-neutral-500 mt-1">Your video is now live on Nostr (kind:22)</p>
-          </div>
-          <button
-            onClick={() => {
-              setVideoFile(null)
-              setVideoPreview('')
-              setTitle('')
-              setDescription('')
-              setHashtags('')
-              setUploadProgress(0)
-              setStep(1)
-            }}
-            className="px-6 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-xl text-xs font-semibold transition-colors"
-          >
-            Upload Another
-          </button>
+        <div className="flex flex-col gap-[5px] rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+          <span className="text-[11px] font-medium text-[#a1a1aa]">Alt text</span>
+          <input value={altText} onChange={(e) => setAltText(e.target.value)} className="bg-transparent text-[13px] text-[#f7f7f8] outline-none" />
         </div>
-      )}
+      </div>
+
+      <div className="flex h-[76px] items-center justify-between px-[18px]">
+        <button
+          type="button"
+          className="rounded-[11px] bg-[#18181d] px-[16px] py-[11px] text-[13px] font-semibold text-white"
+          onClick={() => window.history.back()}
+        >
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={handlePublish}
+          disabled={!session || !videoFile || !!statusMessage}
+          className="rounded-[11px] bg-[#8b5cf6] px-[16px] py-[11px] text-[13px] font-semibold text-white disabled:opacity-50"
+        >
+          Upload and publish
+        </button>
+      </div>
+
+      {statusMessage ? (
+        <div className="px-[18px] pb-[18px] text-[11px] text-[#71717a]">
+          {statusMessage} {uploadProgress ? `${uploadProgress}%` : ''}
+        </div>
+      ) : null}
     </div>
   )
 }

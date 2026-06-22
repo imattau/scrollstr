@@ -5,9 +5,10 @@ import { Home, Compass, PlusSquare, Bell, User, Settings } from 'lucide-react'
 interface MainLayoutProps {
   children: React.ReactNode
   rightPanel?: React.ReactNode
+  immersive?: boolean
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel }) => {
+export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false }) => {
   const location = useLocation()
 
   const navItems = [
@@ -23,6 +24,101 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel }) 
       return location.pathname === '/'
     }
     return location.pathname.startsWith(path)
+  }
+
+  if (immersive) {
+    return (
+      <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
+        <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327]">{children}</div>
+
+        <div className="hidden md:flex min-h-screen justify-center overflow-hidden bg-[#09090b]">
+          <div className="flex h-screen w-full max-w-[1440px] overflow-hidden rounded-none">
+            <aside className="flex w-[248px] shrink-0 flex-col justify-between border-r border-[#111115] bg-[#111115] p-6">
+              <div className="space-y-8">
+                <div className="space-y-2">
+                  <div className="text-[18px] font-bold">NOSTR CLIPS</div>
+                  <div className="text-[11px] text-[#a1a1aa]">Vertical video on the open web</div>
+                </div>
+                <nav className="space-y-1">
+                  {navItems.map((item) => {
+                    const Icon = item.icon
+                    const active = isActive(item.path)
+                    return (
+                      <Link
+                        key={item.path}
+                        to={item.path}
+                        className={[
+                          'flex items-center gap-3 rounded-[12px] px-3 py-3 text-[15px] transition-colors',
+                          active ? 'bg-[#222228] font-semibold text-[#f7f7f8]' : 'text-[#a1a1aa]',
+                        ].join(' ')}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span>{item.label}</span>
+                      </Link>
+                    )
+                  })}
+                </nav>
+              </div>
+
+              <Link to="/profile/me" className="flex items-center gap-3 px-3 py-3 text-[#a1a1aa]">
+                <User className="h-4 w-4" />
+                <span className="text-[15px]">Profile</span>
+              </Link>
+            </aside>
+
+            <main className="flex h-screen w-[720px] shrink-0 flex-col overflow-hidden bg-[#09090b]">
+              <div className="flex h-[68px] items-center justify-center">
+                <div className="flex gap-2">
+                  <div className="rounded-[18px] bg-[#18181d] px-[14px] py-[8px] text-[12px] font-medium text-[#f7f7f8]">
+                    Following
+                  </div>
+                  <div className="rounded-[18px] bg-[#f7f7f8] px-[14px] py-[8px] text-[12px] font-semibold text-[#09090b]">
+                    Explore
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative flex flex-1 justify-center overflow-hidden">
+                {children}
+              </div>
+            </main>
+
+            <aside className="flex w-[472px] shrink-0 flex-col overflow-y-auto bg-[#111115] p-6">
+              {rightPanel || (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-[20px] font-bold text-[#f7f7f8]">Comments</h3>
+                    <p className="mt-2 text-[12px] text-[#a1a1aa]">148 comments</p>
+                  </div>
+                  <div className="space-y-4">
+                    {[
+                      ['@nora', 'The reflections make this feel cinematic.', '#f05252'],
+                      ['@kai', 'This is why open video matters.', '#31c48d'],
+                      ['@jules', '⚡ 210 sats · Great shot', '#f05252'],
+                      ['@nora', 'The reflections make this feel cinematic.', '#31c48d'],
+                      ['@kai', 'This is why open video matters.', '#f05252'],
+                    ].map(([name, text, accent]) => (
+                      <div key={`${name}-${text}`} className="flex gap-3">
+                        <div
+                          className="flex size-[36px] shrink-0 items-center justify-center rounded-[18px] text-[12px] font-bold text-white"
+                          style={{ backgroundColor: accent as string }}
+                        >
+                          N
+                        </div>
+                        <div>
+                          <p className="text-[12px] font-medium text-[#a1a1aa]">{name}</p>
+                          <p className="max-w-[330px] text-[13px] font-normal leading-normal text-[#f7f7f8]">{text}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </aside>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

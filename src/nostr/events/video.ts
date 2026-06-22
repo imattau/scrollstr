@@ -1,4 +1,3 @@
-import NDK, { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
 import { VideoItemData, CreatorProfile } from '../../features/feed/VideoFeedItem'
 
 // Helper to parse space-separated imeta fields (e.g. "url https://example.com/a.mp4")
@@ -20,18 +19,18 @@ export const parseImetaTag = (imetaTag: string[]): Record<string, string> => {
 }
 
 // Convert a Nostr kind:22 or kind:34236 event into our local VideoItemData format
-export const parseVideoEvent = (event: NDKEvent): VideoItemData | null => {
+export const parseVideoEvent = (event: any): VideoItemData | null => {
   try {
-    const titleTag = event.tags.find((t) => t[0] === 'title')
+    const titleTag = event.tags.find((t: any) => t[0] === 'title')
     const title = titleTag ? titleTag[1] : ''
 
-    const altTag = event.tags.find((t) => t[0] === 'alt')
+    const altTag = event.tags.find((t: any) => t[0] === 'alt')
     const alt = altTag ? altTag[1] : ''
 
-    const hashtags = event.tags.filter((t) => t[0] === 't').map((t) => t[1])
+    const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
 
     // Find and parse the imeta tag
-    const imetaTag = event.tags.find((t) => t[0] === 'imeta')
+    const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
     if (!imetaTag) return null
 
     const imetaData = parseImetaTag(imetaTag)
@@ -70,57 +69,37 @@ export const parseVideoEvent = (event: NDKEvent): VideoItemData | null => {
   }
 }
 
-// Fetch and attach creator profile details (kind:0) to the video creator object
-export const fetchCreatorProfile = async (
-  user: NDKUser
-): Promise<Partial<CreatorProfile>> => {
-  try {
-    await user.fetchProfile()
-    return {
-      name: user.profile?.name || user.pubkey.slice(0, 8),
-      displayName: user.profile?.displayName || user.profile?.name,
-      picture: user.profile?.image || user.profile?.picture,
-      nip05: user.profile?.nip05,
-      isVerified: !!user.profile?.nip05,
-    }
-  } catch (err) {
-    console.error(`Failed to fetch profile for ${user.pubkey}:`, err)
-    return {}
-  }
-}
-
 // Sign and broadcast a kind:22 Nostr video event to default relays
 export const publishVideoEvent = async (
-  ndk: NDK,
+  signEvent: (eventTemplate: any) => Promise<any>,
+  rxNostr: any,
   videoUrl: string,
   videoHash: string,
   posterUrl: string,
   title: string,
   description: string,
   hashtags: string[]
-): Promise<NDKEvent> => {
-  if (!ndk.signer) {
-    throw new Error('Nostr signer not available to publish clip')
+): Promise<any> => {
+  const eventTemplate = {
+    kind: 22, // immutable kind:22 video event
+    content: description,
+    tags: [
+      ['title', title],
+      ['published_at', Math.floor(Date.now() / 1000).toString()],
+      ['alt', title],
+      ...hashtags.map((tag) => ['t', tag.trim().toLowerCase()]),
+      [
+        'imeta',
+        `url ${videoUrl}`,
+        `m video/mp4`,
+        `x ${videoHash}`,
+        `image ${posterUrl}`,
+      ],
+    ],
   }
 
-  const event = new NDKEvent(ndk)
-  event.kind = 22 // immutable kind:22 video event
-  event.content = description
-  event.tags = [
-    ['title', title],
-    ['published_at', Math.floor(Date.now() / 1000).toString()],
-    ['alt', title],
-    ...hashtags.map((tag) => ['t', tag.trim().toLowerCase()]),
-    [
-      'imeta',
-      `url ${videoUrl}`,
-      `m video/mp4`,
-      `x ${videoHash}`,
-      `image ${posterUrl}`,
-    ],
-  ]
-
   console.log('Signing and publishing kind:22 event...')
-  await event.publish()
-  return event
+  const signed = await signEvent(eventTemplate)
+  await rxNostr.cast(signed)
+  return signed
 }

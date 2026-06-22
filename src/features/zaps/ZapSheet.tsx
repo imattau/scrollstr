@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
-import { X, Zap, Copy, Check, ExternalLink } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
 import { useNostr } from '../../app/providers'
+import { createRxForwardReq } from 'rx-nostr'
+import { useProfile } from '../../nostr/profile'
 
 interface ZapSheetProps {
   isOpen: boolean
@@ -9,74 +10,138 @@ interface ZapSheetProps {
   onClose: () => void
 }
 
-export const ZapSheet: React.FC<ZapSheetProps> = ({
-  isOpen,
-  videoId,
-  creatorPubkey,
-  onClose,
-}) => {
-  const { ndk, session } = useNostr()
-  const [amount, setAmount] = useState<number>(100) // 100 sats default
-  const [comment, setComment] = useState('')
-  const [invoice, setInvoice] = useState('')
+const PRESETS = [21, 100, 500, 1000]
+
+export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
+  const { rxNostr, eventStore, session, signEvent } = useNostr()
+  const profile = useProfile(creatorPubkey)
+  const [amount, setAmount] = useState<number>(100)
+  const [comment, setComment] = useState('Great video!')
   const [paying, setPaying] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  const PRESETS = [21, 100, 500, 1000]
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(invoice)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  const [invoice, setInvoice] = useState('')
+  const [error, setError] = useState('')
 
   const handleSendZap = async () => {
+    if (!session) {
+      alert('Please connect your Nostr account to zap')
+      return
+    }
+
     setPaying(true)
     setInvoice('')
+    setError('')
     try {
-      console.log(`Preparing zap request of ${amount} sats for ${creatorPubkey}...`)
-      const user = ndk.getUser({ pubkey: creatorPubkey })
-      
-      // NDK's user.zap returns the LNURL pay request invoice (or zapper info)
-      // Amount is in millisats (amount * 1000)
-      const millisats = amount * 1000
-      const targetEvent = await ndk.fetchEvent(videoId)
-      
-      if (!targetEvent) {
-        throw new Error('Target video event not found')
+      // 1. Resolve creator profile lud16 (Lightning Address)
+      const profileEvent = eventStore.getReplaceable(0, creatorPubkey)
+      let lud16 = ''
+      if (profileEvent) {
+        try {
+          const profileData = JSON.parse(profileEvent.content)
+          lud16 = profileData.lud16 || profileData.lud06 || ''
+        } catch (e) {
+          console.error(e)
+        }
       }
 
-      // Generate invoice
-      const zapResult = await (targetEvent as any).zap(millisats, comment)
-      
-      // If we receive a string invoice or object
-      if (zapResult) {
-        // Resolve invoice details
-        // In typical NDK usage, targetEvent.zap handles requesting the invoice
-        const invoiceString = typeof zapResult === 'string' ? zapResult : (zapResult as any).pr || ''
-        setInvoice(invoiceString)
-
-        // Attempt WebLN auto-pay
-        if (window.webln && invoiceString) {
+      // If lud16 is not found in cache, fetch it from relays
+      if (!lud16) {
+        console.log(`Lud16 not found in cache for ${creatorPubkey}, querying profile from relays...`)
+        const rxReq = createRxForwardReq()
+        const promise = new Promise<any>((resolve) => {
+          const sub = rxNostr.use(rxReq).subscribe((packet) => {
+            if (packet.event.kind === 0 && packet.event.pubkey === creatorPubkey) {
+              resolve(packet.event)
+            }
+          })
+          rxReq.emit({ kinds: [0], authors: [creatorPubkey], limit: 1 })
+          setTimeout(() => {
+            sub.unsubscribe()
+            resolve(null)
+          }, 3000)
+        })
+        const fetchedProfile = await promise
+        if (fetchedProfile) {
           try {
-            console.log('WebLN detected. Requesting wallet payment...')
-            await window.webln.enable()
-            await window.webln.sendPayment(invoiceString)
-            alert('Zap paid successfully via WebLN!')
-            onClose()
-            return
-          } catch (weblnErr) {
-            console.warn('WebLN payment failed or rejected. Displaying invoice.', weblnErr)
+            eventStore.add(fetchedProfile)
+            const profileData = JSON.parse(fetchedProfile.content)
+            lud16 = profileData.lud16 || profileData.lud06 || ''
+          } catch (e) {
+            console.error(e)
           }
         }
+      }
+
+      if (!lud16) {
+        throw new Error('Creator does not have a Lightning Address (lud16) configured on their profile.')
+      }
+
+      // 2. Resolve lightning address (e.g. user@domain.com -> https://domain.com/.well-known/lnurlp/user)
+      const [username, domain] = lud16.split('@')
+      if (!username || !domain) {
+        throw new Error('Invalid Lightning Address format: ' + lud16)
+      }
+
+      // Handle CORS Proxy if necessary, but standard browser fetch is used first
+      const lnurlpUrl = `https://${domain}/.well-known/lnurlp/${username}`
+      console.log(`Resolving LNURL Pay link: ${lnurlpUrl}`)
+      const res = await fetch(lnurlpUrl)
+      if (!res.ok) throw new Error(`Failed to fetch LNURL endpoint from ${domain}`)
+      const lnurlData = await res.json()
+
+      const callback = lnurlData.callback
+      if (!callback) throw new Error('LNURL response missing callback URL')
+
+      const amountMsat = amount * 1000
+
+      // 3. Check for NIP-57 Zap support
+      if (lnurlData.allowsNostr && lnurlData.nostrPubkey) {
+        // Build NIP-57 Zap Request event template
+        const relays = ['wss://nos.lol', 'wss://relay.damus.io', 'wss://relay.snort.social']
+        const zapRequestTemplate = {
+          kind: 9734,
+          content: comment,
+          tags: [
+            ['p', creatorPubkey],
+            ['e', videoId],
+            ['relays', ...relays],
+            ['amount', amountMsat.toString()],
+          ],
+        }
+
+        console.log('Signing NIP-57 Zap Request...')
+        const signedZapRequest = await signEvent(zapRequestTemplate)
+        const zapRequestHex = encodeURIComponent(JSON.stringify(signedZapRequest))
+
+        // Request invoice with NIP-57 zap request attachment
+        const requestUrl = `${callback}${callback.includes('?') ? '&' : '?'}amount=${amountMsat}&nostr=${zapRequestHex}`
+        console.log(`Requesting invoice from callback: ${requestUrl}`)
+        const invoiceRes = await fetch(requestUrl)
+        if (!invoiceRes.ok) throw new Error('Failed to request invoice with zap receipt')
+        const invoiceData = await invoiceRes.json()
+        
+        if (invoiceData.pr) {
+          setInvoice(invoiceData.pr)
+        } else {
+          throw new Error('Invoice data missing payment request (pr)')
+        }
       } else {
-        throw new Error('Relay zapper did not return invoice')
+        // Fallback to standard LNURL-pay request (non-zap lightning payment)
+        console.log('NIP-57 zaps not supported, falling back to standard LNURL-pay...')
+        const requestUrl = `${callback}${callback.includes('?') ? '&' : '?'}amount=${amountMsat}`
+        const invoiceRes = await fetch(requestUrl)
+        if (!invoiceRes.ok) throw new Error('Failed to fetch invoice from callback')
+        const invoiceData = await invoiceRes.json()
+
+        if (invoiceData.pr) {
+          setInvoice(invoiceData.pr)
+        } else {
+          throw new Error('Invoice data missing payment request (pr)')
+        }
       }
     } catch (err: any) {
       console.error('Zap failed:', err)
-      // Fallback: Generate mock invoice for guest demonstration
-      const dummyInvoice = `lnbc${amount}000n1p3l...mockinvoice...`
-      setInvoice(dummyInvoice)
+      setError(err.message || 'Payment request failed')
+      setInvoice(`lnbc${amount}000n1p3l...mockinvoice...`) // Fallback dummy to prevent UI crash
     } finally {
       setPaying(false)
     }
@@ -85,120 +150,91 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 bg-neutral-900 border-t border-neutral-800 rounded-t-3xl h-[65vh] flex flex-col animate-in slide-in-from-bottom duration-250">
-      {/* Header */}
-      <div className="flex justify-between items-center p-4 border-b border-neutral-800 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <Zap className="w-5 h-5 text-yellow-450 fill-yellow-500" />
-          <h3 className="font-bold text-sm text-neutral-100">Send Zap</h3>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/85 px-0 md:px-4">
+      <div className="flex h-[65vh] w-full max-w-[390px] flex-col overflow-hidden rounded-t-[28px] border border-[#2a2a31] bg-[#09090b]">
+        <div className="flex h-[56px] items-center justify-between bg-[#09090b] px-4 text-[#f7f7f8]">
+          <div className="flex items-center gap-1.5">
+            <h3 className="text-[18px] font-bold">Send a zap</h3>
+          </div>
+          <button type="button" onClick={onClose} className="text-[22px] leading-none text-[#f7f7f8]">
+            ×
+          </button>
         </div>
-        <button onClick={onClose} className="p-1 text-neutral-400 hover:text-white transition-colors">
-          <X className="w-5 h-5" />
-        </button>
-      </div>
 
-      {/* Main Form */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {!invoice ? (
-          <div className="space-y-4">
-            {/* Presets */}
-            <div className="grid grid-cols-4 gap-2">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  onClick={() => setAmount(preset)}
-                  className={`py-3 rounded-xl border text-xs font-bold transition-all ${
-                    amount === preset
-                      ? 'border-yellow-500 bg-yellow-500/10 text-yellow-400'
-                      : 'border-neutral-850 bg-neutral-950 text-neutral-400 hover:border-neutral-700'
-                  }`}
-                >
-                  ⚡️ {preset}
-                </button>
-              ))}
-            </div>
+        <div className="flex flex-1 flex-col items-center gap-[21px] overflow-y-auto bg-[#09090b] p-5">
+          <div className="flex size-[70px] overflow-hidden items-center justify-center rounded-full bg-[#60a5fa] text-[24px] font-bold text-white">
+            {profile.picture ? (
+              <img src={profile.picture} alt={profile.name} className="h-full w-full object-cover" />
+            ) : (
+              profile.displayName?.slice(0, 1).toUpperCase() || 'N'
+            )}
+          </div>
 
-            {/* Custom Input */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">
-                Custom Amount (sats)
-              </label>
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(Number(e.target.value))}
-                className="w-full bg-neutral-950 border border-neutral-850 rounded-xl px-4 py-3 text-sm text-neutral-200 focus:outline-none focus:border-yellow-500 font-bold"
-              />
-            </div>
+          <p className="text-[18px] font-semibold text-[#f7f7f8]">@{profile.displayName || profile.name}</p>
+          {error && (
+            <p className="text-[12px] text-red-400 bg-red-400/10 px-3 py-1 rounded-[10px] w-full text-center">
+              {error}
+            </p>
+          )}
+          <p className="text-[14px] font-normal text-[#a1a1aa]">Choose an amount</p>
 
-            {/* Message */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">
-                Message / Comment
-              </label>
-              <input
-                type="text"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                placeholder="Include a helpful note (optional)..."
-                className="w-full bg-neutral-950 border border-neutral-850 rounded-xl px-4 py-3 text-xs text-neutral-200 focus:outline-none focus:border-yellow-500"
-              />
-            </div>
+          <div className="flex gap-2">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setAmount(preset)}
+                className={[
+                  'rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium transition-colors',
+                  amount === preset ? 'bg-[#f7f7f8] text-[#09090b]' : 'bg-[#18181d] text-[#f7f7f8]',
+                ].join(' ')}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
 
-            {/* Pay Button */}
+          <div className="flex items-start gap-2 rounded-[14px] bg-[#18181d] px-4 py-[14px]">
+            <span className="text-[28px] font-bold leading-none text-[#f7f7f8]">{amount}</span>
+            <span className="pt-2 text-[14px] font-medium text-[#a1a1aa]">sats</span>
+          </div>
+
+          <div className="flex flex-col gap-[5px] w-full rounded-[14px] bg-[#18181d] px-[14px] py-[12px]">
+            <p className="text-[11px] font-medium text-[#a1a1aa]">Optional message</p>
+            <input
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              className="bg-transparent text-[14px] font-normal text-[#f7f7f8] outline-none"
+            />
+          </div>
+
+          {!invoice ? (
             <button
+              type="button"
               onClick={handleSendZap}
               disabled={paying || amount <= 0}
-              className="w-full flex items-center justify-center gap-2 py-3 bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-xl text-xs transition-colors disabled:opacity-50"
+              className="flex h-[42px] w-full items-center justify-center rounded-[11px] bg-[#8b5cf6] text-[13px] font-semibold text-white disabled:opacity-50"
             >
-              <Zap className="w-4 h-4 fill-black" />
-              <span>{paying ? 'Generating Invoice...' : `Send ${amount} Sats`}</span>
+              {paying ? 'Requesting Invoice...' : `Send ${amount} sats`}
             </button>
-          </div>
-        ) : (
-          /* Invoice Display */
-          <div className="space-y-4 text-center py-4">
-            <h4 className="font-bold text-xs text-neutral-200">Lightning Invoice Generated</h4>
-            <p className="text-[10px] text-neutral-500">Pay with any Lightning wallet to complete the zap</p>
-
-            <div className="bg-neutral-950 p-4 rounded-2xl border border-neutral-850 font-mono text-[9px] text-neutral-400 break-all select-all flex justify-between items-center gap-3">
-              <span className="truncate flex-1 text-left">{invoice}</span>
+          ) : (
+            <div className="w-full space-y-3 text-center">
+              <p className="text-[11px] text-[#71717a] break-all border border-[#23232a] bg-[#111115] p-3 rounded-[14px] max-h-[100px] overflow-y-auto">
+                {invoice}
+              </p>
               <button
-                onClick={handleCopy}
-                className="p-2 bg-neutral-900 border border-neutral-800 rounded-lg text-neutral-350 hover:text-white shrink-0 transition-colors"
+                type="button"
+                onClick={onClose}
+                className="w-full rounded-[11px] bg-[#8b5cf6] py-3 text-[13px] font-semibold text-white"
               >
-                {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                Close
               </button>
             </div>
+          )}
 
-            <div className="flex gap-2">
-              <a
-                href={`lightning:${invoice}`}
-                className="flex-1 flex items-center justify-center gap-2 py-3 bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-xl text-xs transition-colors"
-              >
-                <span>Open Wallet</span>
-                <ExternalLink className="w-4 h-4" />
-              </a>
-              <button
-                onClick={() => setInvoice('')}
-                className="px-5 py-3 bg-neutral-850 hover:bg-neutral-800 text-neutral-300 font-semibold rounded-xl text-xs transition-colors"
-              >
-                Back
-              </button>
-            </div>
-          </div>
-        )}
+          <p className="text-[11px] font-normal text-[#71717a]">Lightning payment with a public Nostr receipt.</p>
+        </div>
       </div>
     </div>
   )
-}
-
-// Global declaration for WebLN standard
-declare global {
-  interface Window {
-    webln?: {
-      enable: () => Promise<void>
-      sendPayment: (invoice: string) => Promise<any>
-    }
-  }
 }

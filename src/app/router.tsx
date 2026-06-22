@@ -18,7 +18,7 @@ export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger }) => {
       <Route
         path="/"
         element={
-          <MainLayout>
+          <MainLayout immersive>
             <VideoFeed onActionTrigger={onActionTrigger} />
           </MainLayout>
         }

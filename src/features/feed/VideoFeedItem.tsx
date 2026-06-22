@@ -1,5 +1,4 @@
-import React, { useState } from 'react'
-import { Heart, MessageCircle, Repeat2, Zap, Share2, MoreHorizontal, Volume2, VolumeX, CheckCircle } from 'lucide-react'
+import React from 'react'
 import { VideoPlayer } from '../video/VideoPlayer'
 
 export interface CreatorProfile {
@@ -33,172 +32,121 @@ interface VideoFeedItemProps {
   onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'follow', videoId: string) => void
 }
 
+function ActionPill({
+  icon,
+  label,
+  labelColor = 'text-[#f7f7f8]',
+  iconColor = 'text-[#f7f7f8]',
+  onClick,
+}: {
+  icon: React.ReactNode
+  label?: string
+  labelColor?: string
+  iconColor?: string
+  onClick?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-center gap-[3px] outline-none transition-transform duration-150 active:scale-95"
+    >
+      <span
+        className={[
+          'flex size-[42px] items-center justify-center rounded-full border border-transparent text-[19px] leading-none',
+          'bg-[#18181d]',
+          iconColor,
+        ].join(' ')}
+      >
+        {icon}
+      </span>
+      {label ? <span className={['text-[10px] font-medium leading-none', labelColor].join(' ')}>{label}</span> : null}
+    </button>
+  )
+}
+
+import { useProfile } from '../../nostr/profile'
+
 export const VideoFeedItem: React.FC<VideoFeedItemProps> = ({ video, isActive, onActionClick }) => {
-  const [descExpanded, setDescExpanded] = useState(false)
-  const [muted, setMuted] = useState(true)
-
-  const toggleMuted = () => setMuted(!muted)
-
-  const handleDoubleTapLike = () => {
-    onActionClick('like', video.id)
-  }
+  const profile = useProfile(video.creator.pubkey)
+  const creatorLabel = `@${profile.displayName || profile.name}`
 
   return (
-    <div className="feed-item w-full h-full relative bg-neutral-950 flex flex-col justify-between select-none">
-      
-      {/* Video Player */}
-      <div className="absolute inset-0 z-0">
-        <VideoPlayer
-          url={video.url}
-          poster={video.poster}
-          isActive={isActive}
-          onLike={handleDoubleTapLike}
+    <article className="feed-item relative h-dvh w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:mt-[84px] md:h-[780px] md:w-[430px] md:rounded-[18px]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%),linear-gradient(180deg,#1b1327_0%,#1b1327_66%,#09090b_100%)]" />
+
+      <div className="absolute inset-0 opacity-20 saturate-0 brightness-75">
+        <VideoPlayer url={video.url} poster={video.poster} isActive={isActive} onLike={() => onActionClick('like', video.id)} showControls={false} />
+      </div>
+
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#09090b]/18" />
+
+      <div className="pointer-events-none absolute left-1/2 top-[39.5%] z-20 -translate-x-1/2 -translate-y-1/2">
+        <div
+          className="flex size-[62px] items-center justify-center rounded-full bg-[#18181d]/80 text-[19px] text-[#f7f7f8] shadow-[0_8px_24px_rgba(0,0,0,0.28)] backdrop-blur-sm"
+          aria-hidden="true"
+        >
+          <span className="ml-[3px]">▶</span>
+        </div>
+      </div>
+
+      <div className="absolute right-4 top-[250px] z-20 flex flex-col items-center gap-[13px] md:right-[-1px] md:top-[290px]">
+        <button
+          type="button"
+          onClick={() => onActionClick('follow', video.id)}
+          className="flex size-[44px] overflow-hidden items-center justify-center rounded-full bg-[#60a5fa] text-[15px] font-bold text-white transition-transform duration-150 active:scale-95"
+          aria-label="Creator"
+        >
+          {profile.picture ? (
+            <img src={profile.picture} alt={profile.name} className="h-full w-full object-cover" />
+          ) : (
+            profile.displayName?.slice(0, 1).toUpperCase() || 'N'
+          )}
+        </button>
+
+        <ActionPill
+          icon="♥"
+          label={video.likesCount >= 1000 ? `${(video.likesCount / 1000).toFixed(video.likesCount % 1000 === 0 ? 0 : 1)}k` : `${video.likesCount}`}
+          onClick={() => onActionClick('like', video.id)}
+        />
+        <ActionPill
+          icon="◌"
+          label={video.commentsCount >= 1000 ? `${(video.commentsCount / 1000).toFixed(video.commentsCount % 1000 === 0 ? 0 : 1)}k` : `${video.commentsCount}`}
+          onClick={() => onActionClick('comment', video.id)}
+        />
+        <ActionPill
+          icon="↻"
+          label={video.boostsCount >= 1000 ? `${(video.boostsCount / 1000).toFixed(video.boostsCount % 1000 === 0 ? 0 : 1)}k` : `${video.boostsCount}`}
+          onClick={() => onActionClick('boost', video.id)}
+        />
+        <ActionPill
+          icon="⚡"
+          label={video.zapsCount >= 1000 ? `${(video.zapsCount / 1000).toFixed(video.zapsCount % 1000 === 0 ? 0 : 1)}k` : `${video.zapsCount}`}
+          labelColor="text-[#f7f7f8]"
+          iconColor="text-[#f5b942]"
+          onClick={() => onActionClick('zap', video.id)}
+        />
+        <ActionPill
+          icon="↗"
+          onClick={() => onActionClick('share', video.id)}
         />
       </div>
 
-      {/* Floating Header (Nostr Clips Logo / Search / Tabs) */}
-      <header className="absolute top-0 left-0 right-0 z-10 px-4 py-6 bg-gradient-to-b from-black/60 to-transparent flex justify-between items-center">
-        <div className="text-lg font-bold text-white tracking-wide">Nostr Clips</div>
-        <div className="flex gap-4 text-sm font-semibold text-neutral-300">
-          <span className="text-white border-b-2 border-purple-500 pb-1">Explore</span>
-          <span className="hover:text-white cursor-pointer" onClick={() => onActionClick('more', video.id)}>Following</span>
-        </div>
-      </header>
-
-      {/* Bottom-left Content Block & Right Action Rail Overlay */}
-      <div className="absolute bottom-16 md:bottom-6 left-0 right-0 z-10 px-4 pb-4 flex justify-between items-end bg-gradient-to-t from-black/80 via-black/20 to-transparent pt-12">
-        
-        {/* Creator Info & Description */}
-        <div className="flex-1 max-w-[75%] space-y-3 text-white">
-          <div className="flex items-center gap-2">
-            <div className="relative cursor-pointer" onClick={() => onActionClick('follow', video.id)}>
-              <img
-                src={video.creator.picture || 'https://api.dicebear.com/7.x/bottts/svg?seed=' + video.creator.pubkey}
-                alt={video.creator.name}
-                className="w-10 h-10 rounded-full border border-purple-500 bg-neutral-900 object-cover"
-              />
-              <span className="absolute -bottom-1 -right-1 bg-purple-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold border border-black">
-                +
-              </span>
-            </div>
-            <div>
-              <div className="flex items-center gap-1 font-semibold text-sm cursor-pointer">
-                <span>@{video.creator.displayName || video.creator.name}</span>
-                {video.creator.isVerified && (
-                  <CheckCircle className="w-3.5 h-3.5 fill-purple-500 text-black" />
-                )}
-              </div>
-              {video.creator.nip05 && (
-                <span className="text-[10px] text-purple-300 block leading-tight">{video.creator.nip05}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Video Description */}
-          <div className="text-xs text-neutral-200">
-            <p
-              onClick={() => setDescExpanded(!descExpanded)}
-              className={`cursor-pointer transition-all duration-200 ${
-                descExpanded ? 'line-clamp-none' : 'line-clamp-2'
-              }`}
-            >
+      <div className="absolute bottom-0 left-0 right-0 z-10 h-[230px] bg-[#09090b]/72 md:h-[100px] md:bg-transparent">
+        <div className="absolute left-4 top-[48px] w-[278px] max-w-[calc(100%-96px)] space-y-[6px] leading-none md:bottom-[16px] md:left-[18px] md:top-auto md:w-[139px]">
+          <p className="text-[15px] font-semibold text-[#f7f7f8]">
+            {creatorLabel} {video.creator.isVerified ? '✓' : ''}
+          </p>
+          <div className="block w-full text-left text-[14px] font-normal text-[#f7f7f8]">
+            <span className="block leading-[1.35]">
               {video.description || video.title}
-            </p>
-            {video.hashtags && video.hashtags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1 text-purple-400 font-medium">
-                {video.hashtags.map((tag) => (
-                  <span key={tag} className="hover:underline cursor-pointer">
-                    #{tag}
-                  </span>
-                ))}
-              </div>
-            )}
+            </span>
           </div>
-
-          {/* Music/Source Info */}
-          {video.music && (
-            <div className="flex items-center gap-1.5 text-[10px] text-neutral-400">
-              <span className="w-2 h-2 rounded-full bg-purple-500 animate-pulse shrink-0" />
-              <span className="truncate">{video.music}</span>
-            </div>
-          )}
-
-          {/* Content Warning Label */}
-          {video.contentWarning && (
-            <div className="inline-flex items-center px-2 py-0.5 rounded bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 text-[10px] font-medium">
-              CW: {video.contentWarning}
-            </div>
-          )}
-        </div>
-
-        {/* Right Action Rail */}
-        <div className="flex flex-col items-center gap-4 text-white shrink-0">
-          
-          {/* Like */}
-          <button
-            onClick={() => onActionClick('like', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-neutral-900/60 backdrop-blur-md flex items-center justify-center border border-neutral-800">
-              <Heart className="w-5 h-5 text-neutral-200 hover:text-red-500 transition-colors" />
-            </div>
-            <span className="text-[10px] font-medium">{video.likesCount}</span>
-          </button>
-
-          {/* Comments */}
-          <button
-            onClick={() => onActionClick('comment', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-neutral-900/60 backdrop-blur-md flex items-center justify-center border border-neutral-800">
-              <MessageCircle className="w-5 h-5 text-neutral-200 hover:text-purple-400 transition-colors" />
-            </div>
-            <span className="text-[10px] font-medium">{video.commentsCount}</span>
-          </button>
-
-          {/* Boost */}
-          <button
-            onClick={() => onActionClick('boost', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-neutral-900/60 backdrop-blur-md flex items-center justify-center border border-neutral-800">
-              <Repeat2 className="w-5 h-5 text-neutral-200 hover:text-green-400 transition-colors" />
-            </div>
-            <span className="text-[10px] font-medium">{video.boostsCount}</span>
-          </button>
-
-          {/* Zap */}
-          <button
-            onClick={() => onActionClick('zap', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-yellow-500/10 backdrop-blur-md flex items-center justify-center border border-yellow-500/30">
-              <Zap className="w-5 h-5 text-yellow-400" />
-            </div>
-            <span className="text-[10px] font-medium text-yellow-400">{video.zapsCount}</span>
-          </button>
-
-          {/* Share */}
-          <button
-            onClick={() => onActionClick('share', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-neutral-900/60 backdrop-blur-md flex items-center justify-center border border-neutral-800">
-              <Share2 className="w-5 h-5 text-neutral-200 hover:text-blue-400 transition-colors" />
-            </div>
-          </button>
-
-          {/* More */}
-          <button
-            onClick={() => onActionClick('more', video.id)}
-            className="flex flex-col items-center gap-1 hover:scale-105 transition-transform"
-          >
-            <div className="w-11 h-11 rounded-full bg-neutral-900/60 backdrop-blur-md flex items-center justify-center border border-neutral-800">
-              <MoreHorizontal className="w-5 h-5 text-neutral-200" />
-            </div>
-          </button>
+          <p className="text-[12px] font-medium text-[#a78bfa]">
+            {(video.hashtags || ['melbourne', 'nightwalk', 'nostr']).map((tag) => `#${tag}`).join('  ')}
+          </p>
         </div>
       </div>
-    </div>
+    </article>
   )
 }

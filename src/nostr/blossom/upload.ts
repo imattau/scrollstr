@@ -1,5 +1,3 @@
-import NDK, { NDKEvent } from '@nostr-dev-kit/ndk'
-
 // Helper to calculate SHA-256 hash of a file/blob locally using Web Crypto API
 export const calculateSha256 = async (blob: Blob): Promise<string> => {
   const arrayBuffer = await blob.arrayBuffer()
@@ -10,27 +8,24 @@ export const calculateSha256 = async (blob: Blob): Promise<string> => {
 
 // Generate a signed Blossom (BUD-11) upload authorization token
 export const generateBlossomAuthHeader = async (
-  ndk: NDK,
+  signEvent: (eventTemplate: any) => Promise<any>,
   sha256Hash: string,
   serverUrl: string
 ): Promise<string> => {
-  if (!ndk.signer) {
-    throw new Error('Nostr signer not available for upload authorization')
+  // Create kind:24242 event template
+  const eventTemplate = {
+    kind: 24242,
+    content: 'Authorize upload',
+    tags: [
+      ['t', 'upload'],
+      ['x', sha256Hash],
+      ['expiration', (Math.floor(Date.now() / 1000) + 300).toString()], // Valid for 5 minutes
+    ],
   }
 
-  // Create kind:24242 event
-  const event = new NDKEvent(ndk)
-  event.kind = 24242
-  event.content = 'Authorize upload'
-  event.tags = [
-    ['t', 'upload'],
-    ['x', sha256Hash],
-    ['expiration', (Math.floor(Date.now() / 1000) + 300).toString()], // Valid for 5 minutes
-  ]
-
   // Sign event
-  await event.sign()
-  const jsonString = JSON.stringify(event.rawEvent())
+  const signed = await signEvent(eventTemplate)
+  const jsonString = JSON.stringify(signed)
   
   // Base64 encode the stringified JSON event
   const base64Token = btoa(unescape(encodeURIComponent(jsonString)))
@@ -39,7 +34,7 @@ export const generateBlossomAuthHeader = async (
 
 // Upload a blob to a configured Blossom server
 export const uploadToBlossom = async (
-  ndk: NDK,
+  signEvent: (eventTemplate: any) => Promise<any>,
   blob: Blob,
   serverUrl: string
 ): Promise<{ url: string; sha256: string }> => {
@@ -50,7 +45,7 @@ export const uploadToBlossom = async (
   const uploadUrl = `${baseUrl}/upload`
 
   console.log(`Hashing complete. SHA-256: ${sha256}`)
-  const authHeader = await generateBlossomAuthHeader(ndk, sha256, baseUrl)
+  const authHeader = await generateBlossomAuthHeader(signEvent, sha256, baseUrl)
 
   console.log(`Uploading file to ${uploadUrl}...`)
   const response = await fetch(uploadUrl, {

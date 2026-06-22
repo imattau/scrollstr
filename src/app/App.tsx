@@ -8,7 +8,7 @@ import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost } from '../nostr/events/reactions'
 
 function AppContent() {
-  const { ndk, session } = useNostr()
+  const { rxNostr, signEvent, session } = useNostr()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
   const [isZapOpen, setIsZapOpen] = useState(false)
@@ -41,7 +41,7 @@ function AppContent() {
       setIsZapOpen(true)
     } else if (actionType === 'like') {
       try {
-        await publishLike(ndk, videoId, creatorPubkey || '')
+        await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '')
         alert('Liked video on Nostr!')
       } catch (err) {
         console.error('Like failed:', err)
@@ -49,7 +49,7 @@ function AppContent() {
       }
     } else if (actionType === 'boost') {
       try {
-        await publishBoost(ndk, videoId, creatorPubkey || '')
+        await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '')
         alert('Boosted video on Nostr (reposted kind:16)!')
       } catch (err) {
         console.error('Boost failed:', err)
