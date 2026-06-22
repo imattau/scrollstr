@@ -1,5 +1,6 @@
 import { createRxNostr } from 'rx-nostr'
 import { EventStore } from 'applesauce-core'
+import { verifyEvent } from 'nostr-tools'
 
 // List of standard default relays to bootstrap client connection
 export const DEFAULT_RELAYS = [
@@ -10,7 +11,9 @@ export const DEFAULT_RELAYS = [
 ]
 
 // Initialize the global rx-nostr client
-export const rxNostr = createRxNostr()
+export const rxNostr = createRxNostr({
+  verifier: async (event) => verifyEvent(event),
+})
 rxNostr.setDefaultRelays(DEFAULT_RELAYS)
 
 // Initialize global Applesauce EventStore
