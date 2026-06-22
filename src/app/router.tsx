@@ -7,19 +7,22 @@ import { PostWizard } from '../features/post/PostWizard'
 import { ActivityPage } from '../features/notifications/ActivityPage'
 import { ProfilePage } from '../features/profile/ProfilePage'
 import { SettingsPage } from '../features/settings/SettingsPage'
+import { DesktopCommentsPanel } from '../features/comments/DesktopCommentsPanel'
 
 interface RouterProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
+  activeVideo: any
+  onVideoChange: (video: any) => void
 }
 
-export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger }) => {
+export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo, onVideoChange }) => {
   return (
     <Routes>
       <Route
         path="/"
         element={
-          <MainLayout immersive>
-            <VideoFeed onActionTrigger={onActionTrigger} />
+          <MainLayout immersive rightPanel={<DesktopCommentsPanel video={activeVideo} />}>
+            <VideoFeed onActionTrigger={onActionTrigger} onVideoChange={onVideoChange} />
           </MainLayout>
         }
       />

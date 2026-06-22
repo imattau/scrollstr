@@ -10,9 +10,10 @@ import { useSearchParams } from 'react-router-dom'
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
+  onVideoChange?: (video: VideoItemData) => void
 }
 
-export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
+export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange }) => {
   const { rxNostr } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
@@ -91,6 +92,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
       container.removeEventListener('scroll', handleScroll)
     }
   }, [activeIndex, videos])
+
+  // Propagate active video to parent
+  useEffect(() => {
+    if (onVideoChange && videos[activeIndex]) {
+      onVideoChange(videos[activeIndex])
+    }
+  }, [activeIndex, videos, onVideoChange])
 
   const handleActionClick = (action: string, videoId: string) => {
     const video = videos.find((v) => v.id === videoId)

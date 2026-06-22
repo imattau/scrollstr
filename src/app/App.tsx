@@ -18,6 +18,7 @@ function AppContent() {
   const [activeVideoId, setActiveVideoId] = useState('')
   const [activeCreatorPubkey, setActiveCreatorPubkey] = useState('')
   const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string } | null>(null)
+  const [activeVideo, setActiveVideo] = useState<any>(null)
 
   const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string) => {
     setActiveVideoId(videoId)
@@ -95,7 +96,11 @@ function AppContent() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
-        <AppRouter onActionTrigger={handleActionTrigger} />
+        <AppRouter 
+          onActionTrigger={handleActionTrigger} 
+          activeVideo={activeVideo}
+          onVideoChange={setActiveVideo}
+        />
         
         {/* Auth Sheets / Dialogs */}
         <LoginSheet
