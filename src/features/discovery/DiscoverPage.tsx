@@ -54,8 +54,8 @@ export const DiscoverPage: React.FC = () => {
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
 
-  // Query kind:22 events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22] }), []) || []
+  // Query kind:22 and kind:34236 events from Applesauce EventStore
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) || []
 
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {

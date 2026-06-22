@@ -21,15 +21,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
   const [activeIndex, setActiveIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // Query kind:22 events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22] }), []) || []
+  // Query kind:22 and kind:34236 events from Applesauce EventStore
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) || []
 
   // Subscribe to real-time events from relays
   useEffect(() => {
-    console.log('Subscribing to Nostr kind:22 events via rx-nostr...')
+    console.log('Subscribing to Nostr kind:22 and kind:34236 events via rx-nostr...')
     const rxReq = createRxForwardReq()
     const sub = rxNostr.use(rxReq).subscribe()
-    rxReq.emit({ kinds: [22], limit: 40 })
+    rxReq.emit({ kinds: [22, 34236], limit: 40 })
 
     return () => {
       sub.unsubscribe()

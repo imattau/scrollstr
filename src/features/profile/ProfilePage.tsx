@@ -23,9 +23,9 @@ export const ProfilePage: React.FC = () => {
   const displayName = profile.displayName || profile.name || 'Nostr User'
   const creatorLabel = `@${profile.name}`
 
-  // Retrieve raw kind:22 video events authored by target pubkey
+  // Retrieve raw kind:22 and kind:34236 video events authored by target pubkey
   const rawVideoEvents = use$(
-    () => getEventsQuery$({ kinds: [22], authors: targetPubkey ? [targetPubkey] : [] }),
+    () => getEventsQuery$({ kinds: [22, 34236], authors: targetPubkey ? [targetPubkey] : [] }),
     [targetPubkey]
   ) || []
 
