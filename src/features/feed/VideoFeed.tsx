@@ -285,12 +285,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         style={{ height: '100vh' }}
       >
         <List
-          defaultHeight={itemHeight}
           rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
           rowHeight={itemHeight}
-          style={{ width: '100%' }}
-          onScroll={handleListScroll}
-          onRowsRendered={() => {}}
+          style={{ width: '100%', height: '100%' }}
           rowProps={{}}
           rowComponent={({ index, style }: any) => {
             if (index === videos.length) {
