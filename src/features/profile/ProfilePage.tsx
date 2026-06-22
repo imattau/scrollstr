@@ -1,70 +1,243 @@
-import React, { useState } from 'react'
-import { MoreHorizontal } from 'lucide-react'
+import React, { useState, useMemo } from 'react'
+import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useNostr } from '../../app/providers'
+import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { use$ } from 'applesauce-react/hooks'
+import { parseVideoEvent } from '../../nostr/events/video'
+import { VideoItemData } from '../feed/VideoFeedItem'
+import { useProfile } from '../../nostr/profile'
 
 export const ProfilePage: React.FC = () => {
-  const [activeTab] = useState<'videos' | 'boosts' | 'about'>('videos')
+  const { session } = useNostr()
+  const { pubkey } = useParams<{ pubkey: string }>()
+  const navigate = useNavigate()
 
-  const thumbnails = [
-    '#20172c',
-    '#16292e',
-    '#30201d',
-    '#16292e',
-    '#30201d',
-    '#20172c',
-  ]
+  const [activeTab, setActiveTab] = useState<'videos' | 'boosts' | 'about'>('videos')
+
+  // Resolve target pubkey (route param or self session key)
+  const targetPubkey = pubkey && pubkey !== 'me' ? pubkey : session?.pubkey
+
+  // Fetch creator profile details
+  const profile = useProfile(targetPubkey || '')
+  const displayName = profile.displayName || profile.name || 'Nostr User'
+  const creatorLabel = `@${profile.name}`
+
+  // Retrieve raw kind:22 video events authored by target pubkey
+  const rawVideoEvents = use$(
+    () => getEventsQuery$({ kinds: [22], authors: targetPubkey ? [targetPubkey] : [] }),
+    [targetPubkey]
+  ) || []
+
+  // Parse events into standard feed item list
+  const videos = useMemo(() => {
+    return rawVideoEvents
+      .map((ev: any) => parseVideoEvent(ev))
+      .filter((v: any): v is VideoItemData => v !== null)
+  }, [rawVideoEvents])
+
+  // Retrieve raw kind:6 or kind:16 repost events
+  const rawBoosts = use$(
+    () => getEventsQuery$({ kinds: [6, 16], authors: targetPubkey ? [targetPubkey] : [] }),
+    [targetPubkey]
+  ) || []
+
+  const handleEditProfile = () => {
+    // Navigate to settings as configuration center
+    navigate('/settings')
+  }
+
+  const handleFollowToggle = () => {
+    alert(`Follow toggle simulation for pubkey: ${targetPubkey}`)
+  }
+
+  if (!targetPubkey) {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8] items-center justify-center">
+        <p className="text-[14px] text-[#a1a1aa] mb-4">Please log in to view your profile.</p>
+        <button
+          onClick={() => navigate('/')}
+          className="rounded-[11px] bg-[#8b5cf6] px-4 py-2 text-[13px] font-semibold text-white"
+        >
+          Go to Feed
+        </button>
+      </div>
+    )
+  }
+
+  const avatarInitial = displayName.slice(0, 1).toUpperCase() || 'N'
+  const isSelf = targetPubkey === session?.pubkey
 
   return (
-    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
+    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-16 pt-4 text-[#f7f7f8] md:pb-4">
+      {/* Header */}
       <div className="flex h-[56px] items-center justify-between">
-        <h2 className="text-[18px] font-bold">@maya</h2>
-        <MoreHorizontal className="h-5 w-5" />
+        <h2 className="text-[18px] font-bold truncate pr-3">{creatorLabel}</h2>
+        <button
+          onClick={() => navigate('/settings')}
+          className="text-neutral-400 hover:text-white p-1"
+        >
+          <MoreHorizontal className="h-5 w-5" />
+        </button>
       </div>
 
-      <div className="flex flex-col gap-[14px]">
-        <div className="flex items-start gap-[14px]">
-          <div className="flex size-[76px] items-center justify-center rounded-[38px] bg-[#60a5fa] text-[27px] font-bold text-white">
-            N
+      <div className="flex flex-col gap-[16px]">
+        {/* Profile Card & Counts */}
+        <div className="flex items-center gap-[20px]">
+          <div
+            className="flex size-[78px] overflow-hidden shrink-0 items-center justify-center rounded-full text-[27px] font-bold text-white bg-purple-600 border-2 border-neutral-900 shadow-md"
+          >
+            {profile.picture ? (
+              <img src={profile.picture} alt={displayName} className="h-full w-full object-cover" />
+            ) : (
+              avatarInitial
+            )}
           </div>
-          <div className="flex gap-[24px]">
-            <div className="flex flex-col items-center gap-0.5">
-              <span className="text-[17px] font-bold">48</span>
-              <span className="text-[10px] text-[#a1a1aa]">Videos</span>
+          <div className="flex gap-[28px]">
+            <div className="flex flex-col items-center">
+              <span className="text-[16px] font-bold text-[#f7f7f8]">{videos.length}</span>
+              <span className="text-[10px] font-semibold text-[#a1a1aa]">Videos</span>
             </div>
-            <div className="flex flex-col items-center gap-0.5">
-              <span className="text-[17px] font-bold">12k</span>
-              <span className="text-[10px] text-[#a1a1aa]">Followers</span>
+            <div className="flex flex-col items-center">
+              <span className="text-[16px] font-bold text-[#f7f7f8]">1.2k</span>
+              <span className="text-[10px] font-semibold text-[#a1a1aa]">Followers</span>
             </div>
-            <div className="flex flex-col items-center gap-0.5">
-              <span className="text-[17px] font-bold">321</span>
-              <span className="text-[10px] text-[#a1a1aa]">Following</span>
+            <div className="flex flex-col items-center">
+              <span className="text-[16px] font-bold text-[#f7f7f8]">321</span>
+              <span className="text-[10px] font-semibold text-[#a1a1aa]">Following</span>
             </div>
           </div>
         </div>
 
-        <div>
-          <h3 className="text-[18px] font-semibold">Maya Chen</h3>
-          <p className="mt-2 text-[13px] font-normal leading-normal text-[#a1a1aa]">
-            Small films about cities, rain and the open web.
-            <br />
-            melbourne.social
-          </p>
+        {/* Creator Info details */}
+        <div className="space-y-1">
+          <h3 className="text-[18px] font-bold text-[#f7f7f8]">
+            {displayName} {profile.isVerified ? <span className="text-blue-400 text-[14px]">✓</span> : ''}
+          </h3>
+          {profile.about && (
+            <p className="text-[13px] font-normal leading-relaxed text-[#a1a1aa] whitespace-pre-line break-words max-w-full">
+              {profile.about}
+            </p>
+          )}
+          {profile.website && (
+            <a
+              href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-[12px] font-semibold text-[#a78bfa] hover:underline truncate"
+            >
+              {profile.website}
+            </a>
+          )}
         </div>
 
-        <button className="h-[44px] rounded-[12px] bg-[#18181d] text-[14px] font-semibold text-white">
-          Edit profile
-        </button>
+        {/* Action Button */}
+        {isSelf ? (
+          <button
+            onClick={handleEditProfile}
+            className="h-[40px] w-full rounded-[12px] bg-[#18181d] text-[13px] font-bold text-white hover:bg-neutral-800 transition-colors"
+          >
+            Edit profile settings
+          </button>
+        ) : (
+          <button
+            onClick={handleFollowToggle}
+            className="h-[40px] w-full rounded-[12px] bg-[#8b5cf6] text-[13px] font-bold text-white hover:bg-[#7c3aed] transition-colors"
+          >
+            Follow Creator
+          </button>
+        )}
 
-        <div className="flex h-[44px] items-start justify-between text-[13px]">
-          <span className="font-semibold text-[#f7f7f8]">Videos</span>
-          <span className="font-medium text-[#a1a1aa]">Boosts</span>
-          <span className="font-medium text-[#a1a1aa]">About</span>
+        {/* Tab Controls */}
+        <div className="flex h-[36px] items-center border-b border-neutral-900 text-[13px] mt-2 font-medium">
+          <button
+            onClick={() => setActiveTab('videos')}
+            className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
+              activeTab === 'videos' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
+            }`}
+          >
+            <FileVideo className="w-4 h-4" /> Videos
+          </button>
+          <button
+            onClick={() => setActiveTab('boosts')}
+            className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
+              activeTab === 'boosts' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
+            }`}
+          >
+            <RotateCw className="w-4 h-4" /> Boosts
+          </button>
+          <button
+            onClick={() => setActiveTab('about')}
+            className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
+              activeTab === 'about' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
+            }`}
+          >
+            <Info className="w-4 h-4" /> About
+          </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-1">
-          {activeTab === 'videos' &&
-            thumbnails.map((color, idx) => (
-              <div key={`${color}-${idx}`} className="h-[174px] rounded-[8px]" style={{ backgroundColor: color }} />
-            ))}
+        {/* Tab content layouts */}
+        <div className="pt-2">
+          {activeTab === 'videos' && (
+            videos.length === 0 ? (
+              <p className="text-[13px] text-[#71717a] text-center py-8">No vertical videos published yet.</p>
+            ) : (
+              <div className="grid grid-cols-3 gap-1">
+                {videos.map((video) => (
+                  <div
+                    key={video.id}
+                    onClick={() => navigate(`/?v=${video.id}`)}
+                    className="relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[8px] bg-[#18181d] transition-all hover:scale-[1.03]"
+                  >
+                    {video.poster ? (
+                      <img src={video.poster} alt={video.title} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[20px]">
+                        ▶
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-transparent to-transparent" />
+                    <p className="absolute bottom-1.5 left-1.5 right-1.5 text-[9px] text-[#f7f7f8] line-clamp-2 leading-tight">
+                      {video.title || video.description}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {activeTab === 'boosts' && (
+            rawBoosts.length === 0 ? (
+              <p className="text-[13px] text-[#71717a] text-center py-8">No reposted/boosted clips.</p>
+            ) : (
+              <div className="space-y-2">
+                {rawBoosts.map((boost) => (
+                  <div key={boost.id} className="p-3 bg-[#18181d] rounded-xl text-[12px] leading-relaxed">
+                    <p className="text-[#a1a1aa] flex items-center gap-1.5 font-semibold">
+                      <RotateCw className="w-3.5 h-3.5 text-green-400" /> Reposted kind:{boost.kind}
+                    </p>
+                    <p className="text-neutral-500 font-mono text-[9px] mt-1 truncate">Event ID: {boost.id}</p>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+
+          {activeTab === 'about' && (
+            <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-4">
+              <div>
+                <p className="text-[11px] font-bold text-[#a1a1aa] uppercase tracking-wider">Public Key Hex</p>
+                <p className="text-[12px] font-mono text-[#f7f7f8] break-all bg-[#18181d] p-2.5 rounded-lg mt-1 select-all">
+                  {targetPubkey}
+                </p>
+              </div>
+              
+              <div className="flex items-center gap-2 text-[12px] text-[#a1a1aa]">
+                <Calendar className="w-4 h-4" />
+                <span>Joined Nostr</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -35,6 +35,8 @@ export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorP
       picture: data.picture || data.image,
       nip05: data.nip05,
       isVerified: !!data.nip05,
+      about: data.about,
+      website: data.website,
     }
   } catch (e) {
     console.error('Failed to parse profile content:', e)

@@ -8,6 +8,8 @@ export interface CreatorProfile {
   picture?: string
   nip05?: string
   isVerified?: boolean
+  about?: string
+  website?: string
 }
 
 export interface VideoItemData {
