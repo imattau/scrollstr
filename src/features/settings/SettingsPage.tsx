@@ -3,14 +3,15 @@ import { useNostr } from '../../app/providers'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { createRxForwardReq } from 'rx-nostr'
-import { ArrowLeft, Plus, Trash2 } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList } from '../../nostr/events/settings'
+import { loadSettings, saveSettings } from '../../db/local-preferences'
 
 export const SettingsPage: React.FC = () => {
-  const { session, rxNostr, signEvent, eventStore } = useNostr()
+  const { session, rxNostr, signEvent, eventStore, logout } = useNostr()
   const userPubkey = session?.pubkey
 
-  const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'mute'>('main')
+  const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'mute' | 'identity' | 'wallet'>('main')
   const [saving, setSaving] = useState(false)
 
   // Local state overrides for draft editing before publishing
@@ -18,6 +19,7 @@ export const SettingsPage: React.FC = () => {
   const [localBlossom, setLocalBlossom] = useState<string[]>([])
   const [localMutePubkeys, setLocalMutePubkeys] = useState<string[]>([])
   const [localMuteTags, setLocalMuteTags] = useState<string[]>([])
+  const [localWalletString, setLocalWalletString] = useState('')
 
   // Input states for adding new entries
   const [newRelayUrl, setNewRelayUrl] = useState('')
@@ -44,7 +46,12 @@ export const SettingsPage: React.FC = () => {
     }
   }, [rxNostr, userPubkey])
 
-  // Synchronize local states when store events update
+  // Load wallet string and synchronize local states when store events update
+  useEffect(() => {
+    const s = loadSettings()
+    setLocalWalletString(s.walletString || '')
+  }, [activeSubView])
+
   useEffect(() => {
     if (relayListEvent) {
       const parsed = relayListEvent.tags
@@ -193,6 +200,22 @@ export const SettingsPage: React.FC = () => {
     }
   }
 
+  // Handlers for Wallet NWC Connection
+  const handleSaveWallet = () => {
+    const s = loadSettings()
+    s.walletString = localWalletString.trim()
+    saveSettings(s)
+    alert('Wallet NWC connection settings updated!')
+    setActiveSubView('main')
+  }
+
+  const handleCopyPubkey = async () => {
+    if (userPubkey) {
+      await navigator.clipboard.writeText(userPubkey)
+      alert('Copied pubkey hex to clipboard!')
+    }
+  }
+
   if (!session) {
     return (
       <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8] items-center justify-center">
@@ -202,6 +225,85 @@ export const SettingsPage: React.FC = () => {
   }
 
   // Render Sub-view layouts
+  if (activeSubView === 'identity') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">Identity & Signer</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Manage your active Nostr keys and session details.</p>
+
+        <div className="space-y-4 mb-6">
+          <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-1">
+            <p className="text-[11px] font-bold text-[#a1a1aa]">Logged In Public Key (Hex)</p>
+            <div className="flex items-center justify-between gap-3 bg-[#18181d] px-3 py-2 rounded-lg text-[13px] text-[#f7f7f8]">
+              <span className="font-mono truncate">{userPubkey}</span>
+              <button onClick={handleCopyPubkey} className="text-[#a78bfa] hover:text-white p-1 shrink-0">
+                <Copy className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-1">
+            <p className="text-[11px] font-bold text-[#a1a1aa]">Signing Method</p>
+            <p className="text-[14px] text-[#f7f7f8] bg-[#18181d] px-3 py-2 rounded-lg font-medium">
+              {session.method.toUpperCase()}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => {
+            logout()
+            setActiveSubView('main')
+          }}
+          className="w-full flex items-center justify-center gap-2 bg-red-600/10 hover:bg-red-600/20 text-red-400 py-3 rounded-xl text-[13px] font-bold transition-colors"
+        >
+          <LogOut className="w-4 h-4" /> Log out Account
+        </button>
+      </div>
+    )
+  }
+
+  if (activeSubView === 'wallet') {
+    return (
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+        <button
+          onClick={() => setActiveSubView('main')}
+          className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Settings
+        </button>
+
+        <h3 className="text-[18px] font-bold mb-1">Wallet Connection</h3>
+        <p className="text-[11px] text-[#a1a1aa] mb-6">Configure a Nostr Wallet Connect (NWC) connection string for quick zapping.</p>
+
+        <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-2 mb-6">
+          <p className="text-[11px] font-bold text-[#a1a1aa]">NWC Connection URI</p>
+          <textarea
+            value={localWalletString}
+            onChange={(e) => setLocalWalletString(e.target.value)}
+            placeholder="nostr+walletconnect://..."
+            rows={4}
+            className="w-full bg-[#18181d] p-3 rounded-lg text-[13px] outline-none text-[#f7f7f8] placeholder:text-[#71717a] font-mono leading-normal resize-none"
+          />
+        </div>
+
+        <button
+          onClick={handleSaveWallet}
+          className="w-full bg-[#8b5cf6] text-white py-3 rounded-xl text-[13px] font-bold hover:bg-[#7c3aed] transition-colors"
+        >
+          Save Wallet Connection
+        </button>
+      </div>
+    )
+  }
+
   if (activeSubView === 'relays') {
     return (
       <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
@@ -415,16 +517,53 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div className="flex flex-1 flex-col">
+        {/* Identity and Signer */}
+        <div
+          onClick={() => setActiveSubView('identity')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Key className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Identity and signer</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {session.method.toUpperCase()} Connected
+              </p>
+            </div>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* Wallet Connection */}
+        <div
+          onClick={() => setActiveSubView('wallet')}
+          className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Wallet className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Wallet Connection</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localWalletString ? 'NWC Configured' : 'Not configured'}
+              </p>
+            </div>
+          </div>
+          <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
         {/* Read/Write Relays */}
         <div
           onClick={() => setActiveSubView('relays')}
           className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
         >
-          <div>
-            <p className="text-[14px] font-medium text-[#f7f7f8]">Nostr Relays</p>
-            <p className="text-[11px] font-normal text-[#a1a1aa]">
-              {localRelays.length} relays configured
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="w-4" /> {/* Spacer */}
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Nostr Relays</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localRelays.length} relays configured
+              </p>
+            </div>
           </div>
           <span className="text-[20px] text-[#71717a]">›</span>
         </div>
@@ -434,11 +573,14 @@ export const SettingsPage: React.FC = () => {
           onClick={() => setActiveSubView('blossom')}
           className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
         >
-          <div>
-            <p className="text-[14px] font-medium text-[#f7f7f8]">Blossom Media Servers</p>
-            <p className="text-[11px] font-normal text-[#a1a1aa]">
-              {localBlossom.length} media servers
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="w-4" /> {/* Spacer */}
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Blossom Media Servers</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localBlossom.length} media servers
+              </p>
+            </div>
           </div>
           <span className="text-[20px] text-[#71717a]">›</span>
         </div>
@@ -448,28 +590,14 @@ export const SettingsPage: React.FC = () => {
           onClick={() => setActiveSubView('mute')}
           className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-[#111115]/50 px-2 rounded-xl transition-colors"
         >
-          <div>
-            <p className="text-[14px] font-medium text-[#f7f7f8]">Muted Users and Tags</p>
-            <p className="text-[11px] font-normal text-[#a1a1aa]">
-              {localMutePubkeys.length} users, {localMuteTags.length} tags muted
-            </p>
-          </div>
-          <span className="text-[20px] text-[#71717a]">›</span>
-        </div>
-
-        {/* Read-only Placeholder settings */}
-        <div className="flex items-center justify-between py-[18px] px-2 opacity-50">
-          <div>
-            <p className="text-[14px] font-medium text-[#f7f7f8]">Identity and signer</p>
-            <p className="text-[11px] font-normal text-[#a1a1aa]">NIP-46 remote signer</p>
-          </div>
-          <span className="text-[20px] text-[#71717a]">›</span>
-        </div>
-
-        <div className="flex items-center justify-between py-[18px] px-2 opacity-50">
-          <div>
-            <p className="text-[14px] font-medium text-[#f7f7f8]">Wallet Connection</p>
-            <p className="text-[11px] font-normal text-[#a1a1aa]">NWC connected</p>
+          <div className="flex items-center gap-3">
+            <div className="w-4" /> {/* Spacer */}
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Muted Users and Tags</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localMutePubkeys.length} users, {localMuteTags.length} tags muted
+              </p>
+            </div>
           </div>
           <span className="text-[20px] text-[#71717a]">›</span>
         </div>
