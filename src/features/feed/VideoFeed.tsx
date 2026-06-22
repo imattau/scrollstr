@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import { List } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
@@ -91,6 +92,21 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [rxNostr, session?.pubkey])
 
+  // Batch query all reactions once (prevents O(n*4) queries)
+  const allReactions = eventStore.getByFilters({ kinds: [7, 16, 6, 9735, 1111], limit: 10000 })
+
+  // Index reactions by videoId for O(1) lookup
+  const reactionsByVideoId = useMemo(() => {
+    const map = new Map()
+    allReactions.forEach((event: any) => {
+      const videoId = event.tags.find((t: any) => t[0] === 'e')?.[1]
+      if (!videoId) return
+      if (!map.has(videoId)) map.set(videoId, [])
+      map.get(videoId).push(event)
+    })
+    return map
+  }, [allReactions])
+
   // Parse events to local format, filter, and enrich with live reaction counts from EventStore
   // Removed eventStore from deps to prevent recalc on every event. Reactions update via eventStore queries below.
   const videos = useMemo(() => {
@@ -119,10 +135,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
 
     return list.map((video) => {
-      const likes = eventStore.getByFilters({ kinds: [7], '#e': [video.id] })
-      const comments = eventStore.getByFilters({ kinds: [1111], '#e': [video.id] })
-      const boosts = eventStore.getByFilters({ kinds: [6, 16], '#e': [video.id] })
-      const zaps = eventStore.getByFilters({ kinds: [9735], '#e': [video.id] })
+      const reactions = reactionsByVideoId.get(video.id) || []
+      const likes = reactions.filter((e: any) => e.kind === 7)
+      const comments = reactions.filter((e: any) => e.kind === 1111)
+      const boosts = reactions.filter((e: any) => e.kind === 6 || e.kind === 16)
+      const zaps = reactions.filter((e: any) => e.kind === 9735)
 
       const hasLiked = session ? likes.some((l: any) => l.pubkey === session.pubkey) : false
       const hasBoosted = session ? boosts.some((b: any) => b.pubkey === session.pubkey) : false
@@ -139,7 +156,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         hasZapped,
       }
     })
-  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session])
+  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session, reactionsByVideoId])
 
   useEffect(() => {
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
@@ -224,27 +241,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [videos, initialVideoId])
 
-  // Track active index on vertical scroll snap
-  // Removed videos from deps and use ref to avoid re-registering listener on every video change
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      const scrollPos = container.scrollTop
-      const height = container.clientHeight
-      const newIndex = Math.round(scrollPos / height)
-
-      if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
-        setActiveIndex(newIndex)
-      }
-    }
-
-    container.addEventListener('scroll', handleScroll)
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-    }
-  }, [activeIndex])
+  // Scroll tracking now handled by FixedSizeList onScroll callback
 
   // Propagate active video to parent
   useEffect(() => {
@@ -273,25 +270,42 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     )
   }
 
+  const itemHeight = typeof window !== 'undefined' ? window.innerHeight : 800
+
   return (
       <div
         ref={containerRef}
         className="feed-container relative h-dvh w-full md:h-full"
+        style={{ height: itemHeight }}
       >
-        {videos.map((video, idx) => (
-        <VideoFeedItem
-          key={video.id}
-          video={video}
-          isActive={idx === activeIndex}
-          isMuted={isMuted}
-          onActionClick={handleActionClick}
-          />
-        ))}
-        {isFetchingOlder ? (
-          <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]">
-            <p className="text-[14px]">Loading older videos...</p>
-          </div>
-        ) : null}
+        <List
+          defaultHeight={itemHeight}
+          rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
+          rowHeight={itemHeight}
+          style={{ width: '100%' }}
+          onRowsRendered={() => {}}
+          rowProps={{}}
+          rowComponent={({ index, style }: any) => {
+            if (index === videos.length) {
+              return (
+                <div style={style} className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]">
+                  <p className="text-[14px]">Loading older videos...</p>
+                </div>
+              )
+            }
+            const video = videos[index]
+            return (
+              <div style={style} key={video.id}>
+                <VideoFeedItem
+                  video={video}
+                  isActive={index === activeIndex}
+                  isMuted={isMuted}
+                  onActionClick={handleActionClick}
+                />
+              </div>
+            )
+          }}
+        />
       </div>
     )
   }
