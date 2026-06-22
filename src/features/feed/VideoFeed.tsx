@@ -6,12 +6,18 @@ import { createRxForwardReq } from 'rx-nostr'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 
+import { useSearchParams } from 'react-router-dom'
+
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
   const { rxNostr } = useNostr()
+  const [searchParams] = useSearchParams()
+  const filterTag = searchParams.get('tag')
+  const initialVideoId = searchParams.get('v')
+  
   const [activeIndex, setActiveIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -32,10 +38,38 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger }) => {
 
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {
-    return rawVideoEvents
+    let list = rawVideoEvents
       .map((ev: any) => parseVideoEvent(ev))
       .filter((v: any): v is VideoItemData => v !== null)
-  }, [rawVideoEvents])
+
+    if (filterTag) {
+      list = list.filter((v) =>
+        v.hashtags?.some((t) => t.toLowerCase() === filterTag.toLowerCase())
+      )
+    }
+
+    return list
+  }, [rawVideoEvents, filterTag])
+
+  // Scroll to deep-linked video if present on load
+  useEffect(() => {
+    if (initialVideoId && videos.length > 0) {
+      const idx = videos.findIndex((v) => v.id === initialVideoId)
+      if (idx !== -1) {
+        setActiveIndex(idx)
+        // Small timeout to allow render completion
+        setTimeout(() => {
+          const container = containerRef.current
+          if (container) {
+            const targetEl = container.children[idx] as HTMLElement
+            if (targetEl) {
+              targetEl.scrollIntoView({ behavior: 'auto' })
+            }
+          }
+        }, 100)
+      }
+    }
+  }, [videos, initialVideoId])
 
   // Track active index on vertical scroll snap
   useEffect(() => {
