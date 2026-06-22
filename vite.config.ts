@@ -25,11 +25,13 @@ export default defineConfig({
             src: 'favicon.svg',
             sizes: '192x192',
             type: 'image/svg+xml',
+            purpose: 'any',
           },
           {
             src: 'favicon.svg',
             sizes: '512x512',
             type: 'image/svg+xml',
+            purpose: 'any maskable',
           },
         ],
       },
@@ -37,6 +39,9 @@ export default defineConfig({
         // Exclude large video files from caching directly via service workers
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
+      },
+      devOptions: {
+        enabled: true,
       },
     }),
   ],

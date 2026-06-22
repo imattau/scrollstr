@@ -22,6 +22,15 @@ function AppContent() {
   const [activeVideo, setActiveVideo] = useState<any>(null)
   const [isMuted, setIsMuted] = useState(true)
 
+  // Automatically prompt user to log in on initial page load if not authenticated (or after browser reset)
+  React.useEffect(() => {
+    const stored = localStorage.getItem('scrollstr_session')
+    if (!stored && !session) {
+      console.log('No existing session found on load/reset. Prompting login.')
+      setIsLoginOpen(true)
+    }
+  }, [session])
+
   const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => {
     setActiveVideoId(videoId)
     setActiveVideoKind(videoKind ?? null)

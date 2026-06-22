@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import { List } from 'react-window'
+import { List, ListImperativeAPI } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
@@ -9,11 +9,62 @@ import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
 
 import { useSearchParams } from 'react-router-dom'
+import { ChevronUp, ChevronDown } from 'lucide-react'
 
 const EMPTY_VIDEOS: any[] = []
 const PAGE_SIZE = 20
 const LOAD_MORE_THRESHOLD = 3
 const LOCAL_PREVIEW_ID = 'local-preview-neon-mascot'
+
+interface VideoRowProps {
+  videos: any[]
+  isFetchingOlder: boolean
+  activeIndex: number
+  isMuted: boolean
+  handleActionClick: (action: string, videoId: string, videoKind?: number) => void
+}
+
+const VideoFeedRow = React.memo(({ index, style, videos, isFetchingOlder, activeIndex, isMuted, handleActionClick }: any) => {
+  if (index === videos.length) {
+    return (
+      <div
+        style={{
+          ...style,
+          scrollSnapAlign: 'start',
+          scrollSnapStop: 'always',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]"
+      >
+        <p className="text-[14px]">Loading older videos...</p>
+      </div>
+    )
+  }
+  const video = videos[index]
+  if (!video) return null
+  return (
+    <div
+      style={{
+        ...style,
+        scrollSnapAlign: 'start',
+        scrollSnapStop: 'always',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      key={video.id}
+    >
+      <VideoFeedItem
+        video={video}
+        isActive={index === activeIndex}
+        isMuted={isMuted}
+        onActionClick={handleActionClick}
+      />
+    </div>
+  )
+})
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
@@ -30,7 +81,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   
   const [activeIndex, setActiveIndex] = useState(0)
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<ListImperativeAPI>(null)
   const lastOlderFetchAtRef = useRef(0)
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
@@ -50,34 +101,16 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     return contactListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
   }, [contactListEvent])
 
-  // Subscribe to real-time events from relays
-  useEffect(() => {
-    console.log('Loading initial video backlog from relays...')
-    const rxReq = createRxBackwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [21, 22, 34236], limit: 40 })
+  // Track whether we have loaded the user's initial metadata/relay lists from relays
+  const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
 
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, relayUrls])
-
-  // Subscribe to future video events after the initial backlog load
-  useEffect(() => {
-    console.log('Subscribing to live Nostr video events...')
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [21, 22, 34236] })
-
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, relayUrls])
-
-  // Subscribe once per pubkey to user's contact list and relay list (kinds 3, 10002)
+  // 1. Subscribe once per pubkey to user's contact list and relay list (kinds 3, 10002)
   // Only re-subscribe if pubkey changes, not on relayUrls changes to avoid circular dependency
   useEffect(() => {
-    if (!session?.pubkey) return
+    if (!session?.pubkey) {
+      setIsMetadataLoaded(true)
+      return
+    }
     if (userMetadataSubscribedRef.current === session.pubkey) return
 
     console.log(`Subscribing to user metadata for ${session.pubkey}...`)
@@ -87,13 +120,45 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     rxReq.emit({ kinds: [3, 10002], authors: [session.pubkey], limit: 1 })
 
+    // Small delay to allow subscription and initial load from bootstrap/fallback relays before fetching videos
+    const timer = setTimeout(() => {
+      setIsMetadataLoaded(true)
+    }, 400)
+
     return () => {
       sub.unsubscribe()
+      clearTimeout(timer)
     }
   }, [rxNostr, session?.pubkey])
 
+  // 2. Subscribe to real-time events from relays (only after metadata has resolved/checked)
+  useEffect(() => {
+    if (!isMetadataLoaded) return
+    console.log('Loading initial video backlog from relays...')
+    const rxReq = createRxBackwardReq()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
+    rxReq.emit({ kinds: [21, 22, 34236], limit: 40 })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, relayUrls, isMetadataLoaded])
+
+  // 3. Subscribe to future video events after the initial backlog load
+  useEffect(() => {
+    if (!isMetadataLoaded) return
+    console.log('Subscribing to live Nostr video events...')
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
+    rxReq.emit({ kinds: [21, 22, 34236] })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, relayUrls, isMetadataLoaded])
+
   // Batch query all reactions once (prevents O(n*4) queries)
-  const allReactions = eventStore.getByFilters({ kinds: [7, 16, 6, 9735, 1111], limit: 10000 })
+  const allReactions = use$(() => getEventsQuery$({ kinds: [7, 16, 6, 9735, 1111] }), []) ?? EMPTY_VIDEOS
 
   // Index reactions by videoId for O(1) lookup
   const reactionsByVideoId = useMemo(() => {
@@ -229,27 +294,57 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         setActiveIndex(idx)
         // Small timeout to allow render completion
         setTimeout(() => {
-          const container = containerRef.current
-          if (container) {
-            const targetEl = container.children[idx] as HTMLElement
-            if (targetEl) {
-              targetEl.scrollIntoView({ behavior: 'auto' })
-            }
-          }
+          listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
         }, 100)
       }
     }
   }, [videos, initialVideoId])
 
-  const itemHeight = typeof window !== 'undefined' ? window.innerHeight : 800
-
   // Track scroll position and snap to nearest video
-  const handleListScroll = useCallback(({ scrollOffset }: any) => {
-    const newIndex = Math.round(scrollOffset / itemHeight)
+  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const scrollOffset = e.currentTarget.scrollTop
+    const containerHeight = e.currentTarget.clientHeight
+    const newIndex = Math.round(scrollOffset / containerHeight)
     if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
       setActiveIndex(newIndex)
     }
-  }, [activeIndex, itemHeight, videos.length])
+  }, [activeIndex, videos.length])
+
+  // Keyboard navigation for desktop view
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore keydowns when user is typing in input, textarea, select or contenteditable
+      const activeEl = document.activeElement
+      if (
+        activeEl &&
+        (activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.tagName === 'SELECT' ||
+          activeEl.hasAttribute('contenteditable'))
+      ) {
+        return
+      }
+
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault()
+        const nextIndex = activeIndex + 1
+        if (nextIndex < videos.length) {
+          listRef.current?.scrollToRow({ index: nextIndex, align: 'auto', behavior: 'auto' })
+        }
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault()
+        const prevIndex = activeIndex - 1
+        if (prevIndex >= 0) {
+          listRef.current?.scrollToRow({ index: prevIndex, align: 'auto', behavior: 'auto' })
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [activeIndex, videos.length])
 
   // Propagate active video to parent
   useEffect(() => {
@@ -262,6 +357,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const video = videos.find((v) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
   }, [videos, onActionTrigger])
+
+  const rowProps = useMemo(() => ({
+    videos,
+    isFetchingOlder,
+    activeIndex,
+    isMuted,
+    handleActionClick,
+  }), [videos, isFetchingOlder, activeIndex, isMuted, handleActionClick])
 
   if (videos.length === 0) {
     return (
@@ -279,37 +382,45 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }
 
   return (
-      <div
-        ref={containerRef}
-        className="feed-container relative w-full"
-        style={{ height: '100vh' }}
-      >
-        <List
-          rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
-          rowHeight={itemHeight}
-          style={{ width: '100%', height: '100%' }}
-          rowProps={{}}
-          rowComponent={({ index, style }: any) => {
-            if (index === videos.length) {
-              return (
-                <div style={style} className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]">
-                  <p className="text-[14px]">Loading older videos...</p>
-                </div>
-              )
+    <div className="w-full h-full relative overflow-hidden">
+      <List
+        listRef={listRef}
+        rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
+        rowHeight="100%"
+        className="feed-container"
+        onScroll={handleListScroll}
+        style={{ width: '100%', height: '100%' }}
+        rowProps={rowProps}
+        rowComponent={VideoFeedRow as any}
+      />
+
+      {/* Floating navigation buttons for desktop */}
+      <div className="hidden md:flex flex-col gap-3 absolute right-6 top-1/2 -translate-y-1/2 z-30">
+        <button
+          onClick={() => {
+            if (activeIndex > 0) {
+              listRef.current?.scrollToRow({ index: activeIndex - 1, align: 'auto', behavior: 'auto' })
             }
-            const video = videos[index]
-            return (
-              <div style={style} key={video.id}>
-                <VideoFeedItem
-                  video={video}
-                  isActive={index === activeIndex}
-                  isMuted={isMuted}
-                  onActionClick={handleActionClick}
-                />
-              </div>
-            )
           }}
-        />
+          disabled={activeIndex === 0}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Previous Video"
+        >
+          <ChevronUp className="w-5 h-5" />
+        </button>
+        <button
+          onClick={() => {
+            if (activeIndex < videos.length - 1) {
+              listRef.current?.scrollToRow({ index: activeIndex + 1, align: 'auto', behavior: 'auto' })
+            }
+          }}
+          disabled={activeIndex === videos.length - 1}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Next Video"
+        >
+          <ChevronDown className="w-5 h-5" />
+        </button>
       </div>
-    )
+    </div>
+  )
   }

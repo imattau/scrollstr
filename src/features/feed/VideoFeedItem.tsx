@@ -80,7 +80,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
   const creatorLabel = `@${profile.displayName || profile.name}`
 
   return (
-    <article className="feed-item relative h-dvh w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]">
+    <article className="feed-item relative h-full w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%),linear-gradient(180deg,#1b1327_0%,#1b1327_66%,#09090b_100%)]" />
 
       <div className="absolute inset-0 z-0">

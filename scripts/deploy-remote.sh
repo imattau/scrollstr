@@ -286,7 +286,7 @@ build_app() {
 	step_begin "install local dependencies"
 	(
 		cd "$REPO_ROOT"
-		npm ci
+		npm ci --legacy-peer-deps
 	)
 	step_done
 

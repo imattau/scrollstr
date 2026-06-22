@@ -1,6 +1,8 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { Home, Compass, PlusSquare, Bell, User, Settings } from 'lucide-react'
+import { Home, Compass, PlusSquare, Bell, User, Settings, LogOut, Download } from 'lucide-react'
+import { useNostr } from '../../app/providers'
+import { usePWAInstall } from '../../pwa/usePWAInstall'
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -11,6 +13,9 @@ interface MainLayoutProps {
 }
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false, pathname, feedType = 'explore' }) => {
+  const { session, logout } = useNostr()
+  const { isInstallable, installApp } = usePWAInstall()
+
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
     { path: '/discover', label: 'Discover', icon: Compass },
@@ -81,10 +86,30 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
                 </nav>
               </div>
 
-              <Link to="/profile/me" className="flex items-center gap-3 px-3 py-3 text-[#a1a1aa]">
-                <User className="h-4 w-4" />
-                <span className="text-[15px]">Profile</span>
-              </Link>
+              <div className="space-y-2">
+                {isInstallable && (
+                  <button
+                    onClick={installApp}
+                    className="flex w-full items-center gap-3 px-3 py-3 rounded-[12px] text-purple-400 hover:bg-[#222228] hover:text-purple-300 transition-colors text-left border border-purple-500/20"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span className="text-[15px]">Install App</span>
+                  </button>
+                )}
+                <Link to="/profile/me" className="flex items-center gap-3 px-3 py-3 rounded-[12px] text-[#a1a1aa] hover:bg-[#222228] hover:text-[#f7f7f8] transition-colors">
+                  <User className="h-4 w-4" />
+                  <span className="text-[15px]">Profile</span>
+                </Link>
+                {session && (
+                  <button
+                    onClick={logout}
+                    className="flex w-full items-center gap-3 px-3 py-3 rounded-[12px] text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span className="text-[15px]">Logout</span>
+                  </button>
+                )}
+              </div>
             </aside>
 
             <main className="flex h-screen w-[720px] shrink-0 flex-col overflow-hidden bg-[#09090b]">
@@ -193,7 +218,16 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
           </div>
 
           {/* Quick Profile/Status in Sidebar */}
-          <div className="pt-4 border-t border-neutral-800">
+          <div className="pt-4 border-t border-neutral-800 space-y-2">
+            {isInstallable && (
+              <button
+                onClick={installApp}
+                className="flex w-full items-center gap-3 px-4 py-2 rounded-xl text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 transition-all duration-200 text-left font-medium border border-purple-500/20"
+              >
+                <Download className="w-5 h-5" />
+                <span className="text-sm">Install App</span>
+              </button>
+            )}
             <Link
               to="/profile/me"
               className={`flex items-center gap-3 px-4 py-2 rounded-xl text-neutral-400 hover:text-neutral-100 transition-colors ${
@@ -203,6 +237,15 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
               <User className="w-5 h-5" />
               <span className="text-sm font-medium">My Profile</span>
             </Link>
+            {session && (
+              <button
+                onClick={logout}
+                className="flex w-full items-center gap-3 px-4 py-2 rounded-xl text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left"
+              >
+                <LogOut className="w-5 h-5" />
+                <span className="text-sm font-medium">Logout</span>
+              </button>
+            )}
           </div>
         </aside>
 

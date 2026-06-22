@@ -3,14 +3,16 @@ import { useNostr } from '../../app/providers'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { createRxForwardReq } from 'rx-nostr'
-import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events/settings'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
 import { useUserRelayUrls } from '../../nostr/relays'
+import { usePWAInstall } from '../../pwa/usePWAInstall'
 
 export const SettingsPage: React.FC = () => {
   const { session, rxNostr, signEvent, eventStore, logout } = useNostr()
   const userPubkey = session?.pubkey
+  const { isInstallable, installApp } = usePWAInstall()
   const relayUrls = useUserRelayUrls(eventStore, userPubkey)
 
   const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'nip96' | 'mute' | 'identity' | 'wallet'>('main')
@@ -715,6 +717,25 @@ export const SettingsPage: React.FC = () => {
           </div>
           <span className="text-[20px] text-[#71717a]">›</span>
         </div>
+
+        {/* PWA App Installation */}
+        {isInstallable && (
+          <div
+            onClick={installApp}
+            className="flex items-center justify-between py-[18px] cursor-pointer border-b border-neutral-900 hover:bg-purple-600/10 px-2 rounded-xl transition-all duration-200 mt-2 border border-purple-500/20 text-purple-400 font-medium"
+          >
+            <div className="flex items-center gap-3">
+              <Download className="w-4 h-4 text-purple-400 shrink-0" />
+              <div>
+                <p className="text-[14px] font-semibold text-purple-400">Install App</p>
+                <p className="text-[11px] font-normal text-purple-300/80">
+                  Save Nostr Clips to your home screen for quick offline access
+                </p>
+              </div>
+            </div>
+            <span className="text-[20px] text-purple-400">›</span>
+          </div>
+        )}
       </div>
     </div>
   )

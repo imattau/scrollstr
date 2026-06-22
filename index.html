@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>scrollstr</title>
+    <script>
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        window.deferredInstallPrompt = e;
+        // Dispatch custom event to notify React if it's already mounted
+        window.dispatchEvent(new CustomEvent('pwa-installable', { detail: e }));
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
