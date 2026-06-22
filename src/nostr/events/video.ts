@@ -100,6 +100,10 @@ export const publishVideoEvent = async (
 
   console.log('Signing and publishing kind:22 event...')
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast video event to relays:', err)
+  }
   return signed
 }

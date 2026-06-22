@@ -17,7 +17,11 @@ export const publishLike = async (
 
   console.log(`Signing and publishing Like event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast Like event to relays:', err)
+  }
   return signed
 }
 
@@ -40,6 +44,47 @@ export const publishBoost = async (
 
   console.log(`Signing and publishing Boost event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast Boost event to relays:', err)
+  }
   return signed
+}
+
+// Publish updated kind:3 contact list to follow/unfollow a user pubkey
+export const publishFollow = async (
+  signEvent: (eventTemplate: any) => Promise<any>,
+  rxNostr: any,
+  creatorPubkey: string,
+  currentContactListEvent: any | null
+): Promise<{ signed: any; action: 'follow' | 'unfollow' }> => {
+  let isFollowing = false
+  let newTags: string[][]
+
+  if (currentContactListEvent && currentContactListEvent.tags) {
+    isFollowing = currentContactListEvent.tags.some((t: any) => t[0] === 'p' && t[1] === creatorPubkey)
+    newTags = isFollowing
+      ? currentContactListEvent.tags.filter((t: any) => !(t[0] === 'p' && t[1] === creatorPubkey))
+      : [...currentContactListEvent.tags, ['p', creatorPubkey]]
+  } else {
+    // No contact list event yet, create first follow
+    newTags = [['p', creatorPubkey]]
+  }
+
+  const eventTemplate = {
+    kind: 3,
+    content: currentContactListEvent?.content || '',
+    tags: newTags,
+  }
+
+  const action = isFollowing ? 'unfollow' : 'follow'
+  console.log(`Signing and publishing Contact list (kind:3) for ${action} of ${creatorPubkey}...`)
+  const signed = await signEvent(eventTemplate)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn(`Failed to broadcast contact list (${action}) event to relays:`, err)
+  }
+  return { signed, action }
 }

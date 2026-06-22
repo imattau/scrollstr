@@ -1,6 +1,7 @@
 import { createRxNostr } from 'rx-nostr'
 import { EventStore } from 'applesauce-core'
 import { verifyEvent } from 'nostr-tools'
+import { queueCachedEventTouches, saveEventToCache } from './cache'
 
 // List of standard default relays to bootstrap client connection
 export const DEFAULT_RELAYS = [
@@ -18,6 +19,23 @@ rxNostr.setDefaultRelays(DEFAULT_RELAYS)
 
 // Initialize global Applesauce EventStore
 export const eventStore = new EventStore()
+
+const originalGetByFilters = eventStore.getByFilters.bind(eventStore)
+const originalGetReplaceable = eventStore.getReplaceable.bind(eventStore)
+
+eventStore.getByFilters = ((filters: any) => {
+  const events = originalGetByFilters(filters)
+  queueCachedEventTouches(events.map((event: any) => event.id))
+  return events
+}) as any
+
+eventStore.getReplaceable = ((kind: number, pubkey: string) => {
+  const event = originalGetReplaceable(kind, pubkey)
+  if (event?.id) {
+    queueCachedEventTouches([event.id])
+  }
+  return event
+}) as any
 
 // Seed EventStore with default high-quality mock video events to ensure content loads immediately
 const MOCK_EVENTS = [
@@ -91,9 +109,21 @@ const MOCK_EVENTS = [
 
 MOCK_EVENTS.forEach((ev) => eventStore.add(ev as any))
 
-// Listen to all events received on rx-nostr connections and add them to eventStore
+// Listen to all events received on rx-nostr connections, add them to eventStore, and save them to local persistent cache
 rxNostr.createAllEventObservable().subscribe((packet) => {
-  eventStore.add(packet.event as any)
+  const event = packet.event as any
+  eventStore.add(event)
+  
+  // Save to persistent IndexedDB cache
+  saveEventToCache(event)
+
+  // Periodic memory pruning: If in-memory eventStore grows larger than 1000 events, prune the oldest 200 unclaimed ones
+  if (eventStore.memory && eventStore.memory.size > 1000) {
+    const pruned = eventStore.prune(200)
+    if (pruned > 0) {
+      console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
+    }
+  }
 })
 
 import { merge } from 'rxjs'

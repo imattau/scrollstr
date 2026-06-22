@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
@@ -7,9 +7,14 @@ import { use$ } from 'applesauce-react/hooks'
 import { parseVideoEvent } from '../../nostr/events/video'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
+import { createRxForwardReq } from 'rx-nostr'
+import { publishFollow } from '../../nostr/events/reactions'
+
+const EMPTY_VIDEOS: any[] = []
+const EMPTY_EVENTS: any[] = []
 
 export const ProfilePage: React.FC = () => {
-  const { session } = useNostr()
+  const { session, rxNostr, signEvent, eventStore } = useNostr()
   const { pubkey } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
 
@@ -27,7 +32,7 @@ export const ProfilePage: React.FC = () => {
   const rawVideoEvents = use$(
     () => getEventsQuery$({ kinds: [22, 34236], authors: targetPubkey ? [targetPubkey] : [] }),
     [targetPubkey]
-  ) || []
+  ) ?? EMPTY_VIDEOS
 
   // Parse events into standard feed item list
   const videos = useMemo(() => {
@@ -40,15 +45,81 @@ export const ProfilePage: React.FC = () => {
   const rawBoosts = use$(
     () => getEventsQuery$({ kinds: [6, 16], authors: targetPubkey ? [targetPubkey] : [] }),
     [targetPubkey]
-  ) || []
+  ) ?? EMPTY_EVENTS
+
+  // Retrieve contact list (kind 3) authored by target pubkey to calculate Following count
+  const targetContactListEvent = use$(
+    () => getEventsQuery$({ kinds: [3], authors: targetPubkey ? [targetPubkey] : [] }),
+    [targetPubkey]
+  )?.[0]
+
+  const followingCount = useMemo(() => {
+    if (!targetContactListEvent) return 0
+    return targetContactListEvent.tags.filter((t: any) => t[0] === 'p').length
+  }, [targetContactListEvent])
+
+  // Retrieve contact list (kind 3) events referencing target pubkey to calculate Followers count
+  const followerEvents = use$(
+    () => getEventsQuery$({ kinds: [3], '#p': targetPubkey ? [targetPubkey] : [] }),
+    [targetPubkey]
+  ) ?? EMPTY_EVENTS
+
+  const followersCount = useMemo(() => {
+    const uniqueAuthors = new Set(followerEvents.map((ev: any) => ev.pubkey))
+    return uniqueAuthors.size
+  }, [followerEvents])
+
+  // Retrieve logged-in user's own contact list to check if following this creator
+  const myContactListEvent = use$(
+    () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
+    [session?.pubkey]
+  )?.[0]
+
+  const isFollowing = useMemo(() => {
+    if (!myContactListEvent || !targetPubkey) return false
+    return myContactListEvent.tags.some((t: any) => t[0] === 'p' && t[1] === targetPubkey)
+  }, [myContactListEvent, targetPubkey])
+
+  // Subscribe to contact list updates on relays
+  useEffect(() => {
+    if (!targetPubkey) return
+    console.log(`Subscribing to contact lists for stats of pubkey: ${targetPubkey}`)
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq).subscribe()
+    
+    // Subscribe to target's following (authored by targetPubkey)
+    rxReq.emit({ kinds: [3], authors: [targetPubkey], limit: 1 })
+    
+    // Subscribe to target's followers (tagged targetPubkey)
+    rxReq.emit({ kinds: [3], '#p': [targetPubkey], limit: 50 })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, targetPubkey])
 
   const handleEditProfile = () => {
-    // Navigate to settings as configuration center
     navigate('/settings')
   }
 
-  const handleFollowToggle = () => {
-    alert(`Follow toggle simulation for pubkey: ${targetPubkey}`)
+  const handleFollowToggle = async () => {
+    if (!session) {
+      alert('Please connect your Nostr account to follow creators')
+      return
+    }
+    try {
+      const { signed, action } = await publishFollow(
+        signEvent,
+        rxNostr,
+        targetPubkey || '',
+        myContactListEvent || null
+      )
+      eventStore.add(signed)
+      alert(action === 'follow' ? 'Followed creator!' : 'Unfollowed creator!')
+    } catch (err: any) {
+      console.error('Follow toggle failed:', err)
+      alert('Failed to update follow status: ' + (err.message || err))
+    }
   }
 
   if (!targetPubkey) {
@@ -99,11 +170,13 @@ export const ProfilePage: React.FC = () => {
               <span className="text-[10px] font-semibold text-[#a1a1aa]">Videos</span>
             </div>
             <div className="flex flex-col items-center">
-              <span className="text-[16px] font-bold text-[#f7f7f8]">1.2k</span>
+              <span className="text-[16px] font-bold text-[#f7f7f8]">
+                {followersCount >= 1000 ? `${(followersCount / 1000).toFixed(followersCount % 1000 === 0 ? 0 : 1)}k` : followersCount}
+              </span>
               <span className="text-[10px] font-semibold text-[#a1a1aa]">Followers</span>
             </div>
             <div className="flex flex-col items-center">
-              <span className="text-[16px] font-bold text-[#f7f7f8]">321</span>
+              <span className="text-[16px] font-bold text-[#f7f7f8]">{followingCount}</span>
               <span className="text-[10px] font-semibold text-[#a1a1aa]">Following</span>
             </div>
           </div>
@@ -142,9 +215,11 @@ export const ProfilePage: React.FC = () => {
         ) : (
           <button
             onClick={handleFollowToggle}
-            className="h-[40px] w-full rounded-[12px] bg-[#8b5cf6] text-[13px] font-bold text-white hover:bg-[#7c3aed] transition-colors"
+            className={`h-[40px] w-full rounded-[12px] text-[13px] font-bold text-white transition-colors ${
+              isFollowing ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' : 'bg-[#8b5cf6] hover:bg-[#7c3aed]'
+            }`}
           >
-            Follow Creator
+            {isFollowing ? 'Unfollow Creator' : 'Follow Creator'}
           </button>
         )}
 

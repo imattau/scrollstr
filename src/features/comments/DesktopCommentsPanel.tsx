@@ -6,6 +6,8 @@ import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { useProfile } from '../../nostr/profile'
 
+const EMPTY_COMMENTS: any[] = []
+
 const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
   const profile = useProfile(comment.pubkey)
   const avatarInitial = profile.displayName?.slice(0, 1).toUpperCase() || 'N'
@@ -41,7 +43,7 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
   const rawComments = use$(() => getEventsQuery$({
     kinds: [1111],
     '#e': [video?.id || '']
-  }), [video?.id]) || []
+  }), [video?.id]) ?? EMPTY_COMMENTS
 
   // Subscribe to real-time comments on relays
   useEffect(() => {

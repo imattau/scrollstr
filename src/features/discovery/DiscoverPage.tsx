@@ -8,6 +8,8 @@ import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 
+const EMPTY_VIDEOS: any[] = []
+
 const TrendingCreatorRow: React.FC<{
   creator: { pubkey: string; name: string; subtitle: string; color: string }
   onFollow: (pubkey: string) => void
@@ -55,7 +57,7 @@ export const DiscoverPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
 
   // Query kind:22 and kind:34236 events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) || []
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) ?? EMPTY_VIDEOS
 
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {

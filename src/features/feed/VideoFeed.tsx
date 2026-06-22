@@ -8,12 +8,15 @@ import { use$ } from 'applesauce-react/hooks'
 
 import { useSearchParams } from 'react-router-dom'
 
+const EMPTY_VIDEOS: any[] = []
+
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
   onVideoChange?: (video: VideoItemData) => void
+  isMuted: boolean
 }
 
-export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange }) => {
+export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange, isMuted }) => {
   const { rxNostr, session, eventStore } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
@@ -24,7 +27,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Query kind:22 and kind:34236 events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) || []
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) ?? EMPTY_VIDEOS
 
   // Query kind 3 replaceable contacts list event for the logged in user
   const contactListEvent = use$(
@@ -61,7 +64,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [rxNostr, session?.pubkey])
 
-  // Parse events to local format and filter out invalid/null ones
+  // Parse events to local format, filter, and enrich with live reaction counts from EventStore
   const videos = useMemo(() => {
     let list = rawVideoEvents
       .map((ev: any) => parseVideoEvent(ev))
@@ -77,8 +80,50 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       list = list.filter((v) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    return list
-  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session])
+    return list.map((video) => {
+      const likes = eventStore.getByFilters({ kinds: [7], '#e': [video.id] })
+      const comments = eventStore.getByFilters({ kinds: [1111], '#e': [video.id] })
+      const boosts = eventStore.getByFilters({ kinds: [6, 16], '#e': [video.id] })
+      const zaps = eventStore.getByFilters({ kinds: [9735], '#e': [video.id] })
+
+      const hasLiked = session ? likes.some((l: any) => l.pubkey === session.pubkey) : false
+      const hasBoosted = session ? boosts.some((b: any) => b.pubkey === session.pubkey) : false
+      const hasZapped = session ? zaps.some((z: any) => z.pubkey === session.pubkey) : false
+
+      return {
+        ...video,
+        likesCount: likes.length,
+        commentsCount: comments.length,
+        boostsCount: boosts.length,
+        zapsCount: zaps.length,
+        hasLiked,
+        hasBoosted,
+        hasZapped,
+      }
+    })
+  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session, eventStore])
+
+  // Prefetch comments, likes, boosts, and zaps for the active video and the next upcoming video
+  useEffect(() => {
+    if (videos.length === 0) return
+    const activeVideo = videos[activeIndex]
+    const nextVideo = videos[activeIndex + 1]
+    if (!activeVideo) return
+
+    const videoIdsToFetch = [activeVideo.id]
+    if (nextVideo) {
+      videoIdsToFetch.push(nextVideo.id)
+    }
+
+    console.log(`Prefetching reactions and comments for videos:`, videoIdsToFetch)
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq).subscribe()
+    rxReq.emit({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
+
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, activeIndex, videos])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
@@ -158,6 +203,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           key={video.id}
           video={video}
           isActive={idx === activeIndex}
+          isMuted={isMuted}
           onActionClick={handleActionClick}
         />
       ))}

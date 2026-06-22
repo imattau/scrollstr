@@ -22,7 +22,11 @@ export const publishRelayList = async (
 
   console.log('Signing and publishing relay list (kind:10002)...')
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast relay list to relays:', err)
+  }
   return signed
 }
 
@@ -42,7 +46,11 @@ export const publishBlossomList = async (
 
   console.log('Signing and publishing Blossom servers list (kind:10063)...')
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast Blossom list to relays:', err)
+  }
   return signed
 }
 
@@ -65,7 +73,11 @@ export const publishMuteList = async (
 
   console.log('Signing and publishing mute list (kind:10000)...')
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast mute list to relays:', err)
+  }
   return signed
 }
 
@@ -85,6 +97,10 @@ export const publishNip96List = async (
 
   console.log('Signing and publishing NIP-96 media servers list (kind:10096)...')
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast NIP-96 list to relays:', err)
+  }
   return signed
 }

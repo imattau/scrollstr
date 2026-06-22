@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import { RxNostr } from 'rx-nostr'
 import { EventStore } from 'applesauce-core'
 import { rxNostr, eventStore } from '../nostr/rxNostr'
+import { loadCachedEvents } from '../nostr/cache'
 import {
   readStoredPasskeyIdentity,
   hasStoredPasskeyIdentity,
@@ -53,8 +54,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isConnected, setIsConnected] = useState(true) // rx-nostr is always active
   const [session, setSession] = useState<UserSession | null>(null)
 
-  // On mount, restore session from localStorage if present
+  // On mount, restore session from localStorage if present and load IndexedDB cached events
   useEffect(() => {
+    // Load local cached events into Applesauce EventStore
+    loadCachedEvents(eventStore)
+
     const stored = localStorage.getItem('scrollstr_session')
     if (stored) {
       try {
@@ -87,7 +91,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
 
   const loginReadOnly = (npubOrPubkey: string) => {
-    let pubkey = npubOrPubkey
+    const pubkey = npubOrPubkey
     // If it's npub, we could decode it, but assuming it's resolved or raw hex here.
     // For simplicity, if npub, let's keep it as is or handle it
     const newSession: UserSession = {

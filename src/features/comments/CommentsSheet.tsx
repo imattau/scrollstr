@@ -7,6 +7,8 @@ import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { useProfile } from '../../nostr/profile'
 
+const EMPTY_COMMENTS: any[] = []
+
 interface CommentsSheetProps {
   isOpen: boolean
   videoId: string
@@ -49,7 +51,7 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
   const rawComments = use$(() => getEventsQuery$({
     kinds: [1111],
     '#e': [videoId]
-  }), [videoId]) || []
+  }), [videoId]) ?? EMPTY_COMMENTS
 
   // Subscribe to real-time comments on relays
   useEffect(() => {

@@ -17,6 +17,10 @@ export const publishComment = async (
 
   console.log(`Signing and publishing comment for ${targetEventId}: "${commentText}"`)
   const signed = await signEvent(eventTemplate)
-  await rxNostr.cast(signed)
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast comment to relays:', err)
+  }
   return signed
 }

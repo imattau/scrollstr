@@ -6,14 +6,15 @@ interface VideoPlayerProps {
   url: string
   poster?: string
   isActive: boolean
+  isMuted: boolean
   onLike?: () => void
   showControls?: boolean
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, onLike, showControls = false }) => {
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, isMuted, onLike, showControls = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const hlsInstanceRef = useRef<Hls | null>(null)
   const [isHls, setIsHls] = useState(false)
-  const [hlsInstance, setHlsInstance] = useState<Hls | null>(null)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
 
   const [isPaused, setIsPaused] = useState(true)
@@ -44,15 +45,22 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
   }, [isActive])
 
+  // Sync mute state dynamically
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted
+    }
+  }, [isMuted])
+
   // Set up HLS or native playback
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     // Clean up previous HLS instance
-    if (hlsInstance) {
-      hlsInstance.destroy()
-      setHlsInstance(null)
+    if (hlsInstanceRef.current) {
+      hlsInstanceRef.current.destroy()
+      hlsInstanceRef.current = null
     }
 
     if (isHls) {
@@ -62,7 +70,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         })
         hls.loadSource(url)
         hls.attachMedia(video)
-        setHlsInstance(hls)
+        hlsInstanceRef.current = hls
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         // Native safari HLS support
         video.src = url
@@ -72,8 +80,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
 
     return () => {
-      if (hlsInstance) {
-        hlsInstance.destroy()
+      if (hlsInstanceRef.current) {
+        hlsInstanceRef.current.destroy()
+        hlsInstanceRef.current = null
       }
     }
   }, [url, isHls])
@@ -157,7 +166,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           poster={poster}
           preload={isActive ? 'auto' : 'metadata'}
           loop
-          muted // Start muted for autoplay browser policies
+          muted={isMuted} // Start muted for autoplay browser policies, sync with isMuted
           playsInline
           onClick={handleSingleClick}
           onDoubleClick={handleDoubleClick}

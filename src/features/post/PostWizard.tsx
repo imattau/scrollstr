@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
-import { uploadToBlossom, calculateSha256 } from '../../nostr/blossom/upload'
+import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events/video'
+import { use$ } from 'applesauce-react/hooks'
+import { getEventsQuery$ } from '../../nostr/rxNostr'
 
 const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
   new Promise((resolve, reject) => {
@@ -33,6 +35,50 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
 
 export const PostWizard: React.FC = () => {
   const { rxNostr, signEvent, session } = useNostr()
+  const userPubkey = session?.pubkey
+
+  // Retrieve user's configured Blossom and NIP-96 lists
+  const blossomListEvent = use$(
+    () => getEventsQuery$({ kinds: [10063], authors: userPubkey ? [userPubkey] : [] }),
+    [userPubkey]
+  )?.[0]
+
+  const nip96ListEvent = use$(
+    () => getEventsQuery$({ kinds: [10096], authors: userPubkey ? [userPubkey] : [] }),
+    [userPubkey]
+  )?.[0]
+
+  // Combine custom configured servers with priority order
+  const uploadServers = useMemo(() => {
+    const servers: string[] = []
+
+    if (blossomListEvent) {
+      const parsed = blossomListEvent.tags
+        .filter((t: any) => t[0] === 'server' || t[0] === 'r')
+        .map((t: any) => t[1])
+      servers.push(...parsed)
+    }
+
+    if (nip96ListEvent) {
+      const parsed = nip96ListEvent.tags
+        .filter((t: any) => t[0] === 'server' || t[0] === 'r')
+        .map((t: any) => t[1])
+      servers.push(...parsed)
+    }
+
+    // Default fallbacks if no custom servers are configured
+    if (servers.length === 0) {
+      return [
+        'https://cdn.nostr.build',
+        'https://nostr.build',
+        'https://void.cat',
+        'https://blossom.damus.io',
+      ]
+    }
+
+    return Array.from(new Set(servers))
+  }, [blossomListEvent, nip96ListEvent])
+
   const [step] = useState(2)
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoPreview, setVideoPreview] = useState('')
@@ -43,8 +89,6 @@ export const PostWizard: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
-
-  const DEFAULT_BLOSSOM_SERVER = 'https://blossom.damus.io'
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -69,20 +113,39 @@ export const PostWizard: React.FC = () => {
     setStatusMessage('Generating poster frame...')
     try {
       const thumbnailBlob = await generateThumbnailFromVideo(videoFile).catch(() => null)
-      let posterUrl = ''
-      if (thumbnailBlob) {
-        setUploadProgress(30)
-        setStatusMessage('Uploading poster to Blossom...')
-        posterUrl = (await uploadToBlossom(signEvent, thumbnailBlob, DEFAULT_BLOSSOM_SERVER)).url
-      }
-
-      setUploadProgress(50)
+      
+      setUploadProgress(20)
       setStatusMessage('Calculating video hash...')
       const videoHash = await calculateSha256(videoFile)
 
-      setUploadProgress(70)
-      setStatusMessage('Uploading video to Blossom...')
-      const videoUploadResult = await uploadToBlossom(signEvent, videoFile, DEFAULT_BLOSSOM_SERVER)
+      let videoUploadResult = null
+      let posterUrl = ''
+      let uploadError = null
+
+      for (const server of uploadServers) {
+        try {
+          if (thumbnailBlob) {
+            setUploadProgress(40)
+            setStatusMessage(`Uploading poster to ${server}...`)
+            const posterRes = await uploadMedia(signEvent, thumbnailBlob, server)
+            posterUrl = posterRes.url
+          }
+
+          setUploadProgress(70)
+          setStatusMessage(`Uploading video to ${server}...`)
+          videoUploadResult = await uploadMedia(signEvent, videoFile, server)
+
+          uploadError = null
+          break
+        } catch (err: any) {
+          console.warn(`Upload using server ${server} failed, trying next...`, err)
+          uploadError = err
+        }
+      }
+
+      if (!videoUploadResult) {
+        throw new Error(uploadError?.message || 'All media servers failed to accept the upload')
+      }
 
       setUploadProgress(90)
       setStatusMessage('Broadcasting video event...')
@@ -108,6 +171,9 @@ export const PostWizard: React.FC = () => {
     } catch (err: any) {
       console.error('Publish pipeline failed:', err)
       setError(err.message || 'Publishing failed')
+    } finally {
+      setStatusMessage('')
+      setUploadProgress(0)
     }
   }
 

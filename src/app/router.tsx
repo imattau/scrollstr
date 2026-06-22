@@ -13,16 +13,17 @@ interface RouterProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string) => void
   activeVideo: any
   onVideoChange: (video: any) => void
+  isMuted: boolean
 }
 
-export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo, onVideoChange }) => {
+export const AppRouter: React.FC<RouterProps> = ({ onActionTrigger, activeVideo, onVideoChange, isMuted }) => {
   return (
     <Routes>
       <Route
         path="/"
         element={
           <MainLayout immersive rightPanel={<DesktopCommentsPanel video={activeVideo} />}>
-            <VideoFeed onActionTrigger={onActionTrigger} onVideoChange={onVideoChange} />
+            <VideoFeed onActionTrigger={onActionTrigger} onVideoChange={onVideoChange} isMuted={isMuted} />
           </MainLayout>
         }
       />

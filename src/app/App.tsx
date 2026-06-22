@@ -5,7 +5,7 @@ import { LoginSheet } from '../features/auth/LoginSheet'
 import { CommentsSheet } from '../features/comments/CommentsSheet'
 import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
-import { publishLike, publishBoost } from '../nostr/events/reactions'
+import { publishLike, publishBoost, publishFollow } from '../nostr/events/reactions'
 import { parseVideoEvent } from '../nostr/events/video'
 
 function AppContent() {
@@ -19,6 +19,7 @@ function AppContent() {
   const [activeCreatorPubkey, setActiveCreatorPubkey] = useState('')
   const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string } | null>(null)
   const [activeVideo, setActiveVideo] = useState<any>(null)
+  const [isMuted, setIsMuted] = useState(true)
 
   const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string) => {
     setActiveVideoId(videoId)
@@ -43,22 +44,44 @@ function AppContent() {
       setIsZapOpen(true)
     } else if (actionType === 'like') {
       try {
-        await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '')
-        alert('Liked video on Nostr!')
+        const signed = await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '')
+        eventStore.add(signed)
       } catch (err) {
         console.error('Like failed:', err)
         alert('Failed to publish Like: ' + err)
       }
     } else if (actionType === 'boost') {
       try {
-        await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '')
-        alert('Boosted video on Nostr (reposted kind:16)!')
+        const signed = await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '')
+        eventStore.add(signed)
       } catch (err) {
         console.error('Boost failed:', err)
         alert('Failed to publish Boost: ' + err)
       }
     } else if (actionType === 'follow') {
-      alert(`Follow pubkey ${creatorPubkey} simulated!`)
+      if (!session) {
+        alert('Please log in to follow creators')
+        return
+      }
+      try {
+        const currentContactListEvent = eventStore.getByFilters({
+          kinds: [3],
+          authors: [session.pubkey],
+        })?.[0]
+
+        const { signed, action } = await publishFollow(
+          signEvent,
+          rxNostr,
+          creatorPubkey || '',
+          currentContactListEvent || null
+        )
+
+        eventStore.add(signed)
+        alert(action === 'follow' ? 'Followed creator on Nostr!' : 'Unfollowed creator on Nostr!')
+      } catch (err: any) {
+        console.error('Follow action failed:', err)
+        alert('Failed to update follow list: ' + (err.message || err))
+      }
     } else if (actionType === 'share') {
       try {
         const evs = eventStore.getByFilters({ ids: [videoId] })
@@ -75,6 +98,8 @@ function AppContent() {
         console.error('Failed to copy link:', err)
         alert('Failed to copy share link: ' + err)
       }
+    } else if (actionType === 'mute') {
+      setIsMuted(!isMuted)
     } else {
       console.log(`Triggered guest action: ${actionType}`)
     }
@@ -100,6 +125,7 @@ function AppContent() {
           onActionTrigger={handleActionTrigger} 
           activeVideo={activeVideo}
           onVideoChange={setActiveVideo}
+          isMuted={isMuted}
         />
         
         {/* Auth Sheets / Dialogs */}

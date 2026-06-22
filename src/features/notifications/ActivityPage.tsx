@@ -7,6 +7,8 @@ import { createRxForwardReq } from 'rx-nostr'
 import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 
+const EMPTY_EVENTS: any[] = []
+
 const formatTime = (createdAt: number) => {
   const diff = Math.floor(Date.now() / 1000) - createdAt
   if (diff < 60) return 'now'
@@ -45,7 +47,9 @@ const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
           if (amountTag) {
             sats = Math.round(parseInt(amountTag[1]) / 1000)
           }
-        } catch (e) {}
+        } catch (error) {
+          console.warn('Failed to parse zap description tag:', error)
+        }
       }
       details = sats > 0 ? `zapped you ${sats} sats` : 'zapped your video'
     }
@@ -116,7 +120,7 @@ export const ActivityPage: React.FC = () => {
         '#p': userPubkey ? [userPubkey] : [],
       }),
     [userPubkey]
-  ) || []
+  ) ?? EMPTY_EVENTS
 
   // Subscribe to real-time events targeting user
   useEffect(() => {

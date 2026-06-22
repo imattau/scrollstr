@@ -47,7 +47,7 @@ export const uploadToBlossom = async (
   console.log(`Hashing complete. SHA-256: ${sha256}`)
   const authHeader = await generateBlossomAuthHeader(signEvent, sha256, baseUrl)
 
-  console.log(`Uploading file to ${uploadUrl}...`)
+  console.log(`Uploading file to Blossom server at ${uploadUrl}...`)
   const response = await fetch(uploadUrl, {
     method: 'PUT',
     body: blob,
@@ -60,7 +60,7 @@ export const uploadToBlossom = async (
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unknown error')
-    throw new Error(`Upload failed with status ${response.status}: ${errorText}`)
+    throw new Error(`Blossom upload failed with status ${response.status}: ${errorText}`)
   }
 
   // Blossom BUD-01 returns a Descriptor object containing "url" and "sha256"
@@ -69,4 +69,94 @@ export const uploadToBlossom = async (
     url: descriptor.url || `${baseUrl}/${sha256}`,
     sha256,
   }
+}
+
+// Upload a blob to a NIP-96 compliant server
+export const uploadToNip96 = async (
+  signEvent: (eventTemplate: any) => Promise<any>,
+  blob: Blob,
+  serverUrl: string,
+  nip96ApiUrl: string
+): Promise<{ url: string; sha256: string }> => {
+  const sha256 = await calculateSha256(blob)
+
+  // Construct NIP-98 HTTP Auth event template
+  const eventTemplate = {
+    kind: 27235,
+    content: '',
+    tags: [
+      ['u', nip96ApiUrl],
+      ['method', 'POST'],
+    ],
+  }
+
+  const signed = await signEvent(eventTemplate)
+  const base64Token = btoa(unescape(encodeURIComponent(JSON.stringify(signed))))
+
+  const formData = new FormData()
+  formData.append('file', blob)
+
+  console.log(`Uploading file to NIP-96 api endpoint at ${nip96ApiUrl}...`)
+  const response = await fetch(nip96ApiUrl, {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'Authorization': `Nostr ${base64Token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => 'Unknown error')
+    throw new Error(`NIP-96 upload failed with status ${response.status}: ${errorText}`)
+  }
+
+  const result = await response.json()
+  
+  // Find URL in nip94_event tags
+  let url = ''
+  if (result.nip94_event && result.nip94_event.tags) {
+    const urlTag = result.nip94_event.tags.find((t: any) => t[0] === 'url')
+    if (urlTag) {
+      url = urlTag[1]
+    }
+  }
+  
+  // Fallbacks
+  if (!url) {
+    url = result.url || ''
+  }
+
+  if (!url) {
+    throw new Error('NIP-96 server did not return a valid download URL')
+  }
+
+  return { url, sha256 }
+}
+
+// Unified media upload helper that auto-detects between Blossom and NIP-96
+export const uploadMedia = async (
+  signEvent: (eventTemplate: any) => Promise<any>,
+  blob: Blob,
+  serverUrl: string
+): Promise<{ url: string; sha256: string }> => {
+  const baseUrl = serverUrl.endsWith('/') ? serverUrl.slice(0, -1) : serverUrl
+
+  // Try NIP-96 capability discovery
+  try {
+    const nip96ConfigUrl = `${baseUrl}/.well-known/nostr/nip96.json`
+    console.log(`Checking NIP-96 configuration at ${nip96ConfigUrl}...`)
+    const res = await fetch(nip96ConfigUrl, { method: 'GET' })
+    if (res.ok) {
+      const config = await res.json()
+      if (config && config.api_url) {
+        console.log(`NIP-96 API detected: ${config.api_url}`)
+        return await uploadToNip96(signEvent, blob, baseUrl, config.api_url)
+      }
+    }
+  } catch (err) {
+    console.log(`Server ${baseUrl} does not support NIP-96 config, falling back to Blossom:`, err)
+  }
+
+  // Fallback to Blossom
+  return await uploadToBlossom(signEvent, blob, baseUrl)
 }
