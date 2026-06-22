@@ -104,7 +104,7 @@ const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
 }
 
 export const ActivityPage: React.FC = () => {
-  const { session, rxNostr } = useNostr()
+  const { session, rxNostr, eventStore } = useNostr()
   const userPubkey = session?.pubkey
   const navigate = useNavigate()
 
@@ -134,10 +134,21 @@ export const ActivityPage: React.FC = () => {
     }
   }, [rxNostr, userPubkey])
 
-  // Sort events chronologically (latest first)
+  // Sort and filter events to only include interactions referencing video events (kinds 22 or 34236)
   const sortedEvents = useMemo(() => {
-    return [...rawEvents].sort((a, b) => b.created_at - a.created_at)
-  }, [rawEvents])
+    return [...rawEvents]
+      .filter((ev) => {
+        // Find the referenced event ID (e tag)
+        const eTag = ev.tags.find((t: any) => t[0] === 'e')
+        if (!eTag) return true // Let non-event targets (like follows) pass
+
+        const parentEvent = eventStore.getByFilters({ ids: [eTag[1]] })[0]
+        if (!parentEvent) return true // If parent event is not yet cached, show it as fallback
+
+        return parentEvent.kind === 22 || parentEvent.kind === 34236
+      })
+      .sort((a, b) => b.created_at - a.created_at)
+  }, [rawEvents, eventStore])
 
   if (!session) {
     return (
