@@ -1,4 +1,4 @@
-import { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
+import NDK, { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
 import { VideoItemData, CreatorProfile } from '../../features/feed/VideoFeedItem'
 
 // Helper to parse space-separated imeta fields (e.g. "url https://example.com/a.mp4")
@@ -39,7 +39,6 @@ export const parseVideoEvent = (event: NDKEvent): VideoItemData | null => {
     if (!url) return null
 
     // Extract likes, comments, zaps, boosts from tags if they are annotated, or fallback to 0
-    // Real dynamic totals will be fetched through subscriptions in Milestones 3 & 4
     const likesCount = 0
     const commentsCount = 0
     const boostsCount = 0
@@ -88,4 +87,40 @@ export const fetchCreatorProfile = async (
     console.error(`Failed to fetch profile for ${user.pubkey}:`, err)
     return {}
   }
+}
+
+// Sign and broadcast a kind:22 Nostr video event to default relays
+export const publishVideoEvent = async (
+  ndk: NDK,
+  videoUrl: string,
+  videoHash: string,
+  posterUrl: string,
+  title: string,
+  description: string,
+  hashtags: string[]
+): Promise<NDKEvent> => {
+  if (!ndk.signer) {
+    throw new Error('Nostr signer not available to publish clip')
+  }
+
+  const event = new NDKEvent(ndk)
+  event.kind = 22 // immutable kind:22 video event
+  event.content = description
+  event.tags = [
+    ['title', title],
+    ['published_at', Math.floor(Date.now() / 1000).toString()],
+    ['alt', title],
+    ...hashtags.map((tag) => ['t', tag.trim().toLowerCase()]),
+    [
+      'imeta',
+      `url ${videoUrl}`,
+      `m video/mp4`,
+      `x ${videoHash}`,
+      `image ${posterUrl}`,
+    ],
+  ]
+
+  console.log('Signing and publishing kind:22 event...')
+  await event.publish()
+  return event
 }
