@@ -14,16 +14,28 @@ interface VideoFeedProps {
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange }) => {
-  const { rxNostr } = useNostr()
+  const { rxNostr, session, eventStore } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
+  const feedType = searchParams.get('feed') || 'explore'
   
   const [activeIndex, setActiveIndex] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Query kind:22 and kind:34236 events from Applesauce EventStore
   const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [22, 34236] }), []) || []
+
+  // Query kind 3 replaceable contacts list event for the logged in user
+  const contactListEvent = use$(
+    () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
+    [session?.pubkey]
+  )?.[0]
+
+  const followingPubkeys = useMemo(() => {
+    if (!contactListEvent) return []
+    return contactListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+  }, [contactListEvent])
 
   // Subscribe to real-time events from relays
   useEffect(() => {
@@ -37,6 +49,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [rxNostr])
 
+  // Subscribe to user's NIP-02 contact list (kind 3)
+  useEffect(() => {
+    if (!session?.pubkey) return
+    console.log(`Subscribing to contact list for ${session.pubkey}...`)
+    const rxReq = createRxForwardReq()
+    const sub = rxNostr.use(rxReq).subscribe()
+    rxReq.emit({ kinds: [3], authors: [session.pubkey], limit: 1 })
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, session?.pubkey])
+
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {
     let list = rawVideoEvents
@@ -49,8 +73,12 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       )
     }
 
+    if (feedType === 'following' && session) {
+      list = list.filter((v) => followingPubkeys.includes(v.creator.pubkey))
+    }
+
     return list
-  }, [rawVideoEvents, filterTag])
+  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
@@ -107,8 +135,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   if (videos.length === 0) {
     return (
-      <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa] md:h-full">
-        <p className="text-[14px]">Connecting to relays and loading videos...</p>
+      <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa] md:h-full px-8 text-center">
+        {feedType === 'following' ? (
+          <div className="space-y-2">
+            <p className="text-[14px] font-semibold text-[#f7f7f8]">No videos from followed creators.</p>
+            <p className="text-[12px] text-[#71717a]">Try following more accounts or switch to Explore feed!</p>
+          </div>
+        ) : (
+          <p className="text-[14px]">Connecting to relays and loading videos...</p>
+        )}
       </div>
     )
   }

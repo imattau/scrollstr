@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Home, Compass, PlusSquare, Bell, User, Settings } from 'lucide-react'
 
 interface MainLayoutProps {
@@ -10,6 +10,8 @@ interface MainLayoutProps {
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false }) => {
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const feedType = searchParams.get('feed') || 'explore'
 
   const navItems = [
     { path: '/', label: 'Home', icon: Home },
@@ -90,12 +92,26 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
             <main className="flex h-screen w-[720px] shrink-0 flex-col overflow-hidden bg-[#09090b]">
               <div className="flex h-[68px] items-center justify-center">
                 <div className="flex gap-2">
-                  <div className="rounded-[18px] bg-[#18181d] px-[14px] py-[8px] text-[12px] font-medium text-[#f7f7f8]">
+                  <Link
+                    to="/?feed=following"
+                    className={`rounded-[18px] px-[14px] py-[8px] text-[12px] font-semibold transition-colors ${
+                      feedType === 'following'
+                        ? 'bg-[#f7f7f8] text-[#09090b]'
+                        : 'bg-[#18181d] text-[#f7f7f8] hover:bg-[#222228]'
+                    }`}
+                  >
                     Following
-                  </div>
-                  <div className="rounded-[18px] bg-[#f7f7f8] px-[14px] py-[8px] text-[12px] font-semibold text-[#09090b]">
+                  </Link>
+                  <Link
+                    to="/?feed=explore"
+                    className={`rounded-[18px] px-[14px] py-[8px] text-[12px] font-semibold transition-colors ${
+                      feedType === 'explore'
+                        ? 'bg-[#f7f7f8] text-[#09090b]'
+                        : 'bg-[#18181d] text-[#f7f7f8] hover:bg-[#222228]'
+                    }`}
+                  >
                     Explore
-                  </div>
+                  </Link>
                 </div>
               </div>
 
