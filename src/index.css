@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .feed-container {
+    height: 100dvh;
+    overflow-y: auto;
+    scroll-snap-type: y mandatory;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none; /* Hide scrollbar for clean vertical feed */
+  }
+
+  .feed-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .feed-item {
+    height: 100dvh;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
+}
