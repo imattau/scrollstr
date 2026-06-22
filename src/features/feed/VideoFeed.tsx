@@ -241,7 +241,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [videos, initialVideoId])
 
-  // Scroll tracking now handled by FixedSizeList onScroll callback
+  // Track scroll position and snap to nearest video
+  const handleListScroll = useCallback(({ scrollOffset }: any) => {
+    const newIndex = Math.round(scrollOffset / itemHeight)
+    if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
+      setActiveIndex(newIndex)
+    }
+  }, [activeIndex, itemHeight, videos.length])
 
   // Propagate active video to parent
   useEffect(() => {
@@ -283,6 +289,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
           rowHeight={itemHeight}
           style={{ width: '100%' }}
+          onScroll={handleListScroll}
           onRowsRendered={() => {}}
           rowProps={{}}
           rowComponent={({ index, style }: any) => {
