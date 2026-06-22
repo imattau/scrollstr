@@ -16,20 +16,35 @@ class SpaRequestHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=directory, **kwargs)
 
     def _resolve_path(self) -> Path:
+        base = Path(self.directory).resolve()
         parsed = urlparse(self.path)
         request_path = unquote(parsed.path)
         rel = request_path.lstrip("/")
-        candidate = Path(self.directory) / rel
+
         if request_path in {"", "/"}:
-            return Path(self.directory) / "index.html"
+            return base / "index.html"
+
+        candidate = (base / rel).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError:
+            return base / "index.html"
+
         if candidate.is_dir():
-            index = candidate / "index.html"
+            index = (candidate / "index.html").resolve()
             if index.exists():
-                return index
+                try:
+                    index.relative_to(base)
+                    return index
+                except ValueError:
+                    pass
+
         if candidate.exists():
             return candidate
+
         if Path(rel).suffix == "":
-            return Path(self.directory) / "index.html"
+            return base / "index.html"
+
         return candidate
 
     def send_head(self):
