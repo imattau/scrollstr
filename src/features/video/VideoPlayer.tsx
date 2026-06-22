@@ -13,7 +13,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isHls, setIsHls] = useState(false)
   const [hlsInstance, setHlsInstance] = useState<Hls | null>(null)
-  const pressTimer = useRef<NodeJS.Timeout | null>(null)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
 
   // Detect if source is HLS (.m3u8)

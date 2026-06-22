@@ -47,7 +47,7 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({
       }
 
       // Generate invoice
-      const zapResult = await targetEvent.zap(millisats, comment)
+      const zapResult = await (targetEvent as any).zap(millisats, comment)
       
       // If we receive a string invoice or object
       if (zapResult) {
