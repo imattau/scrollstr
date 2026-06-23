@@ -19,7 +19,7 @@ export const publishLike = async (
   console.log(`Signing and publishing Like event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
   try {
-    await rxNostr.cast(signed)
+    await rxNostr.cast(signed).toPromise()
   } catch (err) {
     console.warn('Failed to broadcast Like event to relays:', err)
   }
