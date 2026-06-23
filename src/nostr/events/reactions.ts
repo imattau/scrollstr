@@ -18,9 +18,11 @@ export const publishLike = async (
 
   console.log(`Signing and publishing Like event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
-  rxNostr.cast(signed).subscribe({
-    error: (err: any) => console.warn('Failed to broadcast Like event to relays:', err)
-  })
+  try {
+    await rxNostr.cast(signed)
+  } catch (err) {
+    console.warn('Failed to broadcast Like event to relays:', err)
+  }
   return signed
 }
 
