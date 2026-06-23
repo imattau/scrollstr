@@ -88,6 +88,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const lastOlderFetchAtRef = useRef(0)
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
+  const currentVideoIdRef = useRef<string>('')
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
   // Query kind 3 replaceable contacts list event for the logged in user
@@ -218,11 +219,26 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   useEffect(() => {
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
+
+    // Track current video and update activeIndex when list re-sorts
+    if (videos.length > 0) {
+      const currentVideoId = currentVideoIdRef.current
+      if (currentVideoId) {
+        const newIndex = videos.findIndex(v => v.id === currentVideoId)
+        if (newIndex !== -1) {
+          setActiveIndex(newIndex)
+          return
+        }
+      }
+      // If no video is being tracked yet, use activeIndex
+      currentVideoIdRef.current = videos[activeIndex]?.id ?? ''
+    }
+
     // Keep activeIndex within bounds when videos list changes
     if (activeIndex >= videos.length) {
       setActiveIndex(Math.max(0, videos.length - 1))
     }
-  }, [videos])
+  }, [videos, activeIndex])
 
   useEffect(() => {
     if (videos.length === 0) return
@@ -302,7 +318,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const newIndex = Math.round(scrollOffset / containerHeight)
     if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
       setActiveIndex(newIndex)
-      
+      currentVideoIdRef.current = videos[newIndex]?.id ?? ''
+
       // Diagnostics log
       void (async () => {
         console.debug({
