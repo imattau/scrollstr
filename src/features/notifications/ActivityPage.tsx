@@ -8,6 +8,8 @@ import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 
 const EMPTY_EVENTS: any[] = []
+const VIDEO_KINDS = [21, 22, 34236]
+const REACTION_KINDS = [7, 16, 1111, 9735]
 
 const formatTime = (createdAt: number) => {
   const diff = Math.floor(Date.now() / 1000) - createdAt
@@ -113,45 +115,69 @@ export const ActivityPage: React.FC = () => {
   const navigate = useNavigate()
   const relayUrls = useUserRelayUrls(eventStore, userPubkey)
 
-  // Query events targeting the user in EventStore
-  const rawEvents = use$(
-    () =>
-      getEventsQuery$({
-        kinds: [1, 6, 7, 16, 1111, 9735],
-        '#p': userPubkey ? [userPubkey] : [],
-      }),
+  // Subscribe to the user's own video events so the EventStore has them
+  useEffect(() => {
+    if (!userPubkey) return
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: VIDEO_KINDS,
+      authors: [userPubkey],
+      limit: 100,
+    })
+    return () => unsub()
+  }, [userPubkey, relayUrls])
+
+  // Reactive query for the user's video events from the store
+  const rawUserVideos = use$(
+    () => getEventsQuery$({
+      kinds: VIDEO_KINDS,
+      authors: userPubkey ? [userPubkey] : [],
+    }),
     [userPubkey]
   ) ?? EMPTY_EVENTS
 
-  // Subscribe to real-time events targeting user
+  // Deduped array of the user's video event IDs
+  const dedupedVideoIds = useMemo(
+    () => [...new Set(rawUserVideos.map((ev: any) => ev.id))],
+    [rawUserVideos]
+  )
+
+  // Stable key to avoid unnecessary effect re-runs on every EventStore change
+  const videoIdsKey = useMemo(
+    () => (dedupedVideoIds.length > 0 ? dedupedVideoIds.join(',') : null),
+    [dedupedVideoIds]
+  )
+
+  // Reactive query for reactions/comments referencing those videos (from EventStore)
+  const rawEvents = use$(
+    () => getEventsQuery$({
+      kinds: REACTION_KINDS,
+      '#e': videoIdsKey ? videoIdsKey.split(',') : [],
+    }),
+    [videoIdsKey]
+  ) ?? EMPTY_EVENTS
+
+  // Live subscription for reactions/comments on the user's videos
   useEffect(() => {
-    if (!userPubkey) return
-    console.log(`Subscribing to Nostr activity events for ${userPubkey}...`)
+    if (!userPubkey || !videoIdsKey) return
+    const ids = videoIdsKey.split(',')
     const sub = subscribeToRelays(relayUrls, {
-      kinds: [1, 6, 7, 16, 1111, 9735],
-      '#p': [userPubkey],
+      kinds: REACTION_KINDS,
+      '#e': ids,
       limit: 50,
     })
-    return () => {
-      sub()
-    }
-  }, [userPubkey, relayUrls])
+    return () => { sub() }
+  }, [userPubkey, relayUrls, videoIdsKey])
 
-  // Sort and filter events to only include interactions referencing short-video events
+  // Sort and filter events — safety net: only show events referencing known video IDs
   const sortedEvents = useMemo(() => {
+    const videoIdSet = new Set(dedupedVideoIds)
     return [...rawEvents]
       .filter((ev) => {
-        // Find the referenced event ID (e tag)
         const eTag = ev.tags.find((t: any) => t[0] === 'e')
-        if (!eTag) return true // Let non-event targets (like follows) pass
-
-        const parentEvent = eventStore.getByFilters({ ids: [eTag[1]] })[0]
-        if (!parentEvent) return true // If parent event is not yet cached, show it as fallback
-
-        return parentEvent.kind === 21 || parentEvent.kind === 22 || parentEvent.kind === 34236
+        return eTag && videoIdSet.has(eTag[1])
       })
       .sort((a, b) => b.created_at - a.created_at)
-  }, [rawEvents, eventStore])
+  }, [rawEvents, dedupedVideoIds])
 
   if (!session) {
     return (
