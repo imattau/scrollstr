@@ -43,8 +43,13 @@ export const getUserRelayUrls = (eventStore: any, pubkey?: string | null): strin
 }
 
 export const useUserRelayUrls = (eventStore: any, pubkey?: string | null): string[] => {
+  // If no pubkey, return fallback immediately without querying
+  if (!pubkey) {
+    return getFallbackRelayUrls()
+  }
+
   const relayListEvent = use$(
-    () => getEventsQuery$({ kinds: [10002], authors: pubkey ? [pubkey] : [] }),
+    () => getEventsQuery$({ kinds: [10002], authors: [pubkey] }),
     [pubkey]
   )?.[0]
 
