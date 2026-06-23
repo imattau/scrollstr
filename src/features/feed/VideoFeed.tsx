@@ -4,9 +4,7 @@ import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
 import { createRxBackwardReq, createRxForwardReq } from 'rx-nostr'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { use$ } from 'applesauce-react/hooks'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -91,16 +89,12 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const currentVideoIdRef = useRef<string>('')
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
-  // Query kind 3 replaceable contacts list event for the logged in user
-  const contactListEvent = use$(
-    () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
-    [session?.pubkey]
-  )?.[0]
-
   const followingPubkeys = useMemo(() => {
+    if (!session?.pubkey) return []
+    const contactListEvent = eventStore.getByFilters({ kinds: [3], authors: [session.pubkey] })?.[0]
     if (!contactListEvent) return []
     return contactListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
-  }, [contactListEvent])
+  }, [eventStore, session?.pubkey])
 
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
