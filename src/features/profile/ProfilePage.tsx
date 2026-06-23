@@ -2,12 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
 import { parseVideoEvent } from '../../nostr/events/video'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
-import { createRxForwardReq } from 'rx-nostr'
 import { publishFollow } from '../../nostr/events/reactions'
 import { useUserRelayUrls } from '../../nostr/relays'
 
@@ -86,19 +85,16 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     if (!targetPubkey) return
     console.log(`Subscribing to contact lists for stats of pubkey: ${targetPubkey}`)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    
-    // Subscribe to target's following (authored by targetPubkey)
-    rxReq.emit({ kinds: [3], authors: [targetPubkey], limit: 1 })
-    
-    // Subscribe to target's followers (tagged targetPubkey)
-    rxReq.emit({ kinds: [3], '#p': [targetPubkey], limit: 50 })
+
+    const sub = subscribeToRelays(relayUrls, [
+      { kinds: [3], authors: [targetPubkey], limit: 1 },
+      { kinds: [3], '#p': [targetPubkey], limit: 50 },
+    ])
 
     return () => {
-      sub.unsubscribe()
+      sub()
     }
-  }, [rxNostr, targetPubkey, relayUrls])
+  }, [targetPubkey, relayUrls])
 
   const handleEditProfile = () => {
     navigate('/settings')

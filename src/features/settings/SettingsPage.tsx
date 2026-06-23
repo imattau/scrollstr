@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
-import { createRxForwardReq } from 'rx-nostr'
 import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events/settings'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
@@ -45,13 +44,11 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     if (!userPubkey) return
     console.log(`Subscribing to Nostr lists for pubkey ${userPubkey}...`)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [10000, 10002, 10063, 10096], authors: [userPubkey], limit: 10 })
+    const sub = subscribeToRelays(relayUrls, { kinds: [10000, 10002, 10063, 10096], authors: [userPubkey], limit: 10 })
     return () => {
-      sub.unsubscribe()
+      sub()
     }
-  }, [rxNostr, userPubkey, relayUrls])
+  }, [userPubkey, relayUrls])
 
   // Load wallet string and synchronize local states when store events update
   useEffect(() => {

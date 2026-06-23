@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react'
-import { RxNostr } from 'rx-nostr'
 import { EventStore } from 'applesauce-core'
-import { rxNostr, eventStore } from '../nostr/rxNostr'
+import { pool, eventStore } from '../nostr/pool'
 import { loadCachedEvents } from '../nostr/cache'
+import { startCacheBackfill, maybeResumeBackfill } from '../nostr/cacheBackfill'
 import {
   readStoredPasskeyIdentity,
   hasStoredPasskeyIdentity,
@@ -32,13 +32,17 @@ declare global {
 }
 
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isConnected, setIsConnected] = useState(true) // rx-nostr is always active
+  const [isConnected, setIsConnected] = useState(true) // pool is always active
   const [session, setSession] = useState<UserSession | null>(null)
 
   // On mount, restore session from localStorage if present and load IndexedDB cached events
   useEffect(() => {
-    // Load local cached events into Applesauce EventStore
-    loadCachedEvents(eventStore)
+    // Load local cached events into Applesauce EventStore, then start backfill
+    loadCachedEvents(eventStore).then(() => {
+      // Begin filling the cache with historical relay data in the background.
+      // startCacheBackfill is idempotent – a second call while one is running is a no-op.
+      void startCacheBackfill()
+    })
 
     const stored = localStorage.getItem('scrollstr_session')
     if (stored) {
@@ -165,7 +169,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <NostrContext.Provider
       value={{
-        rxNostr,
+        pool,
+        rxNostr: pool, // legacy alias
         eventStore,
         isConnected,
         session,

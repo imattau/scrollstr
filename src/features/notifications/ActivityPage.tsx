@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo } from 'react'
 import { Heart, MessageCircle, Repeat2, Zap, UserPlus } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
-import { createRxForwardReq } from 'rx-nostr'
 import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 
@@ -128,17 +127,15 @@ export const ActivityPage: React.FC = () => {
   useEffect(() => {
     if (!userPubkey) return
     console.log(`Subscribing to Nostr activity events for ${userPubkey}...`)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({
+    const sub = subscribeToRelays(relayUrls, {
       kinds: [1, 6, 7, 16, 1111, 9735],
       '#p': [userPubkey],
       limit: 50,
     })
     return () => {
-      sub.unsubscribe()
+      sub()
     }
-  }, [rxNostr, userPubkey, relayUrls])
+  }, [userPubkey, relayUrls])
 
   // Sort and filter events to only include interactions referencing short-video events
   const sortedEvents = useMemo(() => {

@@ -1,6 +1,6 @@
 import { createContext } from 'react'
 import type { EventStore } from 'applesauce-core'
-import type { RxNostr } from 'rx-nostr'
+import type { SimplePool } from 'nostr-tools'
 
 export interface UserSession {
   pubkey: string
@@ -9,7 +9,9 @@ export interface UserSession {
 }
 
 export interface NostrContextProps {
-  rxNostr: RxNostr
+  /** @deprecated use pool instead */
+  rxNostr: SimplePool
+  pool: SimplePool
   eventStore: EventStore
   isConnected: boolean
   session: UserSession | null

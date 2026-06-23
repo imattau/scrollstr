@@ -39,9 +39,24 @@ export default defineConfig({
         // Exclude large video files from caching directly via service workers
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/.+\.(mp4|webm|m3u8)$/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'videos',
+              networkTimeoutSeconds: 5,
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+              },
+            },
+          },
+        ],
+        navigateFallbackDenylist: [/^\/api\//, /^\/.*\.\w+$/],
       },
       devOptions: {
-        enabled: true,
+        enabled: false,
       },
     }),
   ],

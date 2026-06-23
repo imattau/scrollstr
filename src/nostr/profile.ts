@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { merge } from 'rxjs'
 import { map, startWith } from 'rxjs/operators'
-import { createRxForwardReq } from 'rx-nostr'
+import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { use$ } from 'applesauce-react/hooks'
 import { CreatorProfile } from '../features/feed/VideoFeedItem'
@@ -55,7 +55,7 @@ import { db } from './cache'
 
 // React hook to fetch creator profile reactively and cache it
 export const useProfile = (pubkey: string): CreatorProfile => {
-  const { rxNostr, eventStore, session } = useNostr()
+  const { eventStore, session } = useNostr()
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
   const profileEvent = use$(() => getProfileQuery$(eventStore, pubkey), [pubkey])
 
@@ -69,14 +69,10 @@ export const useProfile = (pubkey: string): CreatorProfile => {
     // Only fetch if profile is not available in both EventStore AND Dexie cache
     if (!profileEvent && !cachedProfile && pubkey) {
       console.log(`Profile event not cached in memory or Dexie for ${pubkey}, fetching from relays...`)
-      const rxReq = createRxForwardReq()
-      const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-      rxReq.emit({ kinds: [0], authors: [pubkey], limit: 1 })
-      return () => {
-        sub.unsubscribe()
-      }
+      const unsub = subscribeToRelays(relayUrls, { kinds: [0], authors: [pubkey], limit: 1 })
+      return unsub
     }
-  }, [pubkey, profileEvent, cachedProfile, rxNostr, relayUrls])
+  }, [pubkey, profileEvent, cachedProfile, relayUrls])
 
   if (cachedProfile) {
     return {

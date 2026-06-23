@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { loadSettings } from '../db/local-preferences'
 import { use$ } from 'applesauce-react/hooks'
 import { getEventsQuery$ } from './rxNostr'
@@ -35,33 +36,41 @@ export const getUserRelayUrls = (eventStore: any, pubkey?: string | null): strin
     return getFallbackRelayUrls()
   }
 
-  const relayListEvent = eventStore.getByFilters({ kinds: [10002], authors: [pubkey] })?.[0]
+  const relayListEvent = eventStore.getReplaceable(10002, pubkey)
   const relayUrls = relayListEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
 
   const normalized = normalizeRelayUrls(relayUrls)
   return normalized.length > 0 ? normalized : getFallbackRelayUrls()
 }
 
+/**
+ * Reactive hook that returns the logged-in user's relay list (kind:10002).
+ *
+ * Falls back to user-configured or default relays when no kind:10002 is in store.
+ */
 export const useUserRelayUrls = (eventStore: any, pubkey?: string | null): string[] => {
-  // If no pubkey, return fallback immediately without querying
-  if (!pubkey) {
-    return getFallbackRelayUrls()
-  }
-
+  // Always call use$ unconditionally (Rules of Hooks).
   const relayListEvent = use$(
-    () => getEventsQuery$({ kinds: [10002], authors: [pubkey] }),
-    [pubkey]
+    () => pubkey
+      ? getEventsQuery$({ kinds: [10002], authors: [pubkey] })
+      : getEventsQuery$({ kinds: [10002], authors: [] }),
+    [pubkey ?? '']
   )?.[0]
 
-  const relayUrls = relayListEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
-  const normalized = normalizeRelayUrls(relayUrls)
+  // Compute the stable relay URL list. We JSON-stringify the raw tags as the
+  // useMemo key so React only produces a new array when the actual relay URLs
+  // change — not on every render (which would cause dependent useEffects to
+  // fire in an infinite loop).
+  const rawTagsKey = relayListEvent?.tags ? JSON.stringify(relayListEvent.tags) : ''
 
-  if (normalized.length > 0) {
-    console.log(`[Relays] Found user relay list (kind 10002) for ${pubkey}:`, normalized)
-    return normalized
-  }
+  return useMemo(() => {
+    if (!pubkey) {
+      return getFallbackRelayUrls()
+    }
 
-  const fallback = getUserRelayUrls(eventStore, pubkey)
-  console.log(`[Relays] No kind 10002 found for ${pubkey}, using fallback:`, fallback)
-  return fallback
+    const relayUrls = relayListEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
+    const normalized = normalizeRelayUrls(relayUrls)
+    return normalized.length > 0 ? normalized : getFallbackRelayUrls()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pubkey, rawTagsKey])
 }

@@ -118,7 +118,7 @@ class ScrollstrCacheDatabase extends Dexie {
 export const db = new ScrollstrCacheDatabase()
 
 // Cache limits
-const MAX_VIDEOS = 2000
+export const MAX_VIDEOS = 2000
 const MAX_REACTIONS_COMMENTS = 20000
 const MAX_PROFILES = 5000
 const TOUCH_DEBOUNCE_MS = 250
@@ -612,3 +612,24 @@ async function getLeastRecentlyUsedRecords(kinds: number[]): Promise<CachedEvent
   })
 }
 
+/**
+ * Returns the total number of video events currently in the cache.
+ * Used by the backfill engine to know whether the cache needs more history.
+ */
+export async function getCacheVideoCount(): Promise<number> {
+  return db.cachedEvents.where('kind').anyOf([21, 22, 34236]).count()
+}
+
+/**
+ * Returns the unix timestamp of the oldest video event in the cache,
+ * or null when the cache is empty.
+ * Used by the backfill engine to walk backwards through relay history.
+ */
+export async function getCacheOldestVideoTimestamp(): Promise<number | null> {
+  const oldest = await db.cachedEvents
+    .where('kind')
+    .anyOf([21, 22, 34236])
+    .sortBy('created_at')
+  if (oldest.length === 0) return null
+  return oldest[0].created_at
+}

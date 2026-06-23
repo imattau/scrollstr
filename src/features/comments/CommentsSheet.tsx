@@ -2,8 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { X } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events/comments'
-import { createRxForwardReq } from 'rx-nostr'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
 import { useProfile } from '../../nostr/profile'
@@ -61,20 +60,17 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
 
     setLoading(true)
     console.log(`Subscribing to comments for event ${videoId}...`)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe(() => {
-      setLoading(false)
-    })
-    rxReq.emit({ kinds: [1111], '#e': [videoId] })
+    const sub = subscribeToRelays(relayUrls, { kinds: [1111], '#e': [videoId] })
+    setLoading(false)
 
     // Hide loader after a brief timeout if no events are returned
     const timer = setTimeout(() => setLoading(false), 2000)
 
     return () => {
-      sub.unsubscribe()
+      sub()
       clearTimeout(timer)
     }
-  }, [rxNostr, videoId, isOpen, relayUrls])
+  }, [videoId, isOpen, relayUrls])
 
   // Sort comments chronologically
   const sortedComments = useMemo(() => {

@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events/comments'
-import { createRxForwardReq } from 'rx-nostr'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
 import { useProfile } from '../../nostr/profile'
@@ -53,20 +52,17 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
 
     setLoading(true)
     console.log(`Subscribing to desktop comments for video ${video.id}...`)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe(() => {
-      setLoading(false)
-    })
-    rxReq.emit({ kinds: [1111], '#e': [video.id] })
+    const sub = subscribeToRelays(relayUrls, { kinds: [1111], '#e': [video.id] })
+    setLoading(false)
 
     // Hide loader after a brief timeout if no events are returned
     const timer = setTimeout(() => setLoading(false), 2000)
 
     return () => {
-      sub.unsubscribe()
+      sub()
       clearTimeout(timer)
     }
-  }, [rxNostr, video?.id, relayUrls])
+  }, [video?.id, relayUrls])
 
   // Sort comments chronologically
   const sortedComments = useMemo(() => {

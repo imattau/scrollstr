@@ -1,4 +1,5 @@
 import { VideoItemData, CreatorProfile } from '../../features/feed/VideoFeedItem'
+import { publishToRelays, activeRelays } from '../pool'
 
 // Helper to parse space-separated imeta fields (e.g. "url https://example.com/a.mp4")
 export const parseImetaTag = (imetaTag: string[]): Record<string, string> => {
@@ -74,7 +75,7 @@ export const parseVideoEvent = (event: any): VideoItemData | null => {
 // Sign and broadcast a kind:22 Nostr video event to default relays
 export const publishVideoEvent = async (
   signEvent: (eventTemplate: any) => Promise<any>,
-  rxNostr: any,
+  _pool: any,
   videoUrl: string,
   videoHash: string,
   posterUrl: string,
@@ -103,7 +104,7 @@ export const publishVideoEvent = async (
   console.log('Signing and publishing kind:22 event...')
   const signed = await signEvent(eventTemplate)
   try {
-    await rxNostr.cast(signed)
+    await publishToRelays(activeRelays, signed)
   } catch (err) {
     console.warn('Failed to broadcast video event to relays:', err)
   }

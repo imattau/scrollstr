@@ -1,15 +1,18 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react'
+import { use$ } from 'applesauce-react/hooks'
 import { List, ListImperativeAPI } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
-import { createRxBackwardReq, createRxForwardReq } from 'rx-nostr'
+import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
+import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, ArrowUp, Sparkles } from 'lucide-react'
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
@@ -74,7 +77,7 @@ interface VideoFeedProps {
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange, isMuted }) => {
-  const { rxNostr, session, eventStore } = useNostr()
+  const { session, eventStore } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
@@ -87,60 +90,109 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
+
+  // New-events counter: tracks how many new items appeared before the current position
+  const [newEventsCount, setNewEventsCount] = useState(0)
+  // Snapshot of video IDs as the user last saw them from index 0
+  const seenTopIdsRef = useRef<Set<string>>(new Set())
+  // Whether the user has scrolled past the top
+  const isAtTopRef = useRef(true)
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
+  // Reactively subscribe to the user's kind:3 contact list so followingPubkeys
+  // updates as soon as the event arrives from relays (fixes the stale-useMemo bug).
+  const contactListEvent = use$(
+    () => session?.pubkey
+      ? getEventsQuery$({ kinds: [3], authors: [session.pubkey] })
+      : getEventsQuery$({ kinds: [3], authors: [] }),
+    [session?.pubkey ?? '']
+  )?.[0]
+
   const followingPubkeys = useMemo(() => {
-    if (!session?.pubkey) return []
-    const contactListEvent = eventStore.getByFilters({ kinds: [3], authors: [session.pubkey] })?.[0]
     if (!contactListEvent) return []
     return contactListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
-  }, [eventStore, session?.pubkey])
+  }, [contactListEvent])
 
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
 
-  // 1. Subscribe to user's profile and relay list (kinds 0, 10002) - prioritized before video loading
+  // Sync rxNostr default relays whenever the user's relay list resolves.
+  // This ensures ALL subscriptions (not just those with explicit { relays }) use
+  // the user's actual relay list once kind:10002 has been fetched.
+  useEffect(() => {
+    if (relayUrls.length > 0) {
+      console.log('[VideoFeed] Updating active relays to user list:', relayUrls)
+      setActiveRelays(relayUrls)
+
+      // Resume backfill with the user's own relay set.
+      // maybeResumeBackfill is a no-op if the cache is already full or a backfill is running.
+      void maybeResumeBackfill(relayUrls)
+    }
+  }, [rxNostr, relayUrls])
+
+  // 1. Fetch user's profile and relay list (kinds 0, 3, 10002) using bootstrap relays.
+  // IMPORTANT: We intentionally do NOT include `relayUrls` in the deps here.
+  // Doing so creates a chicken-and-egg loop: relayUrls depends on kind:10002 being
+  // in the store, but kind:10002 can't be in the store until we fetch it. We always
+  // bootstrap from well-known relays (including purplepag.es which indexes relay lists)
+  // using a backward req so we actually retrieve historical/stored events.
   useEffect(() => {
     if (!session?.pubkey) {
       setIsMetadataLoaded(true)
       return
     }
 
-    console.log(`[VideoFeed] Fetching user profile and relay list for ${session.pubkey} over relays:`, relayUrls)
+    const bootstrapRelays = [
+      'wss://purplepag.es',
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.snort.social',
+    ]
 
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [0, 3, 10002], authors: [session.pubkey], limit: 1 })
+    console.log(`[VideoFeed] Fetching user profile and relay list for ${session.pubkey} over bootstrap relays:`, bootstrapRelays)
+
+    const unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [session.pubkey], limit: 3 })
 
     const timer = setTimeout(() => {
       console.log(`[VideoFeed] Metadata loaded (or timeout)`)
       setIsMetadataLoaded(true)
-    }, 800)
+    }, 1500)
 
     return () => {
-      sub.unsubscribe()
+      unsub()
       clearTimeout(timer)
     }
-  }, [rxNostr, session?.pubkey, relayUrls])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.pubkey])
 
-  // 2. Subscribe to real-time events from relays with strict time & limit guards
+  // 2a. Explore feed: fetch recent videos from all relays (no author filter)
   useEffect(() => {
     if (!isMetadataLoaded) return
-    console.log('Loading initial video backlog from relays (with limit: 50)...')
-    const rxReq = createRxBackwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    
-    // Strict limits
-    rxReq.emit({
+    if (feedType === 'following') return // handled by 2b below
+    console.log('[VideoFeed] Fetching explore feed...')
+    const unsub = subscribeToRelays(relayUrls, {
       kinds: [21, 22, 34236],
       limit: 200,
-      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30 // 30 days ago
+      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
     })
+    return unsub
+  }, [relayUrls, isMetadataLoaded, feedType])
 
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, relayUrls, isMetadataLoaded])
+  // 2b. Following feed: fetch videos authored by followed pubkeys.
+  // Re-runs whenever followingPubkeys resolves (reactive kind:3 subscription).
+  useEffect(() => {
+    if (!isMetadataLoaded) return
+    if (feedType !== 'following') return
+    if (followingPubkeys.length === 0) return
+    console.log(`[VideoFeed] Fetching following feed for ${followingPubkeys.length} authors...`)
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: [21, 22, 34236],
+      authors: followingPubkeys,
+      limit: 200,
+      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
+    })
+    return unsub
+  }, [relayUrls, isMetadataLoaded, feedType, followingPubkeys])
 
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
   const dbShapes = useLiveQuery(async () => {
@@ -254,27 +306,19 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     setIsFetchingOlder(true)
 
     console.log(`Loading older videos before ${oldestCreatedAt}...`)
-    const rxReq = createRxBackwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe({
-      complete: () => {
-        setIsFetchingOlder(false)
-      },
-      error: (error) => {
-        console.error('Failed to load older videos:', error)
-        setIsFetchingOlder(false)
-      },
-    })
-
-    rxReq.emit({
+    const unsub = subscribeToRelays(relayUrls, {
       kinds: [21, 22, 34236],
       limit: PAGE_SIZE,
       until: oldestCreatedAt - 1,
     })
+    // Mark fetch done after a short delay to allow events to arrive
+    const doneTimer = setTimeout(() => setIsFetchingOlder(false), 3000)
 
     return () => {
-      sub.unsubscribe()
+      unsub()
+      clearTimeout(doneTimer)
     }
-  }, [activeIndex, isFetchingOlder, rxNostr, videos.length, relayUrls])
+  }, [activeIndex, isFetchingOlder, videos.length, relayUrls])
 
   // Progressive comments & zaps subscription logic near viewport
   useEffect(() => {
@@ -289,14 +333,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
 
     console.log(`Prefetching reactions/comments progressively near viewport:`, videoIdsToFetch)
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
+    const unsub = subscribeToRelays(relayUrls, { kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, activeIndex, videos, relayUrls])
+    return unsub
+  }, [activeIndex, videos, relayUrls])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
@@ -329,6 +369,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           mediaStatusCount: await db.mediaStatus.count()
         })
       })()
+    }
+
+    // Track whether user is at top
+    isAtTopRef.current = newIndex === 0
+    if (newIndex === 0) {
+      // User scrolled back to the top — reset counter and update seen IDs
+      setNewEventsCount(0)
+      seenTopIdsRef.current = new Set(videos.map(v => v.id))
     }
   }, [activeIndex, videos])
 
@@ -374,6 +422,38 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, videos, onVideoChange])
 
+  // Detect newly arrived videos when user is not at index 0
+  useLayoutEffect(() => {
+    if (videos.length === 0) return
+
+    // Initialise seen IDs on first render
+    if (seenTopIdsRef.current.size === 0) {
+      seenTopIdsRef.current = new Set(videos.map(v => v.id))
+      return
+    }
+
+    if (isAtTopRef.current) {
+      // Always keep seen set fresh when at top
+      seenTopIdsRef.current = new Set(videos.map(v => v.id))
+      return
+    }
+
+    // Count videos that weren't in the set when user was last at the top
+    const unseen = videos.filter(v => !seenTopIdsRef.current.has(v.id)).length
+    if (unseen > 0) {
+      setNewEventsCount(unseen)
+    }
+  }, [videos])
+
+  const handleScrollToTop = useCallback(() => {
+    listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'smooth' })
+    setActiveIndex(0)
+    currentVideoIdRef.current = videos[0]?.id ?? ''
+    isAtTopRef.current = true
+    setNewEventsCount(0)
+    seenTopIdsRef.current = new Set(videos.map(v => v.id))
+  }, [videos])
+
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
     const video = videos.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
@@ -414,6 +494,19 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         rowProps={rowProps}
         rowComponent={VideoFeedRow as any}
       />
+
+      {/* New events pill — shown when user has scrolled past index 0 and new videos arrived */}
+      {newEventsCount > 0 && activeIndex > 0 && (
+        <button
+          onClick={handleScrollToTop}
+          className="new-events-pill"
+          title={`${newEventsCount} new video${newEventsCount === 1 ? '' : 's'} — tap to go to the top`}
+        >
+          <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>{newEventsCount} new</span>
+          <ArrowUp className="w-3.5 h-3.5 flex-shrink-0" />
+        </button>
+      )}
 
       {/* Floating navigation buttons for desktop */}
       <div className="hidden md:flex flex-col gap-3 absolute right-6 top-1/2 -translate-y-1/2 z-30">

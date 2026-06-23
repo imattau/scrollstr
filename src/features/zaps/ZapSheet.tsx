@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNostr } from '../../app/providers'
-import { createRxForwardReq } from 'rx-nostr'
+import { subscribeToRelays } from '../../nostr/pool'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 
@@ -48,17 +48,20 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
       // If lud16 is not found in cache, fetch it from relays
       if (!lud16) {
         console.log(`Lud16 not found in cache for ${creatorPubkey}, querying profile from relays...`)
-        const rxReq = createRxForwardReq()
         const promise = new Promise<any>((resolve) => {
-          const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe((packet) => {
-            if (packet.event.kind === 0 && packet.event.pubkey === creatorPubkey) {
-              resolve(packet.event)
+          let resolved = false
+          const sub = subscribeToRelays(relayUrls, { kinds: [0], authors: [creatorPubkey], limit: 1 }, (event) => {
+            if (!resolved && event.kind === 0 && event.pubkey === creatorPubkey) {
+              resolved = true
+              resolve(event)
             }
           })
-          rxReq.emit({ kinds: [0], authors: [creatorPubkey], limit: 1 })
           setTimeout(() => {
-            sub.unsubscribe()
-            resolve(null)
+            if (!resolved) {
+              resolved = true
+              resolve(null)
+            }
+            sub()
           }, 3000)
         })
         const fetchedProfile = await promise
