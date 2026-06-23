@@ -171,31 +171,31 @@ export function subscribeToRelays(
   filters: any | any[],
   onEvent?: (event: any) => void
 ): () => void {
-  const filterArr = Array.isArray(filters) ? filters : [filters]
-  const sub = pool.subscribeMany(relays, filterArr as any, {
-    onevent(event) {
-      if (event.kind === 10002) {
-        console.log(
-          `[pool] kind:10002 received for ${event.pubkey}:`,
-          event.tags?.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
-        )
+  const filterList = Array.isArray(filters) ? filters : [filters]
+
+  const handleEvent = (event: any) => {
+    if (event.kind === 10002) {
+      console.log(
+        `[pool] kind:10002 received for ${event.pubkey}:`,
+        event.tags?.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
+      )
+    }
+    eventStore.add(event)
+    saveEventToCache(event)
+
+    // Periodic memory pruning
+    if (eventStore.memory && eventStore.memory.size > 1000) {
+      const pruned = eventStore.prune(200)
+      if (pruned > 0) {
+        console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
       }
-      eventStore.add(event)
-      saveEventToCache(event)
+    }
 
-      // Periodic memory pruning
-      if (eventStore.memory && eventStore.memory.size > 1000) {
-        const pruned = eventStore.prune(200)
-        if (pruned > 0) {
-          console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
-        }
-      }
+    onEvent?.(event)
+  }
 
-      onEvent?.(event)
-    },
-  })
-
-  return () => sub.close()
+  const subs = filterList.map((f) => pool.subscribeMany(relays, f, { onevent: handleEvent }))
+  return () => subs.forEach((s) => s.close())
 }
 
 /**
@@ -217,6 +217,7 @@ export async function publishToRelays(relays: string[], event: any): Promise<voi
  * Resolves with all events returned before EOSE.
  */
 export async function fetchFromRelays(relays: string[], filters: any | any[]): Promise<any[]> {
-  const filterArr = Array.isArray(filters) ? filters : [filters]
-  return pool.querySync(relays, filterArr[0])
+  const filterList = Array.isArray(filters) ? filters : [filters]
+  const results = await Promise.all(filterList.map((f) => pool.querySync(relays, f)))
+  return results.flat()
 }
