@@ -1,4 +1,4 @@
-import { generateSecretKey, getPublicKey, nip04, SimplePool } from 'nostr-tools'
+import { generateSecretKey, getPublicKey, nip04, SimplePool, finalizeEvent } from 'nostr-tools'
 
 interface Nip46Request {
   id: string
@@ -82,7 +82,11 @@ export class Nip46Signer {
     if (!this.userPubkey) throw new Error('Not connected to remote signer')
     const response = await this.sendRequest('sign_event', [this.userPubkey, JSON.stringify(event)])
     if (!response.result) throw new Error('Remote signing failed')
-    return JSON.parse(response.result)
+    const signed = JSON.parse(response.result)
+    if (!signed.id || !signed.sig) {
+      throw new Error('Remote signer returned an invalid event (missing id or sig)')
+    }
+    return signed
   }
 
   close() {
@@ -101,13 +105,15 @@ export class Nip46Signer {
 
     const encrypted = await nip04.encrypt(this.ephemeralPrivkey, this.signerPubkey, requestJson)
 
-    const event = {
-      kind: 24133,
-      pubkey: this.ephemeralPubkey,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['p', this.signerPubkey]],
-      content: encrypted,
-    }
+    const event = finalizeEvent(
+      {
+        kind: 24133,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['p', this.signerPubkey]],
+        content: encrypted,
+      },
+      this.ephemeralPrivkey,
+    )
 
     const responsePromise = new Promise<Nip46Response>((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -131,7 +137,7 @@ export class Nip46Signer {
 
     this.subscription = this.pool.subscribeMany(
       [this.relayUrl],
-      [{ kinds: [24133], authors: [this.signerPubkey], '#p': [this.ephemeralPubkey] }],
+      { kinds: [24133], authors: [this.signerPubkey], '#p': [this.ephemeralPubkey] },
       {
         onevent: async (event: any) => {
           try {
