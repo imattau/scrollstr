@@ -1,19 +1,24 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$, subscribeToRelays } from '../../nostr/rxNostr'
 import { use$ } from 'applesauce-react/hooks'
 import { parseVideoEvent } from '../../nostr/events/video'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
+import { publishFollow } from '../../nostr/events/reactions'
 import { useNavigate } from 'react-router-dom'
+import { useUserRelayUrls } from '../../nostr/relays'
 
 const EMPTY_VIDEOS: any[] = []
+const VIDEO_KINDS = [21, 22, 34236]
 
 const TrendingCreatorRow: React.FC<{
   creator: { pubkey: string; name: string; subtitle: string; color: string }
+  isFollowing: boolean
+  session: any
   onFollow: (pubkey: string) => void
-}> = ({ creator, onFollow }) => {
+}> = ({ creator, isFollowing, session, onFollow }) => {
   const navigate = useNavigate()
   const profile = useProfile(creator.pubkey)
   const displayName = profile.displayName || profile.name || creator.name
@@ -40,24 +45,41 @@ const TrendingCreatorRow: React.FC<{
           <p className="text-[11px] font-normal text-[#a1a1aa]">{creator.subtitle}</p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => onFollow(creator.pubkey)}
-        className="rounded-[11px] bg-[#18181d] px-[16px] py-[8px] text-[13px] font-semibold text-white transition-transform duration-150 active:scale-95"
-      >
-        Follow
-      </button>
+      {session && (
+        <button
+          type="button"
+          onClick={() => onFollow(creator.pubkey)}
+          className={`rounded-[11px] px-[16px] py-[8px] text-[13px] font-semibold transition-all duration-150 active:scale-95 ${
+            isFollowing
+              ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+              : 'bg-[#18181d] text-white'
+          }`}
+        >
+          {isFollowing ? 'Unfollow' : 'Follow'}
+        </button>
+      )}
     </div>
   )
 }
 
 export const DiscoverPage: React.FC = () => {
-  const { eventStore } = useNostr()
+  const { session, rxNostr, signEvent, eventStore } = useNostr()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
+  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+
+  // Subscribe to video events from relays so the discover page stays fresh
+  useEffect(() => {
+    if (!relayUrls.length) return
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: VIDEO_KINDS,
+      limit: 100,
+    })
+    return () => unsub()
+  }, [relayUrls])
 
   // Query short-video events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [21, 22, 34236] }), []) ?? EMPTY_VIDEOS
+  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: VIDEO_KINDS }), []) ?? EMPTY_VIDEOS
 
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {
@@ -135,6 +157,37 @@ export const DiscoverPage: React.FC = () => {
     return compiled.length > 0 ? compiled : defaultCreators
   }, [videos])
 
+  // Subscribe to kind:0 for displayed creators to refresh metadata
+  useEffect(() => {
+    const realCreators = creators
+      .filter(c => !c.pubkey.startsWith('mock-'))
+      .map(c => c.pubkey)
+    if (!realCreators.length || !relayUrls.length) return
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: [0],
+      authors: realCreators,
+      limit: 1,
+    })
+    return () => unsub()
+  }, [creators, relayUrls])
+
+  // Get logged-in user's contact list to determine follow state
+  const myContactListEvent = use$(
+    () => session?.pubkey
+      ? getEventsQuery$({ kinds: [3], authors: [session.pubkey] })
+      : getEventsQuery$({ kinds: [3], authors: [] }),
+    [session?.pubkey]
+  )?.[0]
+
+  const isFollowingPubkeys = useMemo(() => {
+    if (!myContactListEvent) return new Set<string>()
+    return new Set(
+      myContactListEvent.tags
+        .filter((t: any) => t[0] === 'p')
+        .map((t: any) => t[1])
+    )
+  }, [myContactListEvent])
+
   // Filter videos based on the search query
   const filteredVideos = useMemo(() => {
     if (!searchQuery.trim()) return []
@@ -148,8 +201,23 @@ export const DiscoverPage: React.FC = () => {
     })
   }, [videos, searchQuery])
 
-  const handleFollow = (pubkey: string) => {
-    alert(`Follow request for pubkey ${pubkey} simulated!`)
+  const handleFollow = async (targetPubkey: string) => {
+    if (!session) {
+      alert('Please connect your Nostr account to follow creators')
+      return
+    }
+    try {
+      const { signed, action } = await publishFollow(
+        signEvent,
+        rxNostr,
+        targetPubkey,
+        myContactListEvent || null
+      )
+      eventStore.add(signed)
+    } catch (err: any) {
+      console.error('Follow toggle failed:', err)
+      alert('Failed to update follow status: ' + (err.message || err))
+    }
   }
 
   return (
@@ -243,6 +311,8 @@ export const DiscoverPage: React.FC = () => {
                   <TrendingCreatorRow
                     key={creator.pubkey}
                     creator={creator}
+                    isFollowing={isFollowingPubkeys.has(creator.pubkey)}
+                    session={session}
                     onFollow={handleFollow}
                   />
                 ))}
