@@ -333,11 +333,17 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       videoIdsToFetch.push(nextVideo.id)
     }
 
+    const existingEvents = eventStore.getByFilters({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
+    if (existingEvents.length > 0) {
+      console.log(`Using cached reactions/comments for videos`, videoIdsToFetch)
+      return
+    }
+
     console.log(`Prefetching reactions/comments progressively near viewport:`, videoIdsToFetch)
     const unsub = subscribeToRelays(relayUrls, { kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 
     return unsub
-  }, [activeIndex, videos, relayUrls])
+  }, [activeIndex, videos, relayUrls, eventStore])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {

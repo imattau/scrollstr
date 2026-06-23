@@ -214,13 +214,20 @@ export const ProfilePage: React.FC = () => {
     const pubkeys = listView === 'followers' ? followersWithVideos : followingWithVideos
     const realPubkeys = pubkeys.filter((pk: string) => !pk.startsWith('mock-'))
     if (!realPubkeys.length) return
+
+    const uncachedPubkeys = realPubkeys.filter((pk: string) => !eventStore.getReplaceable(0, pk))
+    if (!uncachedPubkeys.length) {
+      console.log(`All profiles already cached for ${listView} view`)
+      return
+    }
+
     const sub = subscribeToRelays(relayUrls, {
       kinds: [0],
-      authors: realPubkeys,
+      authors: uncachedPubkeys,
       limit: 1,
     })
     return () => sub()
-  }, [listView, followersWithVideos, followingWithVideos, relayUrls])
+  }, [listView, followersWithVideos, followingWithVideos, relayUrls, eventStore])
 
   const handleEditProfile = () => {
     navigate('/settings')
