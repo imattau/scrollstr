@@ -278,7 +278,32 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
       </div>
 
       {/* Mobile Navigation (Bottom) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
+        {/* Feed Toggle Buttons */}
+        <div className="flex gap-1">
+          <Link
+            to="/?feed=following"
+            className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+              feedType === 'following'
+                ? 'bg-purple-500 text-white'
+                : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+            }`}
+          >
+            Following
+          </Link>
+          <Link
+            to="/?feed=explore"
+            className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+              feedType === 'explore'
+                ? 'bg-purple-500 text-white'
+                : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+            }`}
+          >
+            Explore
+          </Link>
+        </div>
+
+        {/* Navigation Items */}
         {mobileNavItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.path)
