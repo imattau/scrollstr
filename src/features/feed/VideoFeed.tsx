@@ -4,10 +4,10 @@ import { List, ListImperativeAPI } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { parseVideoEvent } from '../../nostr/events/video'
-import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
+import { subscribeToRelays, setActiveRelays, fetchFromRelays } from '../../nostr/pool'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { db, VideoShape } from '../../nostr/cache'
+import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
@@ -90,6 +90,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
+  const deepLinkFetchedRef = useRef(false)
 
   // New-events counter: tracks how many new items appeared before the current position
   const [newEventsCount, setNewEventsCount] = useState(0)
@@ -347,9 +348,24 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         setTimeout(() => {
           listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
         }, 100)
+      } else if (!deepLinkFetchedRef.current) {
+        deepLinkFetchedRef.current = true
+        const existing = eventStore.getByFilters({ ids: [initialVideoId], kinds: [21, 22, 34236] })
+        if (existing.length > 0) {
+          existing.forEach(ev => saveEventToCache(ev))
+        } else {
+          fetchFromRelays(relayUrls, { ids: [initialVideoId], kinds: [21, 22, 34236] })
+            .then(events => {
+              events.forEach(event => {
+                eventStore.add(event)
+                saveEventToCache(event)
+              })
+            })
+            .catch(err => console.error('[VideoFeed] Failed to fetch deep-linked video:', err))
+        }
       }
     }
-  }, [videos, initialVideoId])
+  }, [videos, initialVideoId, relayUrls, eventStore])
 
   // Track scroll position, snap, and run diagnostics
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {

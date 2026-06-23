@@ -93,6 +93,11 @@ export const ProfilePage: React.FC = () => {
   // Resolve target pubkey (route param or self session key)
   const targetPubkey = pubkey && pubkey !== 'me' ? pubkey : session?.pubkey
 
+  // Reset list view when navigating to a different profile
+  useEffect(() => {
+    setListView(null)
+  }, [targetPubkey])
+
   // Fetch creator profile details
   const profile = useProfile(targetPubkey || '')
   const displayName = profile.displayName || profile.name || 'Nostr User'
@@ -110,6 +115,16 @@ export const ProfilePage: React.FC = () => {
       .map((ev: any) => parseVideoEvent(ev))
       .filter((v: any): v is VideoItemData => v !== null)
   }, [rawVideoEvents])
+
+  // Retrieve all video events in EventStore to filter list view to creators with at least 1 video
+  const allVideoEvents = use$(
+    () => getEventsQuery$({ kinds: [21, 22, 34236] }),
+    []
+  ) ?? EMPTY_VIDEOS
+
+  const creatorsWithVideos = useMemo(() => {
+    return new Set(allVideoEvents.map((ev: any) => ev.pubkey))
+  }, [allVideoEvents])
 
   // Retrieve raw kind:6 or kind:16 repost events
   const rawBoosts = use$(
@@ -150,6 +165,14 @@ export const ProfilePage: React.FC = () => {
       .map((t: any) => t[1])
   }, [targetContactListEvent])
 
+  const followersWithVideos = useMemo(() => {
+    return followerPubkeys.filter((pk: string) => creatorsWithVideos.has(pk))
+  }, [followerPubkeys, creatorsWithVideos])
+
+  const followingWithVideos = useMemo(() => {
+    return followingPubkeys.filter((pk: string) => creatorsWithVideos.has(pk))
+  }, [followingPubkeys, creatorsWithVideos])
+
   // Retrieve logged-in user's own contact list to check if following this creator
   const myContactListEvent = use$(
     () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
@@ -188,7 +211,7 @@ export const ProfilePage: React.FC = () => {
   // Subscribe to kind:0 metadata for displayed follower/following pubkeys
   useEffect(() => {
     if (!listView || !relayUrls.length) return
-    const pubkeys = listView === 'followers' ? followerPubkeys : followingPubkeys
+    const pubkeys = listView === 'followers' ? followersWithVideos : followingWithVideos
     const realPubkeys = pubkeys.filter((pk: string) => !pk.startsWith('mock-'))
     if (!realPubkeys.length) return
     const sub = subscribeToRelays(relayUrls, {
@@ -197,7 +220,7 @@ export const ProfilePage: React.FC = () => {
       limit: 1,
     })
     return () => sub()
-  }, [listView, followerPubkeys, followingPubkeys, relayUrls])
+  }, [listView, followersWithVideos, followingWithVideos, relayUrls])
 
   const handleEditProfile = () => {
     navigate('/settings')
@@ -353,14 +376,14 @@ export const ProfilePage: React.FC = () => {
             </button>
 
             <h3 className="text-[16px] font-semibold text-[#f7f7f8] mb-3">
-              {listView === 'followers' ? 'Followers' : 'Following'} ({listView === 'followers' ? followerPubkeys.length : followingPubkeys.length})
+              {listView === 'followers' ? 'Followers' : 'Following'} ({listView === 'followers' ? followersWithVideos.length : followingWithVideos.length})
             </h3>
 
             <div className="flex-1 space-y-1 overflow-y-auto max-h-[400px] pr-1">
-              {(listView === 'followers' ? followerPubkeys : followingPubkeys).length === 0 ? (
-                <p className="text-[13px] text-[#71717a] text-center py-8">No {listView} found.</p>
+              {(listView === 'followers' ? followersWithVideos : followingWithVideos).length === 0 ? (
+                <p className="text-[13px] text-[#71717a] text-center py-8">No {listView} with videos found.</p>
               ) : (
-                (listView === 'followers' ? followerPubkeys : followingPubkeys).map((pk: string) => (
+                (listView === 'followers' ? followersWithVideos : followingWithVideos).map((pk: string) => (
                   <CreatorListItem
                     key={pk}
                     pubkey={pk}
