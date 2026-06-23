@@ -13,10 +13,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 
-const PAGE_SIZE = 20
-const LOAD_MORE_THRESHOLD = 3
+const PAGE_SIZE = 50
+const LOAD_MORE_THRESHOLD = 5
 const LOCAL_PREVIEW_ID = 'local-preview-neon-mascot'
-const MAX_FEED_ITEMS = 100
+const MAX_FEED_ITEMS = 500
 
 // Viewport constants
 const WINDOW_BEFORE = 1
@@ -139,8 +139,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     // Strict limits
     rxReq.emit({
       kinds: [21, 22, 34236],
-      limit: 50,
-      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 14 // 14 days ago
+      limit: 200,
+      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30 // 30 days ago
     })
 
     return () => {
@@ -184,7 +184,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     })
 
     // Filter out failed media
-    list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed' && v.mediaStatus !== 'too_large')
+    list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed')
 
     if (filterTag) {
       list = list.filter((v: VideoItemData) =>

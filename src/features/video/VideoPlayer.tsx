@@ -13,9 +13,6 @@ interface VideoPlayerProps {
   showControls?: boolean
 }
 
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
-const MAX_DURATION_SECONDS = 300;
-
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsInstanceRef = useRef<Hls | null>(null)
@@ -88,11 +85,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         const contentLength = res.headers.get('content-length')
         if (contentLength) {
           const bytes = parseInt(contentLength, 10)
-          if (bytes > MAX_VIDEO_BYTES) {
-            console.warn(`Video too large: ${(bytes / 1024 / 1024).toFixed(1)}MB. Skipping.`)
-            await updateMediaStatus(url, 'too_large', { size: bytes })
-            return
-          }
+          await updateMediaStatus(url, 'available', { size: bytes })
         }
         
         // Proceed with loading
@@ -129,19 +122,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         }
       })
 
-    // Listen to metadata load to enforce duration limits
+    // Listen to metadata load
     const handleLoadedMetadata = async () => {
-      if (video.duration > MAX_DURATION_SECONDS) {
-        console.warn(`Video duration exceeds limit: ${video.duration}s. Pausing.`)
-        video.pause()
-        video.removeAttribute('src')
-        try {
-          video.load()
-        } catch (_) {}
-        await updateMediaStatus(url, 'too_large', { duration: video.duration })
-      } else {
-        await updateMediaStatus(url, 'available', { duration: video.duration })
-      }
+      await updateMediaStatus(url, 'available', { duration: video.duration })
     }
 
     const handleLoadError = async () => {

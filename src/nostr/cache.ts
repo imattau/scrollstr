@@ -118,9 +118,9 @@ class ScrollstrCacheDatabase extends Dexie {
 export const db = new ScrollstrCacheDatabase()
 
 // Cache limits
-const MAX_VIDEOS = 50
-const MAX_REACTIONS_COMMENTS = 500
-const MAX_PROFILES = 150
+const MAX_VIDEOS = 2000
+const MAX_REACTIONS_COMMENTS = 20000
+const MAX_PROFILES = 5000
 const TOUCH_DEBOUNCE_MS = 250
 
 let touchFlushTimer: ReturnType<typeof setTimeout> | null = null
