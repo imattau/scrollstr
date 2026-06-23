@@ -19,7 +19,7 @@ export const publishLike = async (
   console.log(`Signing and publishing Like event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
   try {
-    await rxNostr.cast(signed)
+    await rxNostr.cast(signed).toPromise()
   } catch (err) {
     console.warn('Failed to broadcast Like event to relays:', err)
   }
@@ -47,7 +47,7 @@ export const publishBoost = async (
   console.log(`Signing and publishing Boost event for ${targetEventId}...`)
   const signed = await signEvent(eventTemplate)
   try {
-    await rxNostr.cast(signed)
+    await rxNostr.cast(signed).toPromise()
   } catch (err) {
     console.warn('Failed to broadcast Boost event to relays:', err)
   }
@@ -84,7 +84,7 @@ export const publishFollow = async (
   console.log(`Signing and publishing Contact list (kind:3) for ${action} of ${creatorPubkey}...`)
   const signed = await signEvent(eventTemplate)
   try {
-    await rxNostr.cast(signed)
+    await rxNostr.cast(signed).toPromise()
   } catch (err) {
     console.warn(`Failed to broadcast contact list (${action}) event to relays:`, err)
   }

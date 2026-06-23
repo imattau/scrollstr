@@ -35,6 +35,11 @@ export interface VideoItemData {
   hasZapped?: boolean
   finalRankScore?: number
   mediaStatus?: string
+  width?: number
+  height?: number
+  duration?: number
+  size?: number
+  mimeType?: string
 }
 
 interface VideoFeedItemProps {
@@ -81,9 +86,15 @@ function ActionPill({
 const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick }) => {
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
+  const [showInfo, setShowInfo] = React.useState(false)
 
   return (
-    <article className="feed-item relative h-full w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]">
+    <article
+      className="feed-item relative h-full w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]"
+      onMouseEnter={() => setShowInfo(true)}
+      onMouseLeave={() => setShowInfo(false)}
+      onTouchStart={() => setShowInfo(!showInfo)}
+    >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%),linear-gradient(180deg,#1b1327_0%,#1b1327_66%,#09090b_100%)]" />
 
       <div className="absolute inset-0 z-0">
@@ -149,8 +160,8 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
         />
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 z-10 h-[230px] bg-[#09090b]/72 md:h-[100px] md:bg-transparent">
-        <div className="absolute left-4 top-[48px] w-[278px] max-w-[calc(100%-96px)] space-y-[6px] leading-none md:bottom-[16px] md:left-[18px] md:top-auto md:w-[320px]">
+      <div className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-[#09090b]/90 via-[#09090b]/60 to-transparent transition-all duration-300 ${showInfo ? 'h-[230px] md:h-[120px]' : 'h-0 overflow-hidden'}`}>
+        <div className={`absolute left-4 w-[278px] max-w-[calc(100%-96px)] space-y-[6px] leading-none md:left-[18px] md:w-[320px] transition-all duration-300 ${showInfo ? 'bottom-[16px] opacity-100' : 'bottom-[-10px] opacity-0'}`}>
           <p className="text-[15px] font-semibold text-[#f7f7f8]">
             {creatorLabel} {video.creator.isVerified ? '✓' : ''}
           </p>
@@ -158,6 +169,11 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
             <span className="block leading-[1.35]">
               {video.description || video.title}
             </span>
+            {video.duration && (
+              <span className="text-[12px] text-[#a1a1aa] mt-1">
+                {Math.floor(video.duration / 60)}:{String(Math.floor(video.duration % 60)).padStart(2, '0')}
+              </span>
+            )}
           </div>
           <p className="text-[12px] font-medium text-[#a78bfa]">
             {(video.hashtags || ['melbourne', 'nightwalk', 'nostr']).map((tag) => `#${tag}`).join('  ')}

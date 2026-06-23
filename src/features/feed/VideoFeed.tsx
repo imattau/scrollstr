@@ -175,11 +175,16 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         boostsCount: shape.repostCount || 0,
         zapsCount: shape.zapCount || 0,
         hasLiked: shape.userState?.liked || false,
-        hasBoosted: shape.userState?.skipped || false, // skipped or boosted placeholders
+        hasBoosted: shape.userState?.skipped || false,
         hasZapped: shape.userState?.zapped || false,
         music: 'Original Clip Audio',
         finalRankScore: shape.finalRankScore ?? 0,
-        mediaStatus: shape.mediaStatus
+        mediaStatus: shape.mediaStatus,
+        width: shape.width,
+        height: shape.height,
+        duration: shape.duration,
+        size: shape.size,
+        mimeType: shape.mimeType
       }
     })
 
@@ -213,6 +218,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   useEffect(() => {
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
+    // Keep activeIndex within bounds when videos list changes
+    if (activeIndex >= videos.length) {
+      setActiveIndex(Math.max(0, videos.length - 1))
+    }
   }, [videos])
 
   useEffect(() => {
@@ -393,7 +402,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       <div className="hidden md:flex flex-col gap-3 absolute right-6 top-1/2 -translate-y-1/2 z-30">
         <button
           onClick={() => {
-            if (activeIndex > 0) {
+            if (activeIndex > 0 && activeIndex - 1 < videos.length) {
               listRef.current?.scrollToRow({ index: activeIndex - 1, align: 'auto', behavior: 'auto' })
             }
           }}
@@ -405,11 +414,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         </button>
         <button
           onClick={() => {
-            if (activeIndex < videos.length - 1) {
+            if (activeIndex < videos.length - 1 && activeIndex + 1 < videos.length) {
               listRef.current?.scrollToRow({ index: activeIndex + 1, align: 'auto', behavior: 'auto' })
             }
           }}
-          disabled={activeIndex === videos.length - 1}
+          disabled={activeIndex === videos.length - 1 || videos.length === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
           title="Next Video"
         >
