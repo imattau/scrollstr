@@ -1,31 +1,50 @@
-# Session State - User Profile & Relay Loading Fix
-Generated: 2026-06-23 19:20 UTC
-Status: IN PROGRESS - Testing & Commit
+# Session State - Profile Button Bug Debugging
+Generated: 2026-06-23 20:35 UTC
+Reason: Context threshold exceeded (80%+) - Using clear-context workflow
+execution_mode: unattended
+auto_continue: true
 
-## Problem Identified
-User profile (kind 0) and relay lists (kind 10002) not loading before video feed.
+## Task Objective
+Fix the Profile button bug: The button doesn't show "My Profile" text when logged in until clicked. Use systematic-debugging skill to:
+1. Find the Profile button component
+2. Identify where button text comes from
+3. Trace session state dependency
+4. Check useEffect dependencies and initial render timing
+5. Identify root cause
+6. Apply ONE fix
+7. Test in browser to verify immediate display
+8. Commit the fix
 
-## Root Cause
-Chicken-and-egg dependency: useUserRelayUrls falls back to default relays while fetching the actual relay list, subscription runs once with fallbacks and never re-runs.
+## Current Status
+- Migration from rx-nostr to nostr-tools is COMPLETE and VERIFIED
+- Bug discovered: Profile button text doesn't display until clicked after login
+- No debugging work started yet
 
-## Solution Implemented
-Modified VideoFeed.tsx useEffect to:
-1. Add `relayUrls` to dependency array → subscription re-runs when relay list arrives
-2. Include kind 0 (profile) in initial subscription
-3. Increase timeout from 400ms to 800ms
-4. Add debug logging to track metadata loading
+## Key Context
+- Repository: /home/mattthomson/workspace/scrollstr
+- Tech stack: React + TypeScript + Nostr
+- Dev server runs on http://localhost:5173/
+- Recent changes to: nostrContext.ts, providers.tsx, VideoFeed.tsx, and other Nostr-related files
 
-## Files Changed (NOT YET COMMITTED)
-- src/nostr/relays.ts - Debug logging added
-- src/features/feed/VideoFeed.tsx - Subscription fix applied (relayUrls dependency + kind 0)
-- vite.config.ts - PWA caching config (from earlier session)
+## Active Files to Investigate
+- src/app/App.tsx or similar (likely contains navigation/Profile button)
+- src/app/providers.tsx (session/auth providers)
+- src/app/nostrContext.ts (Nostr session state)
+- Look for Profile button component and related hooks
 
-## Next Steps for Continuation Agent
-1. Kill old dev processes: `pkill -f "scrollstr.*vite" || true`
-2. Start fresh: `npm run dev`
-3. Test in browser (http://localhost:5173) - check console for:
-   - `[Relays] Found user relay list` → relay list loaded
-   - `[VideoFeed] Fetching user profile` → subscription started
-   - `[VideoFeed] Metadata loaded` → profile ready before video feed
-4. If working: Commit with `git commit -m "fix(init): load user profile and relay list before video feed"`
-5. If broken: Check console errors and adjust relay timeout or request logic
+## Debugging Strategy
+1. START: Locate Profile button in App.tsx navigation
+2. TRACE: Find where button text is derived from (likely auth state)
+3. CHECK: Review useEffect dependencies in providers/context
+4. IDENTIFY: Missing dependency or timing issue in state initialization
+5. FIX: Apply single targeted fix
+6. VERIFY: Test in running browser to confirm "My Profile" shows immediately
+
+## Continuation Instructions
+- Read this file FIRST to understand the bug
+- Search for Profile button component (likely in App.tsx)
+- Use systematic-debugging skill for structured approach
+- Work autonomously - NO confirmation needed
+- Complete all 8 debugging steps
+- Commit fix with clear message
+- DO NOT create new files - edit existing only
