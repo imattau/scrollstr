@@ -52,8 +52,11 @@ export const useUserRelayUrls = (eventStore: any, pubkey?: string | null): strin
   const normalized = normalizeRelayUrls(relayUrls)
 
   if (normalized.length > 0) {
+    console.log(`[Relays] Found user relay list (kind 10002) for ${pubkey}:`, normalized)
     return normalized
   }
 
-  return getUserRelayUrls(eventStore, pubkey)
+  const fallback = getUserRelayUrls(eventStore, pubkey)
+  console.log(`[Relays] No kind 10002 found for ${pubkey}, using fallback:`, fallback)
+  return fallback
 }

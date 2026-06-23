@@ -105,30 +105,29 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
 
-  // 1. Subscribe once per pubkey to user's contact list and relay list (kinds 3, 10002)
+  // 1. Subscribe to user's profile and relay list (kinds 0, 10002) - prioritized before video loading
   useEffect(() => {
     if (!session?.pubkey) {
       setIsMetadataLoaded(true)
       return
     }
-    if (userMetadataSubscribedRef.current === session.pubkey) return
 
-    console.log(`Subscribing to user metadata for ${session.pubkey}...`)
-    userMetadataSubscribedRef.current = session.pubkey
+    console.log(`[VideoFeed] Fetching user profile and relay list for ${session.pubkey} over relays:`, relayUrls)
 
     const rxReq = createRxForwardReq()
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [3, 10002], authors: [session.pubkey], limit: 1 })
+    rxReq.emit({ kinds: [0, 3, 10002], authors: [session.pubkey], limit: 1 })
 
     const timer = setTimeout(() => {
+      console.log(`[VideoFeed] Metadata loaded (or timeout)`)
       setIsMetadataLoaded(true)
-    }, 400)
+    }, 800)
 
     return () => {
       sub.unsubscribe()
       clearTimeout(timer)
     }
-  }, [rxNostr, session?.pubkey])
+  }, [rxNostr, session?.pubkey, relayUrls])
 
   // 2. Subscribe to real-time events from relays with strict time & limit guards
   useEffect(() => {
