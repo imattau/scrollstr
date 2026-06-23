@@ -16,6 +16,7 @@ export interface NostrContextProps {
   isConnected: boolean
   session: UserSession | null
   loginWithNip07: () => Promise<string>
+  loginWithNip46: (bunkerUrl: string) => Promise<string>
   loginReadOnly: (pubkey: string) => void
   loginWithPasskey: () => Promise<string>
   registerPasskey: (nsec?: string) => Promise<string>

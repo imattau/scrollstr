@@ -62,7 +62,7 @@ function OptionCard({
 }
 
 export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess }) => {
-  const { loginWithNip07, loginReadOnly, loginWithPasskey, registerPasskey } = useNostr()
+  const { loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey } = useNostr()
   const [npub, setNpub] = useState('')
   const [nsec, setNsec] = useState('')
   const [nip46Address, setNip46Address] = useState('')
@@ -87,15 +87,19 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
     }
   }
 
-  const handleNip46Login = () => {
+  const handleNip46Login = async () => {
     setError('')
     if (!nip46Address.trim()) {
       setError('Please enter a remote signer address')
       return
     }
 
-    alert(`NIP-46 connect simulated for ${nip46Address}`)
-    onLoginSuccess()
+    try {
+      await loginWithNip46(nip46Address.trim())
+      onLoginSuccess()
+    } catch (err: any) {
+      setError(err.message || 'Remote signer connection failed')
+    }
   }
 
   const handleReadOnlyLogin = () => {

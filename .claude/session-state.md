@@ -17,8 +17,9 @@ Fix the Profile button bug: The button doesn't show "My Profile" text when logge
 
 ## Current Status
 - Migration from rx-nostr to nostr-tools is COMPLETE and VERIFIED
-- Bug discovered: Profile button text doesn't display until clicked after login
-- No debugging work started yet
+- Fix 1 (console.error → console.warn in VideoPlayer.tsx:109) — DONE
+- Profile button investigation: text is hardcoded ("Profile"/"My Profile") in MainLayout.tsx lines 109, 246, 32 — no dynamic state dependency. The hypothesis in a prior session was not validated against the actual code.
+- Playwright test captured 14 console.error from VideoPlayer media probe (now downgraded to warn).
 
 ## Key Context
 - Repository: /home/mattthomson/workspace/scrollstr

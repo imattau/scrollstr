@@ -13,6 +13,7 @@ import {
 } from 'nostr-passkey'
 import { PasskeySigner } from 'nostr-passkey/applesauce'
 import { NostrContext, type UserSession } from './nostrContext'
+import { Nip46Signer, parseBunkerUrl } from '../nostr/nip46'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -54,6 +55,24 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setSession({ pubkey, method })
         } else if (method === 'passkey') {
           setSession({ pubkey, method, signer: null })
+        } else if (method === 'nip46') {
+          const { bunkerUrl } = JSON.parse(stored)
+          if (bunkerUrl) {
+            try {
+              const params = parseBunkerUrl(bunkerUrl)
+              const remoteSigner = new Nip46Signer(pool, params)
+              remoteSigner.connect().then(connectedPubkey => {
+                setSession({ pubkey: connectedPubkey, method: 'nip46', signer: remoteSigner })
+              }).catch(err => {
+                console.warn('[NIP-46] Reconnect failed for restored session:', err)
+                setSession({ pubkey, method: 'nip46', signer: null })
+              })
+            } catch {
+              setSession({ pubkey, method: 'nip46', signer: null })
+            }
+          } else {
+            setSession({ pubkey, method: 'nip46', signer: null })
+          }
         }
       } catch (e) {
         console.error('Failed to restore session:', e)
@@ -72,6 +91,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     setSession(newSession)
     localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'nip07' }))
+    return pubkey
+  }
+
+  const loginWithNip46 = async (bunkerUrl: string): Promise<string> => {
+    const params = parseBunkerUrl(bunkerUrl)
+
+    const signer = new Nip46Signer(pool, params)
+    const pubkey = await signer.connect()
+
+    const newSession: UserSession = {
+      pubkey,
+      method: 'nip46',
+      signer,
+    }
+    setSession(newSession)
+    localStorage.setItem(
+      'scrollstr_session',
+      JSON.stringify({ pubkey, method: 'nip46', bunkerUrl })
+    )
     return pubkey
   }
 
@@ -161,6 +199,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         })
       }
       return await activeSigner.signEvent(event)
+    } else if (session.method === 'nip46') {
+      const remoteSigner = session.signer as Nip46Signer
+      if (!remoteSigner || !remoteSigner.connected) {
+        throw new Error('NIP-46 remote signer is not connected')
+      }
+      return await remoteSigner.signEvent(event)
     } else {
       throw new Error('Signing is not supported in read-only mode')
     }
@@ -175,6 +219,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         isConnected,
         session,
         loginWithNip07,
+        loginWithNip46,
         loginReadOnly,
         loginWithPasskey,
         registerPasskey,

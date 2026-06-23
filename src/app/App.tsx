@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
 import { LoginSheet } from '../features/auth/LoginSheet'
@@ -18,7 +18,10 @@ function AppContent() {
   const [activeVideoId, setActiveVideoId] = useState('')
   const [activeCreatorPubkey, setActiveCreatorPubkey] = useState('')
   const [activeVideoKind, setActiveVideoKind] = useState<number | null>(null)
-  const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string; videoKind?: number } | null>(null)
+  const [pendingAction, setPendingAction] = useState<{ type: string; videoId: string; creatorPubkey?: string; videoKind?: number } | null>(null)
+  // Keep a ref pointing at the latest handleActionTrigger so pending post-login
+  // actions don't use a stale closure (session is null in the pre-login render).
+  const handleActionTriggerRef = useRef<typeof handleActionTrigger>(null as any)
   const [activeVideo, setActiveVideo] = useState<any>(null)
   const [isMuted, setIsMuted] = useState(true)
 
@@ -43,7 +46,7 @@ function AppContent() {
 
     if (requiresAuth && !session) {
       console.log(`Action '${actionType}' requires login. Opening Login Sheet.`)
-      setPendingAction({ type: actionType, videoId, videoKind })
+      setPendingAction({ type: actionType, videoId, creatorPubkey, videoKind })
       setIsLoginOpen(true)
       return
     }
@@ -116,15 +119,21 @@ function AppContent() {
     }
   }
 
+  // Sync ref after commit so pending post-login actions use the latest closure.
+  useEffect(() => {
+    handleActionTriggerRef.current = handleActionTrigger
+  })
+
   const handleLoginSuccess = () => {
     setIsLoginOpen(false)
     // Resume pending action if present
     if (pendingAction) {
-      const { type, videoId, videoKind } = pendingAction
+      const { type, videoId, creatorPubkey, videoKind } = pendingAction
       setPendingAction(null)
       // Small timeout to let sheet close before launching next step
+      // Use handleActionTriggerRef to avoid stale closure capturing a null session.
       setTimeout(() => {
-        handleActionTrigger(type, videoId, activeCreatorPubkey, videoKind)
+        handleActionTriggerRef.current(type, videoId, creatorPubkey, videoKind)
       }, 300)
     }
   }

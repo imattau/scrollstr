@@ -106,7 +106,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       })
       .catch((err) => {
         if (err.name === 'AbortError') return
-        console.error('Failed to probe media metadata:', err)
+        console.warn('Failed to probe media metadata:', err)
         // Fallback load even if HEAD fails (e.g. CORS block on HEAD)
         if (isHls) {
           if (Hls.isSupported()) {
