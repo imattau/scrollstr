@@ -116,7 +116,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
 
-  // Sync rxNostr default relays whenever the user's relay list resolves.
+  // Sync pool default relays whenever the user's relay list resolves.
   // This ensures ALL subscriptions (not just those with explicit { relays }) use
   // the user's actual relay list once kind:10002 has been fetched.
   useEffect(() => {
@@ -128,7 +128,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       // maybeResumeBackfill is a no-op if the cache is already full or a backfill is running.
       void maybeResumeBackfill(relayUrls)
     }
-  }, [rxNostr, relayUrls])
+  }, [relayUrls])
 
   // 1. Fetch user's profile and relay list (kinds 0, 3, 10002) using bootstrap relays.
   // IMPORTANT: We intentionally do NOT include `relayUrls` in the deps here.

@@ -172,7 +172,7 @@ export function subscribeToRelays(
   onEvent?: (event: any) => void
 ): () => void {
   const filterArr = Array.isArray(filters) ? filters : [filters]
-  const sub = pool.subscribeMany(relays, filterArr, {
+  const sub = pool.subscribeMany(relays, filterArr as any, {
     onevent(event) {
       if (event.kind === 10002) {
         console.log(
