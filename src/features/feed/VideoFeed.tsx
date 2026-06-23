@@ -81,7 +81,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
   const feedType = searchParams.get('feed') || 'explore'
-  
+
   const [activeIndex, setActiveIndex] = useState(0)
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const listRef = useRef<ListImperativeAPI>(null)
@@ -226,7 +226,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (currentVideoId) {
         const newIndex = videos.findIndex(v => v.id === currentVideoId)
         if (newIndex !== -1) {
-          setActiveIndex(newIndex)
+          // Only update if the video position actually changed
+          if (newIndex !== activeIndex) {
+            setActiveIndex(newIndex)
+            // Schedule scroll to maintain view of current video
+            requestAnimationFrame(() => {
+              listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
+            })
+          }
           return
         }
       }
