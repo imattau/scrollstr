@@ -20,6 +20,7 @@
     "applesauce-relay": "^6.0.3",
     "applesauce-signers": "^6.0.1",
     "dexie": "^4.4.4",
+    "dexie-react-hooks": "^4.4.0",
     "hls.js": "^1.6.16",
     "lucide-react": "^1.21.0",
     "media-chrome": "^4.19.2",

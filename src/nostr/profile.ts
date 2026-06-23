@@ -50,15 +50,25 @@ export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorP
   }
 }
 
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from './cache'
+
 // React hook to fetch creator profile reactively and cache it
 export const useProfile = (pubkey: string): CreatorProfile => {
   const { rxNostr, eventStore, session } = useNostr()
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
   const profileEvent = use$(() => getProfileQuery$(eventStore, pubkey), [pubkey])
 
+  // Reactively query Dexie's authorProfiles cache table
+  const cachedProfile = useLiveQuery(async () => {
+    if (!pubkey) return null
+    return await db.authorProfiles.get(pubkey)
+  }, [pubkey])
+
   useEffect(() => {
-    if (!profileEvent && pubkey) {
-      console.log(`Profile event not cached for ${pubkey}, fetching from relays...`)
+    // Only fetch if profile is not available in both EventStore AND Dexie cache
+    if (!profileEvent && !cachedProfile && pubkey) {
+      console.log(`Profile event not cached in memory or Dexie for ${pubkey}, fetching from relays...`)
       const rxReq = createRxForwardReq()
       const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
       rxReq.emit({ kinds: [0], authors: [pubkey], limit: 1 })
@@ -66,7 +76,20 @@ export const useProfile = (pubkey: string): CreatorProfile => {
         sub.unsubscribe()
       }
     }
-  }, [pubkey, profileEvent, rxNostr, relayUrls])
+  }, [pubkey, profileEvent, cachedProfile, rxNostr, relayUrls])
+
+  if (cachedProfile) {
+    return {
+      pubkey,
+      name: cachedProfile.name,
+      displayName: cachedProfile.displayName || cachedProfile.name,
+      picture: cachedProfile.picture,
+      nip05: cachedProfile.nip05,
+      isVerified: cachedProfile.isVerified,
+      about: cachedProfile.about,
+      website: cachedProfile.website
+    }
+  }
 
   return parseProfileContent(profileEvent, pubkey)
 }

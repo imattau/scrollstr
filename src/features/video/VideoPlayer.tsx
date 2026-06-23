@@ -1,17 +1,22 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, MediaTimeRange } from 'media-chrome/react'
 import Hls from 'hls.js'
+import { updateMediaStatus } from '../../nostr/cache'
 
 interface VideoPlayerProps {
   url: string
   poster?: string
   isActive: boolean
+  isNearActive: boolean
   isMuted: boolean
   onLike?: () => void
   showControls?: boolean
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, isMuted, onLike, showControls = false }) => {
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_DURATION_SECONDS = 300;
+
+export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsInstanceRef = useRef<Hls | null>(null)
   const [isHls, setIsHls] = useState(false)
@@ -33,7 +38,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     const video = videoRef.current
     if (!video) return
 
-    if (isActive) {
+    if (isActive && isNearActive) {
       // In active viewport
       video.play().catch((err) => {
         console.log('Autoplay blocked or interrupted:', err)
@@ -43,7 +48,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       video.pause()
       video.currentTime = 0 // Reset to beginning
     }
-  }, [isActive])
+  }, [isActive, isNearActive])
 
   // Sync mute state dynamically
   useEffect(() => {
@@ -52,7 +57,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
   }, [isMuted])
 
-  // Set up HLS or native playback
+  // Set up HLS or native playback only when near active viewport
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -63,29 +68,106 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       hlsInstanceRef.current = null
     }
 
-    if (isHls) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          maxMaxBufferLength: 10, // Optimize memory for vertical feed
-        })
-        hls.loadSource(url)
-        hls.attachMedia(video)
-        hlsInstanceRef.current = hls
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Native safari HLS support
-        video.src = url
-      }
-    } else {
-      video.src = url
+    if (!isNearActive) {
+      // Fully strip media resource to release browser decoding memory
+      video.pause()
+      video.removeAttribute('src')
+      try {
+        video.load()
+      } catch (_) {}
+      return
     }
 
+    // Media Guard Check: Head request to evaluate content length
+    let isAborted = false
+    const abortController = new AbortController()
+    
+    fetch(url, { method: 'HEAD', signal: abortController.signal })
+      .then(async (res) => {
+        if (isAborted) return
+        const contentLength = res.headers.get('content-length')
+        if (contentLength) {
+          const bytes = parseInt(contentLength, 10)
+          if (bytes > MAX_VIDEO_BYTES) {
+            console.warn(`Video too large: ${(bytes / 1024 / 1024).toFixed(1)}MB. Skipping.`)
+            await updateMediaStatus(url, 'too_large', { size: bytes })
+            return
+          }
+        }
+        
+        // Proceed with loading
+        if (isHls) {
+          if (Hls.isSupported()) {
+            const hls = new Hls({
+              maxMaxBufferLength: 10, // Optimize memory for vertical feed
+            })
+            hls.loadSource(url)
+            hls.attachMedia(video)
+            hlsInstanceRef.current = hls
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url
+          }
+        } else {
+          video.src = url
+        }
+      })
+      .catch((err) => {
+        if (err.name === 'AbortError') return
+        console.error('Failed to probe media metadata:', err)
+        // Fallback load even if HEAD fails (e.g. CORS block on HEAD)
+        if (isHls) {
+          if (Hls.isSupported()) {
+            const hls = new Hls({ maxMaxBufferLength: 10 })
+            hls.loadSource(url)
+            hls.attachMedia(video)
+            hlsInstanceRef.current = hls
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = url
+          }
+        } else {
+          video.src = url
+        }
+      })
+
+    // Listen to metadata load to enforce duration limits
+    const handleLoadedMetadata = async () => {
+      if (video.duration > MAX_DURATION_SECONDS) {
+        console.warn(`Video duration exceeds limit: ${video.duration}s. Pausing.`)
+        video.pause()
+        video.removeAttribute('src')
+        try {
+          video.load()
+        } catch (_) {}
+        await updateMediaStatus(url, 'too_large', { duration: video.duration })
+      } else {
+        await updateMediaStatus(url, 'available', { duration: video.duration })
+      }
+    }
+
+    const handleLoadError = async () => {
+      console.warn(`Failed to load video source: ${url}`)
+      await updateMediaStatus(url, 'failed')
+    }
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    video.addEventListener('error', handleLoadError)
+
     return () => {
+      isAborted = true
+      abortController.abort()
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      video.removeEventListener('error', handleLoadError)
       if (hlsInstanceRef.current) {
         hlsInstanceRef.current.destroy()
         hlsInstanceRef.current = null
       }
+      video.pause()
+      video.removeAttribute('src')
+      try {
+        video.load()
+      } catch (_) {}
     }
-  }, [url, isHls])
+  }, [url, isHls, isNearActive])
 
   // Track actual play/pause events
   useEffect(() => {

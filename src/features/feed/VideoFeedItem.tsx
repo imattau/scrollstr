@@ -33,11 +33,14 @@ export interface VideoItemData {
   hasLiked?: boolean
   hasBoosted?: boolean
   hasZapped?: boolean
+  finalRankScore?: number
+  mediaStatus?: string
 }
 
 interface VideoFeedItemProps {
   video: VideoItemData
   isActive: boolean
+  isNearActive: boolean
   isMuted: boolean
   onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'follow' | 'mute', videoId: string, videoKind?: number) => void
 }
@@ -75,7 +78,7 @@ function ActionPill({
   )
 }
 
-const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isMuted, onActionClick }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick }) => {
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
 
@@ -88,6 +91,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
           url={video.url}
           poster={video.poster}
           isActive={isActive}
+          isNearActive={isNearActive}
           isMuted={isMuted}
           onLike={() => onActionClick('like', video.id, video.kind)}
           showControls={false}
@@ -165,5 +169,8 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
 }
 
 export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, nextProps) => {
-  return prevProps.video.id === nextProps.video.id && prevProps.isActive === nextProps.isActive && prevProps.isMuted === nextProps.isMuted
+  return prevProps.video.id === nextProps.video.id &&
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.isNearActive === nextProps.isNearActive &&
+    prevProps.isMuted === nextProps.isMuted
 })

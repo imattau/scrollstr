@@ -8,6 +8,7 @@ import {
   hasStoredPasskeyIdentity,
   unlockPasskeyIdentity,
   registerPasskeyIdentity,
+  importPasskeyIdentityFromNsec,
   clearPasskeyIdentity
 } from 'nostr-passkey'
 import { PasskeySigner } from 'nostr-passkey/applesauce'
@@ -100,13 +101,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return pubkey
   }
 
-  const registerPasskey = async (): Promise<string> => {
-    console.log('Registering new passkey identity...')
-    const result = await registerPasskeyIdentity({
+  const registerPasskey = async (nsec?: string): Promise<string> => {
+    console.log(nsec ? 'Registering passkey from existing nsec...' : 'Registering new passkey identity...')
+    const options = {
       rpName: 'Scrollstr',
       userName: 'scrollstr_user_' + Math.floor(Math.random() * 1000000),
       displayName: 'Scrollstr User'
-    })
+    }
+    const result = nsec
+      ? await importPasskeyIdentityFromNsec(nsec, options)
+      : await registerPasskeyIdentity(options)
     const signer = new PasskeySigner(result.record, result.secretKey)
     const pubkey = result.pubkey
     setSession({

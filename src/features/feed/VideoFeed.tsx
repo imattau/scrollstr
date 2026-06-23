@@ -7,22 +7,20 @@ import { createRxBackwardReq, createRxForwardReq } from 'rx-nostr'
 import { getEventsQuery$ } from '../../nostr/rxNostr'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
+import { db, VideoShape } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 
-const EMPTY_VIDEOS: any[] = []
 const PAGE_SIZE = 20
 const LOAD_MORE_THRESHOLD = 3
 const LOCAL_PREVIEW_ID = 'local-preview-neon-mascot'
+const MAX_FEED_ITEMS = 100
 
-interface VideoRowProps {
-  videos: any[]
-  isFetchingOlder: boolean
-  activeIndex: number
-  isMuted: boolean
-  handleActionClick: (action: string, videoId: string, videoKind?: number) => void
-}
+// Viewport constants
+const WINDOW_BEFORE = 1
+const WINDOW_AFTER = 2
 
 const VideoFeedRow = React.memo(({ index, style, videos, isFetchingOlder, activeIndex, isMuted, handleActionClick }: any) => {
   if (index === videos.length) {
@@ -44,6 +42,10 @@ const VideoFeedRow = React.memo(({ index, style, videos, isFetchingOlder, active
   }
   const video = videos[index]
   if (!video) return null
+
+  const isNearActive = index >= activeIndex - WINDOW_BEFORE && index <= activeIndex + WINDOW_AFTER
+  const isActive = index === activeIndex
+
   return (
     <div
       style={{
@@ -58,7 +60,8 @@ const VideoFeedRow = React.memo(({ index, style, videos, isFetchingOlder, active
     >
       <VideoFeedItem
         video={video}
-        isActive={index === activeIndex}
+        isActive={isActive}
+        isNearActive={isNearActive}
         isMuted={isMuted}
         onActionClick={handleActionClick}
       />
@@ -87,9 +90,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
 
-  // Query short-video events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: [21, 22, 34236] }), []) ?? EMPTY_VIDEOS
-
   // Query kind 3 replaceable contacts list event for the logged in user
   const contactListEvent = use$(
     () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
@@ -105,7 +105,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
 
   // 1. Subscribe once per pubkey to user's contact list and relay list (kinds 3, 10002)
-  // Only re-subscribe if pubkey changes, not on relayUrls changes to avoid circular dependency
   useEffect(() => {
     if (!session?.pubkey) {
       setIsMetadataLoaded(true)
@@ -120,7 +119,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     rxReq.emit({ kinds: [3, 10002], authors: [session.pubkey], limit: 1 })
 
-    // Small delay to allow subscription and initial load from bootstrap/fallback relays before fetching videos
     const timer = setTimeout(() => {
       setIsMetadataLoaded(true)
     }, 400)
@@ -131,97 +129,87 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [rxNostr, session?.pubkey])
 
-  // 2. Subscribe to real-time events from relays (only after metadata has resolved/checked)
+  // 2. Subscribe to real-time events from relays with strict time & limit guards
   useEffect(() => {
     if (!isMetadataLoaded) return
-    console.log('Loading initial video backlog from relays...')
+    console.log('Loading initial video backlog from relays (with limit: 50)...')
     const rxReq = createRxBackwardReq()
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [21, 22, 34236], limit: 40 })
-
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, relayUrls, isMetadataLoaded])
-
-  // 3. Subscribe to future video events after the initial backlog load
-  useEffect(() => {
-    if (!isMetadataLoaded) return
-    console.log('Subscribing to live Nostr video events...')
-    const rxReq = createRxForwardReq()
-    const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
-    rxReq.emit({ kinds: [21, 22, 34236] })
-
-    return () => {
-      sub.unsubscribe()
-    }
-  }, [rxNostr, relayUrls, isMetadataLoaded])
-
-  // Batch query all reactions once (prevents O(n*4) queries)
-  const allReactions = use$(() => getEventsQuery$({ kinds: [7, 16, 6, 9735, 1111] }), []) ?? EMPTY_VIDEOS
-
-  // Index reactions by videoId for O(1) lookup
-  const reactionsByVideoId = useMemo(() => {
-    const map = new Map()
-    allReactions.forEach((event: any) => {
-      const videoId = event.tags.find((t: any) => t[0] === 'e')?.[1]
-      if (!videoId) return
-      if (!map.has(videoId)) map.set(videoId, [])
-      map.get(videoId).push(event)
+    
+    // Strict limits
+    rxReq.emit({
+      kinds: [21, 22, 34236],
+      limit: 50,
+      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 14 // 14 days ago
     })
-    return map
-  }, [allReactions])
 
-  // Parse events to local format, filter, and enrich with live reaction counts from EventStore
-  // Removed eventStore from deps to prevent recalc on every event. Reactions update via eventStore queries below.
+    return () => {
+      sub.unsubscribe()
+    }
+  }, [rxNostr, relayUrls, isMetadataLoaded])
+
+  // 3. Query VideoShapes from Dexie and rank/sort them on the client side
+  const dbShapes = useLiveQuery(async () => {
+    const list = await db.videoShapes.toArray()
+    return list
+  }) || []
+
   const videos = useMemo(() => {
-    const sortedRawEvents = [...rawVideoEvents].sort((a: any, b: any) => {
-      if (a.id === LOCAL_PREVIEW_ID) return -1
-      if (b.id === LOCAL_PREVIEW_ID) return 1
-
-      const createdAtDiff = (b.created_at ?? 0) - (a.created_at ?? 0)
-      if (createdAtDiff !== 0) return createdAtDiff
-
-      return String(a.id).localeCompare(String(b.id))
+    let list = dbShapes.map((shape: VideoShape): VideoItemData => {
+      return {
+        id: shape.id,
+        kind: 22,
+        createdAt: shape.created_at,
+        title: shape.title ?? '',
+        description: shape.summary ?? '',
+        url: shape.videoUrl,
+        poster: shape.thumbnailUrl,
+        creator: {
+          pubkey: shape.pubkey,
+          name: shape.authorName || shape.pubkey.slice(0, 8),
+          picture: shape.authorPicture
+        },
+        hashtags: shape.hashtags || [],
+        likesCount: shape.reactionCount || 0,
+        commentsCount: shape.replyCount || 0,
+        boostsCount: shape.repostCount || 0,
+        zapsCount: shape.zapCount || 0,
+        hasLiked: shape.userState?.liked || false,
+        hasBoosted: shape.userState?.skipped || false, // skipped or boosted placeholders
+        hasZapped: shape.userState?.zapped || false,
+        music: 'Original Clip Audio',
+        finalRankScore: shape.finalRankScore ?? 0,
+        mediaStatus: shape.mediaStatus
+      }
     })
 
-    let list = sortedRawEvents
-      .map((ev: any) => parseVideoEvent(ev))
-      .filter((v: any): v is VideoItemData => v !== null)
+    // Filter out failed media
+    list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed' && v.mediaStatus !== 'too_large')
 
     if (filterTag) {
-      list = list.filter((v) =>
-        v.hashtags?.some((t) => t.toLowerCase() === filterTag.toLowerCase())
+      list = list.filter((v: VideoItemData) =>
+        v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
       )
     }
 
     if (feedType === 'following' && session) {
-      list = list.filter((v) => followingPubkeys.includes(v.creator.pubkey))
+      list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    return list.map((video) => {
-      const reactions = reactionsByVideoId.get(video.id) || []
-      const likes = reactions.filter((e: any) => e.kind === 7)
-      const comments = reactions.filter((e: any) => e.kind === 1111)
-      const boosts = reactions.filter((e: any) => e.kind === 6 || e.kind === 16)
-      const zaps = reactions.filter((e: any) => e.kind === 9735)
+    // Sort by finalRankScore descending, then by created_at descending
+    list.sort((a: VideoItemData, b: VideoItemData) => {
+      if (a.id === LOCAL_PREVIEW_ID) return -1
+      if (b.id === LOCAL_PREVIEW_ID) return 1
+      
+      const rankDiff = (b.finalRankScore ?? 0) - (a.finalRankScore ?? 0)
+      if (Math.abs(rankDiff) > 0.001) return rankDiff
 
-      const hasLiked = session ? likes.some((l: any) => l.pubkey === session.pubkey) : false
-      const hasBoosted = session ? boosts.some((b: any) => b.pubkey === session.pubkey) : false
-      const hasZapped = session ? zaps.some((z: any) => z.pubkey === session.pubkey) : false
-
-      return {
-        ...video,
-        likesCount: likes.length,
-        commentsCount: comments.length,
-        boostsCount: boosts.length,
-        zapsCount: zaps.length,
-        hasLiked,
-        hasBoosted,
-        hasZapped,
-      }
+      return (b.createdAt ?? 0) - (a.createdAt ?? 0)
     })
-  }, [rawVideoEvents, filterTag, feedType, followingPubkeys, session, reactionsByVideoId])
+
+    // Cap the rendered feed
+    return list.slice(0, MAX_FEED_ITEMS)
+  }, [dbShapes, filterTag, feedType, followingPubkeys, session])
 
   useEffect(() => {
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
@@ -263,8 +251,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, isFetchingOlder, rxNostr, videos.length, relayUrls])
 
-  // Prefetch comments, likes, boosts, and zaps for the active video and the next upcoming video
-  // Only trigger on activeIndex change, not on entire videos array change (prevents cascading re-subscriptions)
+  // Progressive comments & zaps subscription logic near viewport
   useEffect(() => {
     if (videos.length === 0) return
     const activeVideo = videos[activeIndex]
@@ -276,7 +263,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       videoIdsToFetch.push(nextVideo.id)
     }
 
-    console.log(`Prefetching reactions and comments for videos:`, videoIdsToFetch)
+    console.log(`Prefetching reactions/comments progressively near viewport:`, videoIdsToFetch)
     const rxReq = createRxForwardReq()
     const sub = rxNostr.use(rxReq, { relays: relayUrls }).subscribe()
     rxReq.emit({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
@@ -289,10 +276,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // Scroll to deep-linked video if present on load
   useEffect(() => {
     if (initialVideoId && videos.length > 0) {
-      const idx = videos.findIndex((v) => v.id === initialVideoId)
+      const idx = videos.findIndex((v: VideoItemData) => v.id === initialVideoId)
       if (idx !== -1) {
         setActiveIndex(idx)
-        // Small timeout to allow render completion
         setTimeout(() => {
           listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
         }, 100)
@@ -300,20 +286,29 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [videos, initialVideoId])
 
-  // Track scroll position and snap to nearest video
+  // Track scroll position, snap, and run diagnostics
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const scrollOffset = e.currentTarget.scrollTop
     const containerHeight = e.currentTarget.clientHeight
     const newIndex = Math.round(scrollOffset / containerHeight)
     if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
       setActiveIndex(newIndex)
+      
+      // Diagnostics log
+      void (async () => {
+        console.debug({
+          cachedShapes: await db.videoShapes.count(),
+          renderedFeedItems: videos.length,
+          activeVideoSources: document.querySelectorAll("video[src]").length,
+          mediaStatusCount: await db.mediaStatus.count()
+        })
+      })()
     }
-  }, [activeIndex, videos.length])
+  }, [activeIndex, videos])
 
   // Keyboard navigation for desktop view
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore keydowns when user is typing in input, textarea, select or contenteditable
       const activeEl = document.activeElement
       if (
         activeEl &&
@@ -354,7 +349,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [activeIndex, videos, onVideoChange])
 
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
-    const video = videos.find((v) => v.id === videoId)
+    const video = videos.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
   }, [videos, onActionTrigger])
 
@@ -423,4 +418,4 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       </div>
     </div>
   )
-  }
+}

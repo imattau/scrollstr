@@ -64,6 +64,7 @@ function OptionCard({
 export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   const { loginWithNip07, loginReadOnly, loginWithPasskey, registerPasskey } = useNostr()
   const [npub, setNpub] = useState('')
+  const [nsec, setNsec] = useState('')
   const [nip46Address, setNip46Address] = useState('')
   const [error, setError] = useState('')
   const [hasPasskey, setHasPasskey] = useState(false)
@@ -118,7 +119,8 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
       if (hasPasskey) {
         await loginWithPasskey()
       } else {
-        await registerPasskey()
+        const trimmedNsec = nsec.trim()
+        await registerPasskey(trimmedNsec || undefined)
       }
       onLoginSuccess()
     } catch (err: any) {
@@ -245,6 +247,26 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
               onClick={handlePasskeyLogin}
               subtle
             />
+
+            {!hasPasskey && (
+              <div className="mt-1 space-y-2 rounded-[20px] border border-[#23232a] bg-[#111115] p-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
+                    Use existing private key (Optional)
+                  </label>
+                </div>
+                <input
+                  type="password"
+                  value={nsec}
+                  onChange={(e) => setNsec(e.target.value)}
+                  placeholder="nsec1..."
+                  className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#f5b942]/40"
+                />
+                <p className="text-[11px] leading-normal text-[#71717a]">
+                  Enter your existing nsec to secure it with a passkey. Leave empty to generate a brand new identity.
+                </p>
+              </div>
+            )}
 
             <OptionCard
               title="Remote signer"

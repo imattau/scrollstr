@@ -128,7 +128,10 @@ const MOCK_EVENTS = [
   }
 ]
 
-MOCK_EVENTS.forEach((ev) => eventStore.add(ev as any))
+MOCK_EVENTS.forEach((ev) => {
+  eventStore.add(ev as any)
+  saveEventToCache(ev as any)
+})
 
 // Listen to all events received on rx-nostr connections, add them to eventStore, and save them to local persistent cache
 rxNostr.createAllEventObservable().subscribe((packet) => {

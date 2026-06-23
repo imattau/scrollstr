@@ -16,7 +16,7 @@ export interface NostrContextProps {
   loginWithNip07: () => Promise<string>
   loginReadOnly: (pubkey: string) => void
   loginWithPasskey: () => Promise<string>
-  registerPasskey: () => Promise<string>
+  registerPasskey: (nsec?: string) => Promise<string>
   logout: () => void
   signEvent: (eventTemplate: any) => Promise<any>
 }
