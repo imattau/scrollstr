@@ -58,7 +58,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
                   }`}
                 >
                   <Icon className="w-5 h-5" />
-                  <span className="text-[10px] mt-1">{item.label}</span>
+                  <span className="text-[10px] mt-1">{item.path === '/profile/me' ? (session ? 'My Profile' : 'Profile') : item.label}</span>
                 </Link>
               );
             })}
@@ -106,7 +106,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
                 )}
                 <Link to="/profile/me" className="flex items-center gap-3 px-3 py-3 rounded-[12px] text-[#a1a1aa] hover:bg-[#222228] hover:text-[#f7f7f8] transition-colors">
                   <User className="h-4 w-4" />
-                  <span className="text-[15px]">Profile</span>
+                  <span className="text-[15px]">{session ? 'My Profile' : 'Profile'}</span>
                 </Link>
                 {session && (
                   <button
@@ -243,7 +243,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
               }`}
             >
               <User className="w-5 h-5" />
-              <span className="text-sm font-medium">My Profile</span>
+              <span className="text-sm font-medium">{session ? 'My Profile' : 'Profile'}</span>
             </Link>
             {session && (
               <button
@@ -316,7 +316,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
               }`}
             >
               <Icon className="w-5 h-5" />
-              <span className="text-[10px] mt-1">{item.label}</span>
+              <span className="text-[10px] mt-1">{item.path === '/profile/me' ? (session ? 'My Profile' : 'Profile') : item.label}</span>
             </Link>
           )
         })}
