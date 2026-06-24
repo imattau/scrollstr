@@ -35,7 +35,6 @@ export interface VideoItemData {
   hasLiked?: boolean
   hasBoosted?: boolean
   hasZapped?: boolean
-  finalRankScore?: number
   mediaStatus?: string
   width?: number
   height?: number

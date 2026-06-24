@@ -16,8 +16,7 @@ import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } f
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
-const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000001'
-const MAX_FEED_ITEMS = 500
+const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000000001'
 
 // Viewport constants
 const WINDOW_BEFORE = 1
@@ -180,48 +179,40 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [relayUrls, isMetadataLoaded])
 
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
-  const dbShapes = useLiveQuery(async () => {
-    const list = await db.videoShapes.toArray()
-    return list
-  }) || []
+  const videos = useLiveQuery(async () => {
+    let list = (await db.videoShapes.toArray()).map((shape: VideoShape): VideoItemData => ({
+      id: shape.id,
+      kind: 22,
+      createdAt: shape.created_at,
+      firstSeen: shape.firstSeen,
+      title: shape.title ?? '',
+      description: shape.summary ?? '',
+      url: shape.videoUrl,
+      poster: shape.thumbnailUrl,
+      creator: {
+        pubkey: shape.pubkey,
+        name: shape.authorName || shape.pubkey.slice(0, 8),
+        picture: shape.authorPicture
+      },
+      hashtags: shape.hashtags || [],
+      likesCount: shape.reactionCount || 0,
+      commentsCount: shape.replyCount || 0,
+      boostsCount: shape.repostCount || 0,
+      zapsCount: shape.zapCount || 0,
+      hasLiked: shape.userState?.liked || false,
+      hasBoosted: shape.userState?.skipped || false,
+      hasZapped: shape.userState?.zapped || false,
+      music: 'Original Clip Audio',
 
-  const videos = useMemo(() => {
-    let list = dbShapes.map((shape: VideoShape): VideoItemData => {
-      return {
-        id: shape.id,
-        kind: 22,
-        createdAt: shape.created_at,
-        firstSeen: shape.firstSeen,
-        title: shape.title ?? '',
-        description: shape.summary ?? '',
-        url: shape.videoUrl,
-        poster: shape.thumbnailUrl,
-        creator: {
-          pubkey: shape.pubkey,
-          name: shape.authorName || shape.pubkey.slice(0, 8),
-          picture: shape.authorPicture
-        },
-        hashtags: shape.hashtags || [],
-        likesCount: shape.reactionCount || 0,
-        commentsCount: shape.replyCount || 0,
-        boostsCount: shape.repostCount || 0,
-        zapsCount: shape.zapCount || 0,
-        hasLiked: shape.userState?.liked || false,
-        hasBoosted: shape.userState?.skipped || false,
-        hasZapped: shape.userState?.zapped || false,
-        music: 'Original Clip Audio',
-        finalRankScore: shape.finalRankScore ?? 0,
-        mediaStatus: shape.mediaStatus,
-        contentWarning: shape.contentWarning,
-        width: shape.width,
-        height: shape.height,
-        duration: shape.duration,
-        size: shape.size,
-        mimeType: shape.mimeType
-      }
-    })
+      mediaStatus: shape.mediaStatus,
+      contentWarning: shape.contentWarning,
+      width: shape.width,
+      height: shape.height,
+      duration: shape.duration,
+      size: shape.size,
+      mimeType: shape.mimeType
+    }))
 
-    // Filter out failed media
     list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed')
 
     if (filterTag) {
@@ -234,20 +225,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    // Sort by finalRankScore descending, then by firstSeen (arrival order) descending
     list.sort((a: VideoItemData, b: VideoItemData) => {
       if (a.id === LOCAL_PREVIEW_ID) return -1
       if (b.id === LOCAL_PREVIEW_ID) return 1
-      
-      const rankDiff = (b.finalRankScore ?? 0) - (a.finalRankScore ?? 0)
-      if (Math.abs(rankDiff) > 0.001) return rankDiff
-
       return (b.firstSeen ?? 0) - (a.firstSeen ?? 0)
     })
 
-    // Cap the rendered feed
-    return list.slice(0, MAX_FEED_ITEMS)
-  }, [dbShapes, filterTag, feedType, followingPubkeys, session])
+    return list
+  }, [filterTag, feedType, session, followingPubkeys]) || []
 
   // Guard ref: tracks the last known video ID order so downstream effects can
   // short-circuit when only metadata changed (preventing cascading re-renders
@@ -278,10 +263,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (currentVideoId) {
         const newIndex = videos.findIndex(v => v.id === currentVideoId)
         if (newIndex !== -1) {
-          // Only update if the video position actually changed
           if (newIndex !== activeIndex) {
             setActiveIndex(newIndex)
-            // Schedule scroll to maintain view of current video
             scrollRAFRef.current = requestAnimationFrame(() => {
               scrollRAFRef.current = null
               listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
@@ -290,7 +273,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           return
         }
       }
-      // If no video is being tracked yet, use activeIndex
       currentVideoIdRef.current = videos[activeIndex]?.id ?? ''
     }
 
@@ -498,6 +480,16 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     seenTopIdsRef.current = new Set(videos.map(v => v.id))
   }, [videos])
 
+  const handleScrollToBottom = useCallback(() => {
+    const lastIndex = videos.length - 1
+    if (lastIndex < 0) return
+    listRef.current?.scrollToRow({ index: lastIndex, align: 'auto', behavior: 'auto' })
+    listRef.current?.element?.scrollTo({ top: lastIndex * window.innerHeight, behavior: 'auto' })
+    setActiveIndex(lastIndex)
+    currentVideoIdRef.current = videos[lastIndex]?.id ?? ''
+    oldestLoadedCreatedAtRef.current = videos[lastIndex]?.createdAt ?? null
+  }, [videos])
+
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
     const video = videos.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
@@ -555,7 +547,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       {/* Floating navigation buttons for desktop */}
       <div className="hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30">
         <button
-          onClick={() => listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'auto' })}
+          onClick={handleScrollToTop}
           disabled={activeIndex === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
           title="Jump to top"
@@ -587,7 +579,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           <ChevronDown className="w-5 h-5" />
         </button>
         <button
-          onClick={() => listRef.current?.scrollToRow({ index: videos.length - 1, align: 'auto', behavior: 'auto' })}
+          onClick={handleScrollToBottom}
           disabled={activeIndex === videos.length - 1 || videos.length === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
           title="Jump to bottom"

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, MediaTimeRange } from 'media-chrome/react'
 import Hls from 'hls.js'
+import { RotateCw } from 'lucide-react'
 import { updateMediaStatus } from '../../nostr/cache'
 
 interface VideoPlayerProps {
@@ -18,6 +19,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   const hlsInstanceRef = useRef<Hls | null>(null)
   const [isHls, setIsHls] = useState(false)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
+  const [isLandscape, setIsLandscape] = useState(false)
 
   const [isPaused, setIsPaused] = useState(true)
 
@@ -141,6 +143,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
 
     // Listen to metadata load
     const handleLoadedMetadata = async () => {
+      setIsLandscape(video.videoWidth > video.videoHeight)
       await updateMediaStatus(url, 'available', { duration: video.duration })
     }
 
@@ -244,7 +247,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         <video
           ref={videoRef}
           slot="media"
-          className="w-full h-full object-cover"
+          className={`w-full h-full ${isLandscape ? 'object-contain' : 'object-cover'}`}
           poster={poster}
           preload={isActive ? 'auto' : 'metadata'}
           loop
@@ -266,6 +269,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
             >
               <span className="ml-[3px]">▶</span>
             </div>
+          </div>
+        )}
+        {isLandscape && (
+          <div className="pointer-events-none absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-[#a1a1aa] backdrop-blur-sm">
+            <RotateCw className="size-3" />
+            <span>Rotate for full view</span>
           </div>
         )}
         {showControls && (

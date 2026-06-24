@@ -1,5 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 
+export const MAX_VIDEOS = 2000
+
 export interface CachedEvent {
   id: string
   kind: number
@@ -39,12 +41,6 @@ export interface VideoShape {
 
   relayCount?: number;
   relaysSeenOn?: string[];
-
-  freshnessScore?: number;
-  engagementScore?: number;
-  qualityScore?: number;
-  relevanceScore?: number;
-  finalRankScore?: number;
 
   mediaStatus?: "unknown" | "available" | "failed" | "too_large" | "unsupported";
   contentWarning?: string;
@@ -106,9 +102,9 @@ class ScrollstrCacheDatabase extends Dexie {
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(3).stores({
+    this.version(4).stores({
       cachedEvents: 'id, kind, pubkey, created_at',
-      videoShapes: 'id, pubkey, created_at, finalRankScore, videoUrl',
+      videoShapes: 'id, pubkey, created_at, videoUrl',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
@@ -120,7 +116,6 @@ class ScrollstrCacheDatabase extends Dexie {
 export const db = new ScrollstrCacheDatabase()
 
 // Cache limits
-export const MAX_VIDEOS = 2000
 const MAX_REACTIONS_COMMENTS = 20000
 const MAX_PROFILES = 5000
 const TOUCH_DEBOUNCE_MS = 250
@@ -184,48 +179,6 @@ function parseImetaTag(imetaTag: string[]): Record<string, string> {
     }
   }
   return data
-}
-
-export function scoreVideoShape(shape: VideoShape): VideoShape {
-  const now = Math.floor(Date.now() / 1000)
-  const age = Math.max(1, now - shape.created_at)
-  
-  // 1. Freshness Score: exponential decay over 7 days
-  const freshnessScore = Math.exp(-age / (3600 * 24 * 7))
-
-  // 2. Engagement Score: normalized likes, zaps, comments, etc.
-  const likes = shape.reactionCount ?? 0
-  const zaps = shape.zapCount ?? 0
-  const comments = shape.replyCount ?? 0
-  const totalSats = shape.zapTotalSats ?? 0
-  const engagementScore = Math.min(1, (likes * 0.1 + zaps * 0.2 + comments * 0.3 + (totalSats / 1000) * 0.4))
-
-  // 3. Quality Score: depends on duration and presence of thumbnail
-  const hasThumbnail = shape.thumbnailUrl ? 1 : 0
-  const isOptimalDuration = (shape.duration && shape.duration > 5 && shape.duration < 60) ? 1 : 0.5
-  const qualityScore = hasThumbnail * 0.5 + isOptimalDuration * 0.5
-
-  // 4. Relevance Score: based on local user interactions (watched, skipped, liked)
-  let relevanceScore = 0.5
-  if (shape.userState) {
-    if (shape.userState.liked) relevanceScore += 0.3
-    if (shape.userState.zapped) relevanceScore += 0.4
-    if (shape.userState.watched) relevanceScore += 0.2
-    if (shape.userState.skipped) relevanceScore -= 0.4
-  }
-  relevanceScore = Math.max(0, Math.min(1, relevanceScore))
-
-  // 5. Final Score
-  const finalRankScore = freshnessScore * 0.25 + relevanceScore * 0.30 + engagementScore * 0.25 + qualityScore * 0.20
-
-  return {
-    ...shape,
-    freshnessScore,
-    engagementScore,
-    qualityScore,
-    relevanceScore,
-    finalRankScore
-  }
 }
 
 export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | null> {
@@ -335,7 +288,6 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       updatedAt: Date.now()
     }
 
-    shape = scoreVideoShape(shape)
     await db.videoShapes.put(shape)
     return shape
   } catch (err) {
@@ -357,14 +309,13 @@ export async function updateMediaStatus(url: string, status: MediaStatusRecord['
   // Find all shapes with this videoUrl and update them
   const shapes = await db.videoShapes.where('videoUrl').equals(url).toArray()
   for (const s of shapes) {
-    const updatedShape = scoreVideoShape({
+    await db.videoShapes.put({
       ...s,
       mediaStatus: status,
       size: extra?.size ?? s.size,
       duration: extra?.duration ?? s.duration,
       updatedAt: Date.now()
     })
-    await db.videoShapes.put(updatedShape)
   }
 }
 
@@ -383,7 +334,7 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
   // Sync back to VideoShape
   const shape = await db.videoShapes.get(id)
   if (shape) {
-    const updatedShape = scoreVideoShape({
+    await db.videoShapes.put({
       ...shape,
       userState: {
         watched: updatedRec.watched,
@@ -393,7 +344,6 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
       },
       updatedAt: Date.now()
     })
-    await db.videoShapes.put(updatedShape)
   }
 }
 
@@ -418,13 +368,12 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
     // Update username/profile fields in related video shapes
     const shapes = await db.videoShapes.where('pubkey').equals(event.pubkey).toArray()
     for (const s of shapes) {
-      const updated = scoreVideoShape({
+      await db.videoShapes.put({
         ...s,
         authorName: profile.name,
         authorPicture: profile.picture,
         updatedAt: Date.now()
       })
-      await db.videoShapes.put(updated)
     }
     return profile
   } catch (err) {

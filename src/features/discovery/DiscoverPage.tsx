@@ -78,8 +78,11 @@ export const DiscoverPage: React.FC = () => {
     return () => unsub()
   }, [relayUrls])
 
-  // Query short-video events from Applesauce EventStore
-  const rawVideoEvents = use$(() => getEventsQuery$({ kinds: VIDEO_KINDS }), []) ?? EMPTY_VIDEOS
+  // Query short-video events from Applesauce EventStore (last 48 hours)
+  const rawVideoEvents = use$(
+    () => getEventsQuery$({ kinds: VIDEO_KINDS, since: Math.floor(Date.now() / 1000) - 48 * 3600 }),
+    []
+  ) ?? EMPTY_VIDEOS
 
   // Parse events to local format and filter out invalid/null ones
   const videos = useMemo(() => {
@@ -88,10 +91,16 @@ export const DiscoverPage: React.FC = () => {
       .filter((v: any): v is VideoItemData => v !== null)
   }, [rawVideoEvents])
 
-  // Extract unique hashtags/topics dynamically from videos
+  // Only consider recent videos for trending computation
+  const recentVideos = useMemo(() => {
+    const sorted = [...videos].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    return sorted.slice(0, 300)
+  }, [videos])
+
+  // Extract unique hashtags/topics dynamically from recent videos
   const topics = useMemo(() => {
     const counts: Record<string, number> = {}
-    videos.forEach((v) => {
+    recentVideos.forEach((v) => {
       v.hashtags?.forEach((tag) => {
         const normalized = tag.toLowerCase()
         counts[normalized] = (counts[normalized] || 0) + 1
@@ -118,12 +127,12 @@ export const DiscoverPage: React.FC = () => {
       })
 
     return compiled.length > 0 ? compiled : defaultTopics
-  }, [videos])
+  }, [recentVideos])
 
-  // Extract active creators dynamically from videos
+  // Extract active creators dynamically from recent videos
   const creators = useMemo(() => {
     const creatorMap: Record<string, { pubkey: string; name: string; count: number }> = {}
-    videos.forEach((v) => {
+    recentVideos.forEach((v) => {
       const pubkey = v.creator.pubkey
       if (!creatorMap[pubkey]) {
         creatorMap[pubkey] = {
@@ -155,7 +164,7 @@ export const DiscoverPage: React.FC = () => {
       })
 
     return compiled.length > 0 ? compiled : defaultCreators
-  }, [videos])
+  }, [recentVideos])
 
   // Subscribe to kind:0 for displayed creators to refresh metadata
   useEffect(() => {
