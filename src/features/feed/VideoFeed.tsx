@@ -13,7 +13,7 @@ import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } from 'lucide-react'
-import { sortByFirstSeen } from './feedSort'
+import { sortByInsertOrder } from './feedSort'
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
@@ -185,6 +185,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       kind: 22,
       createdAt: shape.created_at,
       firstSeen: shape.firstSeen,
+      insertOrder: shape.insertOrder,
       title: shape.title ?? '',
       description: shape.summary ?? '',
       url: shape.videoUrl,
@@ -225,7 +226,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    list.sort(sortByFirstSeen)
+    list.sort(sortByInsertOrder)
 
     return list
   }, [filterTag, feedType, session, followingPubkeys]) || []
@@ -347,7 +348,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       const allShapes = await db.videoShapes.toArray()
       const sorted = allShapes
         .filter(s => s.mediaStatus !== 'failed')
-        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+        .sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
 
       const idx = sorted.findIndex(s => s.id === initialVideoId)
       if (idx === -1) return

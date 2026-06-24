@@ -2,6 +2,11 @@ import Dexie, { type Table } from 'dexie'
 
 export const MAX_VIDEOS = 2000
 
+let insertOrderCounter = 0
+function nextInsertOrder(): number {
+  return Date.now() * 1000 + (++insertOrderCounter % 1000)
+}
+
 export interface CachedEvent {
   id: string
   kind: number
@@ -16,6 +21,7 @@ export interface VideoShape {
   pubkey: string;
   created_at: number;
   firstSeen?: number;
+  insertOrder?: number;
 
   videoUrl: string;
   thumbnailUrl?: string;
@@ -102,9 +108,9 @@ class ScrollstrCacheDatabase extends Dexie {
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(4).stores({
+    this.version(5).stores({
       cachedEvents: 'id, kind, pubkey, created_at',
-      videoShapes: 'id, pubkey, created_at, videoUrl',
+      videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
@@ -269,6 +275,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       pubkey: event.pubkey,
       created_at: event.created_at,
       firstSeen: existing?.firstSeen ?? Date.now(),
+      insertOrder: existing?.insertOrder ?? nextInsertOrder(),
       videoUrl,
       thumbnailUrl,
       title,

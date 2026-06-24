@@ -20,6 +20,7 @@ export interface VideoItemData {
   kind?: number
   createdAt?: number
   firstSeen?: number
+  insertOrder?: number
   title?: string
   description?: string
   url: string

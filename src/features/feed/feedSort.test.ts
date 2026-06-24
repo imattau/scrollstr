@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sortByFirstSeen } from './feedSort'
+import { sortByInsertOrder } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
 function makeVideo(overrides: Partial<VideoItemData> & { id: string }): VideoItemData {
@@ -16,44 +16,44 @@ function makeVideo(overrides: Partial<VideoItemData> & { id: string }): VideoIte
 
 const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000000001'
 
-describe('sortByFirstSeen', () => {
-  it('sorts by createdAt descending as primary key', () => {
+describe('sortByInsertOrder', () => {
+  it('sorts by insertOrder descending', () => {
     const videos = [
-      makeVideo({ id: 'a', createdAt: 100, firstSeen: 999 }),
-      makeVideo({ id: 'b', createdAt: 300, firstSeen: 0 }),
-      makeVideo({ id: 'c', createdAt: 200, firstSeen: 500 }),
+      makeVideo({ id: 'a', insertOrder: 100 }),
+      makeVideo({ id: 'b', insertOrder: 300 }),
+      makeVideo({ id: 'c', insertOrder: 200 }),
     ]
-    videos.sort(sortByFirstSeen)
+    videos.sort(sortByInsertOrder)
     expect(videos.map(v => v.id)).toEqual(['b', 'c', 'a'])
   })
 
-  it('puts LOCAL_PREVIEW_ID first regardless of createdAt', () => {
+  it('puts LOCAL_PREVIEW_ID first regardless of insertOrder', () => {
     const videos = [
-      makeVideo({ id: 'a', createdAt: 500 }),
-      makeVideo({ id: LOCAL_PREVIEW_ID, createdAt: 100 }),
-      makeVideo({ id: 'b', createdAt: 400 }),
+      makeVideo({ id: 'a', insertOrder: 500 }),
+      makeVideo({ id: LOCAL_PREVIEW_ID, insertOrder: 100 }),
+      makeVideo({ id: 'b', insertOrder: 400 }),
     ]
-    videos.sort(sortByFirstSeen)
+    videos.sort(sortByInsertOrder)
     expect(videos[0].id).toBe(LOCAL_PREVIEW_ID)
   })
 
-  it('treats undefined createdAt as 0', () => {
+  it('treats undefined insertOrder as 0', () => {
     const videos = [
-      makeVideo({ id: 'a', createdAt: undefined }),
-      makeVideo({ id: 'b', createdAt: 100 }),
+      makeVideo({ id: 'a', insertOrder: undefined }),
+      makeVideo({ id: 'b', insertOrder: 100 }),
     ]
-    videos.sort(sortByFirstSeen)
+    videos.sort(sortByInsertOrder)
     expect(videos.map(v => v.id)).toEqual(['b', 'a'])
   })
 
-  it('preserves relative order when createdAt is equal (stable sort)', () => {
+  it('preserves relative order when insertOrder is equal (stable sort)', () => {
     const videos = [
-      makeVideo({ id: 'a', createdAt: 100 }),
-      makeVideo({ id: 'b', createdAt: 100 }),
-      makeVideo({ id: 'c', createdAt: 100 }),
+      makeVideo({ id: 'a', insertOrder: 100 }),
+      makeVideo({ id: 'b', insertOrder: 100 }),
+      makeVideo({ id: 'c', insertOrder: 100 }),
     ]
     const original = videos.map(v => v.id)
-    videos.sort(sortByFirstSeen)
+    videos.sort(sortByInsertOrder)
     expect(videos.map(v => v.id)).toEqual(original)
   })
 })
