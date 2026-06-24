@@ -36,19 +36,22 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Exclude large video files from caching directly via service workers
+        // Exclude large video files from precaching
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/.+\.(mp4|webm|m3u8)$/,
+            // Only cache m3u8 playlists (small text files); skip mp4/webm
+            // to avoid filling Cache Storage with multi-MB video files
+            urlPattern: /^https:\/\/.+\.(m3u8)$/,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'videos',
               networkTimeoutSeconds: 5,
               expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 7 * 24 * 60 * 60, // 7 days
+                maxEntries: 20,
+                maxAgeSeconds: 24 * 60 * 60, // 1 day
+                purgeOnQuotaError: true,
               },
             },
           },

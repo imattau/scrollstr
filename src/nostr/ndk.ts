@@ -1,5 +1,4 @@
 import NDK from '@nostr-dev-kit/ndk'
-import NDKCacheAdapterDexie from '@nostr-dev-kit/cache-dexie'
 
 // List of standard default relays to bootstrap client connection
 export const DEFAULT_RELAYS = [
@@ -9,13 +8,10 @@ export const DEFAULT_RELAYS = [
   'wss://purplepag.es', // Optimized for user profiles search/lookup
 ]
 
-// Initialize Dexie IndexedDB caching adapter for offline capabilities
-const cacheAdapter = new NDKCacheAdapterDexie({ dbName: 'nostr-clips-cache' })
-
-// Instantiate global NDK controller
+// Instantiate global NDK controller (no cache adapter — the app manages
+// its own IndexedDB cache via cache.ts to avoid redundant storage)
 export const ndk = new NDK({
   explicitRelayUrls: DEFAULT_RELAYS,
-  cacheAdapter,
 })
 
 // Establish connections to relays

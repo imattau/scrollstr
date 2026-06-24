@@ -129,24 +129,49 @@ const TOUCH_DEBOUNCE_MS = 250
 let touchFlushTimer: ReturnType<typeof setTimeout> | null = null
 const pendingTouchIds = new Set<string>()
 
+const MAX_LOAD_EVENTS = 500
+
 /**
- * Loads all cached events from IndexedDB and adds them to the Applesauce EventStore.
+ * Loads cached events from IndexedDB into the Applesauce EventStore,
+ * bounded to MAX_LOAD_EVENTS to avoid excessive memory use on startup.
+ * Prioritizes videos, profiles, and contacts over reactions.
  */
 export async function loadCachedEvents(eventStore: any): Promise<void> {
   try {
     console.log('[Cache] Loading events from IndexedDB cache...')
     const startTime = performance.now()
-    const allRecords = await db.cachedEvents.toArray()
-    
+
+    // Load high-priority kinds first (videos, profiles, contacts)
+    const priorityKinds: number[] = [21, 22, 34236, 0, 3]
+    const priorityRecords: CachedEvent[] = []
+    for (const kind of priorityKinds) {
+      const batch = await db.cachedEvents.where('kind').equals(kind).toArray()
+      priorityRecords.push(...batch)
+    }
+
+    // Fill remaining budget with reactions, newest first
+    let allRecords: CachedEvent[]
+    if (priorityRecords.length <= MAX_LOAD_EVENTS) {
+      const remaining = MAX_LOAD_EVENTS - priorityRecords.length
+      const reactions = await db.cachedEvents
+        .where('kind')
+        .anyOf([7, 16, 9735, 1111])
+        .reverse()
+        .limit(remaining)
+        .toArray()
+      allRecords = [...priorityRecords, ...reactions]
+    } else {
+      allRecords = priorityRecords.slice(0, MAX_LOAD_EVENTS)
+    }
+
     if (allRecords.length === 0) {
       console.log('[Cache] IndexedDB cache is empty.')
       return
     }
 
-    // Add events to applesauce eventStore
     let count = 0
     const loadedIds: string[] = []
-    allRecords.forEach((record) => {
+    for (const record of allRecords) {
       try {
         eventStore.add(record.event)
         count++
@@ -154,13 +179,13 @@ export async function loadCachedEvents(eventStore: any): Promise<void> {
       } catch (err) {
         // Skip invalid events
       }
-    })
+    }
 
     queueCachedEventTouches(loadedIds)
 
     const duration = (performance.now() - startTime).toFixed(1)
     console.log(`[Cache] Successfully loaded ${count} events from IndexedDB in ${duration}ms.`)
-    
+
     // Asynchronously project loaded video events to VideoShape
     for (const record of allRecords) {
       const isVideo = record.kind === 21 || record.kind === 22 || record.kind === 34236
