@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useNostr } from '../../app/providers'
 import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events/video'
@@ -8,10 +8,18 @@ import { getEventsQuery$ } from '../../nostr/rxNostr'
 const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
   new Promise((resolve, reject) => {
     const video = document.createElement('video')
+    const blobUrl = URL.createObjectURL(videoFile)
     video.preload = 'metadata'
-    video.src = URL.createObjectURL(videoFile)
+    video.src = blobUrl
     video.muted = true
     video.playsInline = true
+
+    const cleanup = () => {
+      video.pause()
+      video.removeAttribute('src')
+      try { video.load() } catch (_) {}
+      URL.revokeObjectURL(blobUrl)
+    }
 
     video.onloadedmetadata = () => {
       video.currentTime = 1
@@ -22,15 +30,22 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
       const ctx = canvas.getContext('2d')
-      if (!ctx) return reject(new Error('Canvas 2D context not available'))
+      if (!ctx) {
+        cleanup()
+        return reject(new Error('Canvas 2D context not available'))
+      }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       canvas.toBlob((blob) => {
+        cleanup()
         if (blob) resolve(blob)
         else reject(new Error('Canvas blob extraction failed'))
       }, 'image/jpeg', 0.85)
     }
 
-    video.onerror = (err) => reject(err)
+    video.onerror = (err) => {
+      cleanup()
+      reject(err)
+    }
   })
 
 export const PostWizard: React.FC = () => {
@@ -82,6 +97,15 @@ export const PostWizard: React.FC = () => {
   const [step] = useState(2)
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoPreview, setVideoPreview] = useState('')
+
+  // Revoke blob URL on unmount or when preview changes
+  useEffect(() => {
+    return () => {
+      if (videoPreview) {
+        URL.revokeObjectURL(videoPreview)
+      }
+    }
+  }, [videoPreview])
   const [title, setTitle] = useState('Night walk in Melbourne')
   const [description, setDescription] = useState('The city after rain.')
   const [hashtags, setHashtags] = useState('#melbourne #nightwalk')

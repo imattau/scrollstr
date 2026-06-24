@@ -263,7 +263,27 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     return list.slice(0, MAX_FEED_ITEMS)
   }, [dbShapes, filterTag, feedType, followingPubkeys, session])
 
+  // Guard ref: tracks the last known video ID order so downstream effects can
+  // short-circuit when only metadata changed (preventing cascading re-renders
+  // from reaching VideoPlayer). Written only inside effect callbacks.
+  const lastFeedIdsRef = useRef<string[]>([])
+
   useEffect(() => {
+    // Skip processing when the feed content (IDs + order) hasn't changed
+    const prevIds = lastFeedIdsRef.current
+    const currentIds = videos.map((v) => v.id)
+    let feedChanged = currentIds.length !== prevIds.length
+    if (!feedChanged) {
+      for (let i = 0; i < currentIds.length; i++) {
+        if (currentIds[i] !== prevIds[i]) {
+          feedChanged = true
+          break
+        }
+      }
+    }
+    if (!feedChanged) return
+    lastFeedIdsRef.current = currentIds
+
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
 
     // Track current video and update activeIndex when list re-sorts

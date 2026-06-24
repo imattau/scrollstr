@@ -243,41 +243,93 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
               onClick={handleNip07Login}
             />
 
-            <OptionCard
-              title={hasPasskey ? 'Unlock Passkey' : 'Create Passkey'}
-              description={hasPasskey ? 'Use your device passkey (TouchID/FaceID) to sign in.' : 'Create a new secure Nostr identity using a device passkey.'}
-              icon={<Key className="h-5 w-5 text-[#f5b942]" />}
-              badge="Recommended"
-              onClick={handlePasskeyLogin}
-              subtle
-            />
-
-            {!hasPasskey && (
-              <div className="mt-1 space-y-2 rounded-[20px] border border-[#23232a] bg-[#111115] p-4">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
-                    Use existing private key (Optional)
-                  </label>
+            {hasPasskey ? (
+              <OptionCard
+                title="Unlock Passkey"
+                description="Use your device passkey (TouchID/FaceID) to sign in."
+                icon={<Key className="h-5 w-5 text-[#f5b942]" />}
+                onClick={handlePasskeyLogin}
+                subtle
+              />
+            ) : (
+              <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
+                <div className="flex items-start gap-4 px-4 py-4">
+                  <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
+                    <Key className="h-5 w-5 text-[#f5b942]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-[15px] font-semibold text-[#f7f7f8]">Create Passkey</p>
+                      <span className="rounded-full border border-[#3b3b47] bg-[#222228] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#d4d4d8]">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
+                      Create a new secure Nostr identity using a device passkey.
+                    </p>
+                  </div>
                 </div>
-                <input
-                  type="password"
-                  value={nsec}
-                  onChange={(e) => setNsec(e.target.value)}
-                  placeholder="nsec1..."
-                  className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#f5b942]/40"
-                />
-                <p className="text-[11px] leading-normal text-[#71717a]">
-                  Enter your existing nsec to secure it with a passkey. Leave empty to generate a brand new identity.
-                </p>
+                <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
+                      Use existing private key (Optional)
+                    </label>
+                    <input
+                      type="password"
+                      value={nsec}
+                      onChange={(e) => setNsec(e.target.value)}
+                      placeholder="nsec1..."
+                      className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#f5b942]/40"
+                    />
+                    <p className="text-[11px] leading-normal text-[#71717a]">
+                      Enter your existing nsec to secure it with a passkey. Leave empty to generate a brand new identity.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePasskeyLogin}
+                    className="w-full rounded-[14px] bg-[#f5b942] px-4 py-2.5 text-[13px] font-semibold text-[#09090b] transition-opacity hover:opacity-90"
+                  >
+                    Create Passkey
+                  </button>
+                </div>
               </div>
             )}
 
-            <OptionCard
-              title="Remote signer"
-              description="Connect a bunker or remote NIP-46 signer."
-              icon={<Eye className="h-5 w-5 text-[#f7f7f8]" />}
-              onClick={handleNip46Login}
-            />
+            <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
+              <div className="flex items-start gap-4 px-4 py-4">
+                <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
+                  <Eye className="h-5 w-5 text-[#f7f7f8]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-semibold text-[#f7f7f8]">Remote signer</p>
+                  <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
+                    Connect a bunker or remote NIP-46 signer.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
+                    Bunker address
+                  </label>
+                  <input
+                    type="text"
+                    value={nip46Address}
+                    onChange={(e) => setNip46Address(e.target.value)}
+                    placeholder="bunker://..."
+                    className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#a78bfa]/40"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleNip46Login}
+                  className="w-full rounded-[14px] bg-[#a78bfa] px-4 py-2.5 text-[13px] font-semibold text-white transition-opacity hover:opacity-90"
+                >
+                  Connect
+                </button>
+              </div>
+            </div>
 
             <div className="relative flex items-center py-3">
               <div className="flex-1 border-t border-[#23232a]" />
@@ -303,11 +355,11 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
             </p>
 
             <div className="mt-3 rounded-[20px] border border-[#23232a] bg-[#111115] p-4 md:hidden">
-              <p className="text-[12px] font-semibold text-[#f7f7f8]">Read-only / remote access</p>
+              <p className="text-[12px] font-semibold text-[#f7f7f8]">Read-only access</p>
               <p className="mt-1 text-[11px] leading-normal text-[#a1a1aa]">
-                Enter an npub to browse as a reader, or connect a bunker address.
+                Enter an npub to browse as a reader without signing in.
               </p>
-              <div className="mt-4 space-y-3">
+              <div className="mt-4">
                 <div className="space-y-2">
                   <label className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
                     Read-only npub
@@ -326,28 +378,6 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
                       className="rounded-[14px] bg-[#18181d] px-4 text-[12px] font-semibold text-[#f7f7f8]"
                     >
                       Watch
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
-                    Remote signer
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={nip46Address}
-                      onChange={(e) => setNip46Address(e.target.value)}
-                      placeholder="bunker://..."
-                      className="flex-1 rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a]"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleNip46Login}
-                      className="rounded-[14px] bg-[#18181d] px-4 text-[12px] font-semibold text-[#f7f7f8]"
-                    >
-                      Connect
                     </button>
                   </div>
                 </div>
