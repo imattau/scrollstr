@@ -18,6 +18,7 @@ export interface VideoItemData {
   id: string
   kind?: number
   createdAt?: number
+  firstSeen?: number
   title?: string
   description?: string
   url: string

@@ -31,19 +31,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   }, [url])
 
   // Playback control based on active status in feed
+  // Debounced to avoid stutter during brief isActive flickers from feed reorder.
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
     if (isActive && isNearActive) {
-      // In active viewport
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current)
+        pauseTimerRef.current = null
+      }
       video.play().catch((err) => {
         console.log('Autoplay blocked or interrupted:', err)
       })
     } else {
-      // Out of active viewport
-      video.pause()
-      if (video.src) video.currentTime = 0 // Reset to beginning
+      pauseTimerRef.current = setTimeout(() => {
+        pauseTimerRef.current = null
+        video.pause()
+        if (video.src) video.currentTime = 0
+      }, 400)
+    }
+
+    return () => {
+      if (pauseTimerRef.current) {
+        clearTimeout(pauseTimerRef.current)
+        pauseTimerRef.current = null
+      }
     }
   }, [isActive, isNearActive])
 

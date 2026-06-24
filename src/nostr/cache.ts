@@ -13,6 +13,7 @@ export interface VideoShape {
   id: string;
   pubkey: string;
   created_at: number;
+  firstSeen?: number;
 
   videoUrl: string;
   thumbnailUrl?: string;
@@ -308,6 +309,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       id: event.id,
       pubkey: event.pubkey,
       created_at: event.created_at,
+      firstSeen: existing?.firstSeen ?? Date.now(),
       videoUrl,
       thumbnailUrl,
       title,

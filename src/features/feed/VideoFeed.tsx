@@ -208,6 +208,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         id: shape.id,
         kind: 22,
         createdAt: shape.created_at,
+        firstSeen: shape.firstSeen,
         title: shape.title ?? '',
         description: shape.summary ?? '',
         url: shape.videoUrl,
@@ -249,7 +250,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    // Sort by finalRankScore descending, then by created_at descending
+    // Sort by finalRankScore descending, then by firstSeen (arrival order) descending
     list.sort((a: VideoItemData, b: VideoItemData) => {
       if (a.id === LOCAL_PREVIEW_ID) return -1
       if (b.id === LOCAL_PREVIEW_ID) return 1
@@ -257,7 +258,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       const rankDiff = (b.finalRankScore ?? 0) - (a.finalRankScore ?? 0)
       if (Math.abs(rankDiff) > 0.001) return rankDiff
 
-      return (b.createdAt ?? 0) - (a.createdAt ?? 0)
+      return (b.firstSeen ?? 0) - (a.firstSeen ?? 0)
     })
 
     // Cap the rendered feed
@@ -469,10 +470,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, videos.length])
 
-  // Propagate active video to parent
+  // Propagate active video to parent — skip during feed reorder so the comment
+  // panel doesn't flash the wrong video's comments while the index corrects.
   useEffect(() => {
-    if (onVideoChange && videos[activeIndex]) {
-      onVideoChange(videos[activeIndex])
+    const video = videos[activeIndex]
+    if (onVideoChange && video) {
+      const trackedId = currentVideoIdRef.current
+      if (trackedId && video.id !== trackedId) return
+      onVideoChange(video)
     }
   }, [activeIndex, videos, onVideoChange])
 
@@ -500,7 +505,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [videos])
 
   const handleScrollToTop = useCallback(() => {
-    listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'smooth' })
+    listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'auto' })
+    listRef.current?.element?.scrollTo({ top: 0, behavior: 'auto' })
     setActiveIndex(0)
     currentVideoIdRef.current = videos[0]?.id ?? ''
     isAtTopRef.current = true
