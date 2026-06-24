@@ -472,7 +472,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   const handleScrollToTop = useCallback(() => {
     listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'auto' })
-    listRef.current?.element?.scrollTo({ top: 0, behavior: 'auto' })
     setActiveIndex(0)
     currentVideoIdRef.current = videos[0]?.id ?? ''
     isAtTopRef.current = true
@@ -484,7 +483,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const lastIndex = videos.length - 1
     if (lastIndex < 0) return
     listRef.current?.scrollToRow({ index: lastIndex, align: 'auto', behavior: 'auto' })
-    listRef.current?.element?.scrollTo({ top: lastIndex * window.innerHeight, behavior: 'auto' })
     setActiveIndex(lastIndex)
     currentVideoIdRef.current = videos[lastIndex]?.id ?? ''
     oldestLoadedCreatedAtRef.current = videos[lastIndex]?.createdAt ?? null
