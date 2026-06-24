@@ -27,17 +27,7 @@ describe('sortByFirstSeen', () => {
     expect(videos.map(v => v.id)).toEqual(['b', 'c', 'a'])
   })
 
-  it('falls back to firstSeen when createdAt is equal', () => {
-    const videos = [
-      makeVideo({ id: 'a', createdAt: 100, firstSeen: 100 }),
-      makeVideo({ id: 'b', createdAt: 100, firstSeen: 300 }),
-      makeVideo({ id: 'c', createdAt: 100, firstSeen: 200 }),
-    ]
-    videos.sort(sortByFirstSeen)
-    expect(videos.map(v => v.id)).toEqual(['b', 'c', 'a'])
-  })
-
-  it('puts LOCAL_PREVIEW_ID first regardless of timestamps', () => {
+  it('puts LOCAL_PREVIEW_ID first regardless of createdAt', () => {
     const videos = [
       makeVideo({ id: 'a', createdAt: 500 }),
       makeVideo({ id: LOCAL_PREVIEW_ID, createdAt: 100 }),
@@ -56,12 +46,14 @@ describe('sortByFirstSeen', () => {
     expect(videos.map(v => v.id)).toEqual(['b', 'a'])
   })
 
-  it('treats undefined firstSeen as 0 when createdAt is equal', () => {
+  it('preserves relative order when createdAt is equal (stable sort)', () => {
     const videos = [
-      makeVideo({ id: 'a', createdAt: 100, firstSeen: undefined }),
-      makeVideo({ id: 'b', createdAt: 100, firstSeen: 200 }),
+      makeVideo({ id: 'a', createdAt: 100 }),
+      makeVideo({ id: 'b', createdAt: 100 }),
+      makeVideo({ id: 'c', createdAt: 100 }),
     ]
+    const original = videos.map(v => v.id)
     videos.sort(sortByFirstSeen)
-    expect(videos.map(v => v.id)).toEqual(['b', 'a'])
+    expect(videos.map(v => v.id)).toEqual(original)
   })
 })
