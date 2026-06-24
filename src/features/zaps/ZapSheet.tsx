@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays } from '../../nostr/pool'
+import { fetchFromRelays } from '../../nostr/pool'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 
@@ -48,23 +48,8 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
       // If lud16 is not found in cache, fetch it from relays
       if (!lud16) {
         console.log(`Lud16 not found in cache for ${creatorPubkey}, querying profile from relays...`)
-        const promise = new Promise<any>((resolve) => {
-          let resolved = false
-          const sub = subscribeToRelays(relayUrls, { kinds: [0], authors: [creatorPubkey], limit: 1 }, (event) => {
-            if (!resolved && event.kind === 0 && event.pubkey === creatorPubkey) {
-              resolved = true
-              resolve(event)
-            }
-          })
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true
-              resolve(null)
-            }
-            sub()
-          }, 3000)
-        })
-        const fetchedProfile = await promise
+        const events = await fetchFromRelays(relayUrls, { kinds: [0], authors: [creatorPubkey], limit: 1 })
+        const fetchedProfile = events.find((e: any) => e.kind === 0 && e.pubkey === creatorPubkey) ?? null
         if (fetchedProfile) {
           try {
             eventStore.add(fetchedProfile)

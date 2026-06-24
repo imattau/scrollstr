@@ -263,18 +263,17 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       zapped: cachedUserState.zapped
     } : existing?.userState
 
-    // Count reactions, zaps, comments from cachedEvents
-    const associatedEvents = await db.cachedEvents.where('id').anyOf(event.id).toArray() // or scan via e-tag if queried
-    // To keep it light, let's query kind-based counts for this videoId from cachedEvents
-    // reaction kind: 7, 16, 6
-    // reply kind: 1111
-    // zap kind: 9735
-    const reactions = await db.cachedEvents.filter(rec => {
-      const isReaction = rec.kind === 7 || rec.kind === 16 || rec.kind === 6 || rec.kind === 1111 || rec.kind === 9735
-      if (!isReaction) return false
-      const eTags = rec.event.tags.filter((t: any) => t[0] === 'e').map((t: any) => t[1])
-      return eTags.includes(event.id)
-    }).toArray()
+    // Count reactions, zaps, comments from cachedEvents using kind index
+    // to avoid a full table scan
+    const reactionKinds = [7, 16, 6, 1111, 9735]
+    const reactions = await db.cachedEvents
+      .where('kind')
+      .anyOf(reactionKinds)
+      .toArray()
+      .then(records => records.filter(rec => {
+        const eTags = rec.event.tags.filter((t: any) => t[0] === 'e').map((t: any) => t[1])
+        return eTags.includes(event.id)
+      }))
 
     const reactionCount = reactions.filter(r => r.kind === 7).length
     const repostCount = reactions.filter(r => r.kind === 6 || r.kind === 16).length
@@ -458,6 +457,10 @@ export async function saveEventToCache(event: any): Promise<void> {
   }
 
   try {
+    // Deduplicate: skip if this event is already cached
+    const alreadyCached = await db.cachedEvents.get(id)
+    if (alreadyCached) return
+
     // 1. Write the event to IndexedDB
     await db.cachedEvents.put({
       id,
@@ -471,28 +474,53 @@ export async function saveEventToCache(event: any): Promise<void> {
     // 2. Project to tables
     if (isVideo) {
       await buildOrUpdateVideoShape(event)
-      await pruneVideos()
     } else if (isReactionOrComment) {
-      // If reaction/comment, check which video it refers to and re-build its shape
+      // Increment counts incrementally instead of full table scan
       const eTags = event.tags.filter((t: any) => t[0] === 'e').map((t: any) => t[1])
       for (const eId of eTags) {
-        const videoEventRecord = await db.cachedEvents.get(eId)
-        if (videoEventRecord) {
-          await buildOrUpdateVideoShape(videoEventRecord.event)
-        }
+        await incrementVideoCounts(eId, event)
       }
-      await pruneReactions()
     } else if (isProfileOrContact) {
       if (kind === 0) {
         await buildOrUpdateAuthorProfile(event)
       } else if (kind === 3) {
         await buildOrUpdateSocialRelations(event)
       }
-      await pruneProfiles()
     }
+
+    schedulePrune()
   } catch (error) {
     console.error(`[Cache] Error saving event ${id} to cache:`, error)
   }
+}
+
+async function incrementVideoCounts(videoId: string, reactionEvent: any): Promise<void> {
+  const shape = await db.videoShapes.get(videoId)
+  if (!shape) return
+
+  const kind = reactionEvent.kind
+  if (kind === 7) {
+    shape.reactionCount = (shape.reactionCount ?? 0) + 1
+  } else if (kind === 6 || kind === 16) {
+    shape.repostCount = (shape.repostCount ?? 0) + 1
+  } else if (kind === 1111) {
+    shape.replyCount = (shape.replyCount ?? 0) + 1
+  } else if (kind === 9735) {
+    shape.zapCount = (shape.zapCount ?? 0) + 1
+    const descriptionTag = reactionEvent.tags.find((t: any) => t[0] === 'description')?.[1]
+    if (descriptionTag) {
+      try {
+        const parsedDesc = JSON.parse(descriptionTag)
+        const amount = parsedDesc.tags.find((t: any) => t[0] === 'amount')?.[1]
+        if (amount) {
+          shape.zapTotalSats = (shape.zapTotalSats ?? 0) + Math.floor(parseInt(amount, 10) / 1000)
+        }
+      } catch (_) {}
+    }
+  }
+
+  shape.updatedAt = Date.now()
+  await db.videoShapes.put(shape)
 }
 
 /**
@@ -513,7 +541,8 @@ async function pruneVideos(): Promise<void> {
     await db.cachedEvents.bulkDelete(evictedIds)
     await db.videoShapes.bulkDelete(evictedIds)
 
-    // Cascading delete: Remove reactions/comments corresponding to evicted video IDs
+    // Cascading delete: Remove reactions/comments and user state for evicted video IDs
+    await db.userVideoState.bulkDelete(evictedIds)
     // Since reaction/comment events store the video id in 'e' tags, we scan them.
     const allReactions = await db.cachedEvents
       .where('kind')
@@ -575,6 +604,45 @@ export async function touchCachedEvents(ids: string[]): Promise<void> {
       })
     )
   )
+}
+
+const MEDIA_STATUS_MAX = 5000
+
+async function pruneMediaStatus(): Promise<void> {
+  const count = await db.mediaStatus.count()
+  if (count > MEDIA_STATUS_MAX) {
+    const overflow = count - MEDIA_STATUS_MAX
+    const records = await db.mediaStatus
+      .orderBy('updatedAt')
+      .limit(overflow)
+      .toArray()
+    const urlsToDelete = records.map((r) => r.url)
+    await db.mediaStatus.bulkDelete(urlsToDelete)
+    console.log(`[Cache] Evicted ${overflow} mediaStatus records.`)
+  }
+}
+
+// Debounced pruning — coalesces multiple prune requests into at most one run per interval
+let pruneScheduled = false
+let pruneTimer: ReturnType<typeof setTimeout> | null = null
+const PRUNE_INTERVAL_MS = 5000
+
+function schedulePrune(): void {
+  if (pruneScheduled) return
+  pruneScheduled = true
+  if (pruneTimer) clearTimeout(pruneTimer)
+  pruneTimer = setTimeout(async () => {
+    pruneScheduled = false
+    pruneTimer = null
+    try {
+      await pruneVideos()
+      await pruneReactions()
+      await pruneProfiles()
+      await pruneMediaStatus()
+    } catch (err) {
+      console.warn('[Cache] Pruning error:', err)
+    }
+  }, PRUNE_INTERVAL_MS)
 }
 
 export function queueCachedEventTouches(ids: string[]): void {
