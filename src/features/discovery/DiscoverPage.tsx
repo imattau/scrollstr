@@ -292,10 +292,7 @@ export const DiscoverPage: React.FC = () => {
                 {filteredVideos.map((video) => (
                   <div
                     key={video.id}
-                    onClick={() => {
-                      console.log('[discover] clicking video', video.id, video.title)
-                      navigate(`/?v=${video.id}`)
-                    }}
+                    onClick={() => navigate(`/?v=${video.id}`)}
                     className="group relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[16px] bg-[#18181d] transition-all duration-200 hover:scale-[1.02]"
                   >
                     {video.poster ? (

@@ -90,7 +90,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
   const deepLinkJumpedRef = useRef(false)
-  const scrollRAFRef = useRef<number | null>(null)
 
   // New-events counter: tracks how many new items appeared before the current position
   const [newEventsCount, setNewEventsCount] = useState(0)
@@ -262,10 +261,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         if (newIndex !== -1) {
           if (newIndex !== activeIndex) {
             setActiveIndex(newIndex)
-            scrollRAFRef.current = requestAnimationFrame(() => {
-              scrollRAFRef.current = null
-              listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
-            })
+            listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
           }
           return
         }
@@ -276,13 +272,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     // Keep activeIndex within bounds when videos list changes
     if (activeIndex >= videos.length) {
       setActiveIndex(Math.max(0, videos.length - 1))
-    }
-
-    return () => {
-      if (scrollRAFRef.current !== null) {
-        cancelAnimationFrame(scrollRAFRef.current)
-        scrollRAFRef.current = null
-      }
     }
   }, [videos, activeIndex])
 
@@ -342,7 +331,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   useEffect(() => {
     if (!initialVideoId || videos.length === 0 || deepLinkJumpedRef.current) return
     const idx = videos.findIndex(v => v.id === initialVideoId)
-    console.log('[deep-link]', { initialVideoId, idx, videoCount: videos.length, firstFewIds: videos.slice(0, 3).map(v => v.id) })
     if (idx === -1) return
     deepLinkJumpedRef.current = true
     setActiveIndex(idx)
