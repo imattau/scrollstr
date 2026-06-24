@@ -155,66 +155,118 @@ MOCK_EVENTS.forEach((ev) => {
   saveEventToCache(ev as any)
 })
 
-import { merge } from 'rxjs'
-import { map, startWith } from 'rxjs/operators'
+import { Observable } from 'rxjs'
 
-export const getEventsQuery$ = (filters: any) => {
-  return merge(eventStore.insert$, eventStore.update$, eventStore.remove$).pipe(
-    startWith(null),
-    map(() => eventStore.getByFilters(filters))
-  )
+export const getEventsQuery$ = (filters: any): Observable<any[]> => {
+  return new Observable<any[]>((subscriber) => {
+    subscriber.next(eventStore.getByFilters(filters))
+    const subs = [
+      eventStore.insert$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
+      eventStore.update$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
+      eventStore.remove$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
+    ]
+    return () => subs.forEach((s) => s.unsubscribe())
+  })
+}
+
+export const getReplaceableQuery$ = (kind: number, pubkey: string): Observable<any> => {
+  return new Observable<any>((subscriber) => {
+    subscriber.next(eventStore.getReplaceable(kind, pubkey))
+    const subs = [
+      eventStore.insert$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
+      eventStore.update$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
+      eventStore.remove$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
+    ]
+    return () => subs.forEach((s) => s.unsubscribe())
+  })
 }
 
 /**
- * Reactive observable for a single replaceable event (kind 0, 3, 10002, etc.).
- * Uses getReplaceable() which is the correct Applesauce API for these kinds —
- * unlike getByFilters, it goes directly to the replaceable index without filter overhead.
+ * Managed subscription — aggregates all active filter registrations into a single
+ * REQ per relay via pool.subscribeMap, so that N components × R relays does not
+ * exceed relay REQ-concurrency limits.
+ *
+ * Each registration stores its own relays, filters, and optional onEvent callback.
+ * On any add/remove the underlying subscription is torn down and rebuilt with the
+ * full merged set of filters.
  */
-export const getReplaceableQuery$ = (kind: number, pubkey: string) => {
-  return merge(eventStore.insert$, eventStore.update$, eventStore.remove$).pipe(
-    startWith(null),
-    map(() => eventStore.getReplaceable(kind, pubkey))
-  )
+const subRegistrations = new Map<symbol, { relays: string[]; filters: any[]; onEvent?: (event: any) => void }>()
+let managedClose: (() => void) | null = null
+let rebuildScheduled = false
+
+function rebuildManagedSub() {
+  if (managedClose) {
+    managedClose()
+    managedClose = null
+  }
+  if (subRegistrations.size === 0) return
+
+  const requests: { url: string; filter: any }[] = []
+  for (const reg of subRegistrations.values()) {
+    const cleaned = sanitizeFilters(reg.filters)
+    for (const url of reg.relays) {
+      for (const filter of cleaned) {
+        requests.push({ url, filter })
+      }
+    }
+  }
+
+  const sub = pool.subscribeMap(requests, {
+    onevent(event: any) {
+      if (event.kind === 10002) {
+        console.log(
+          `[pool] kind:10002 received for ${event.pubkey}:`,
+          event.tags?.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
+        )
+      }
+      eventStore.add(event)
+      saveEventToCache(event)
+
+      if (eventStore.memory && eventStore.memory.size > 1000) {
+        const pruned = eventStore.prune(200)
+        if (pruned > 0) {
+          console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
+        }
+      }
+
+      for (const reg of subRegistrations.values()) {
+        reg.onEvent?.(event)
+      }
+    },
+  })
+  managedClose = () => sub.close()
+}
+
+function scheduleRebuild() {
+  if (rebuildScheduled) return
+  rebuildScheduled = true
+  queueMicrotask(() => {
+    rebuildScheduled = false
+    rebuildManagedSub()
+  })
 }
 
 /**
  * Subscribe to relay events and feed them into the EventStore + IndexedDB cache.
- * Returns an unsubscribe function.
+ * All registrations are merged into a single REQ per relay to stay under relay
+ * concurrency limits.
  *
- * @param relays   Relay URLs to connect to
- * @param filters  One or more Nostr filter objects
- * @param onEvent  Optional extra callback per event
+ * Returns an unsubscribe function.
  */
 export function subscribeToRelays(
   relays: string[],
   filters: any | any[],
   onEvent?: (event: any) => void
 ): () => void {
-  const filterList = sanitizeFilters(filters)
+  const key = Symbol()
+  const filterList = Array.isArray(filters) ? filters : [filters]
+  subRegistrations.set(key, { relays, filters: filterList, onEvent })
+  scheduleRebuild()
 
-  const handleEvent = (event: any) => {
-    if (event.kind === 10002) {
-      console.log(
-        `[pool] kind:10002 received for ${event.pubkey}:`,
-        event.tags?.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
-      )
-    }
-    eventStore.add(event)
-    saveEventToCache(event)
-
-    // Periodic memory pruning
-    if (eventStore.memory && eventStore.memory.size > 1000) {
-      const pruned = eventStore.prune(200)
-      if (pruned > 0) {
-        console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
-      }
-    }
-
-    onEvent?.(event)
+  return () => {
+    subRegistrations.delete(key)
+    scheduleRebuild()
   }
-
-  const subs = filterList.map((f) => pool.subscribeMany(relays, f, { onevent: handleEvent }))
-  return () => subs.forEach((s) => s.close())
 }
 
 /**
