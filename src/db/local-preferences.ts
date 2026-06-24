@@ -4,6 +4,7 @@ export interface AppSettings {
   walletString: string
   autoplay: boolean
   mutedUsers: string[]
+  nsfwBlur: boolean
 }
 
 const STORAGE_KEY = 'nostr-clips-settings'
@@ -22,6 +23,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   walletString: '',
   autoplay: true,
   mutedUsers: [],
+  nsfwBlur: true,
 }
 
 export const loadSettings = (): AppSettings => {

@@ -47,6 +47,7 @@ export interface VideoShape {
   finalRankScore?: number;
 
   mediaStatus?: "unknown" | "available" | "failed" | "too_large" | "unsupported";
+  contentWarning?: string;
 
   userState?: {
     watched?: boolean;
@@ -243,6 +244,11 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
     const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
     const finalHashtags = hashtags.length > 0 ? hashtags : (existing?.hashtags ?? [])
 
+    // Parse content warning: check for content-warning tag or NIP-32 nsfw labels
+    const cwTag = event.tags.find((t: any) => t[0] === 'content-warning')
+    const nsfwLabel = event.tags.find((t: any) => t[0] === 'l' && t[1] === 'nsfw')
+    const contentWarning = cwTag?.[1] || nsfwLabel?.[1] || existing?.contentWarning
+
     const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
     let videoUrl = existing?.videoUrl ?? ''
     let thumbnailUrl = existing?.thumbnailUrl
@@ -319,6 +325,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       size,
       duration,
       mediaStatus,
+      contentWarning,
       userState,
       reactionCount,
       repostCount,

@@ -229,6 +229,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         music: 'Original Clip Audio',
         finalRankScore: shape.finalRankScore ?? 0,
         mediaStatus: shape.mediaStatus,
+        contentWarning: shape.contentWarning,
         width: shape.width,
         height: shape.height,
         duration: shape.duration,

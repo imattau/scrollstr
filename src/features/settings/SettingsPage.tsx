@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
-import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events/settings'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
 import { useUserRelayUrls } from '../../nostr/relays'
@@ -24,6 +24,7 @@ export const SettingsPage: React.FC = () => {
   const [localMutePubkeys, setLocalMutePubkeys] = useState<string[]>([])
   const [localMuteTags, setLocalMuteTags] = useState<string[]>([])
   const [localWalletString, setLocalWalletString] = useState('')
+  const [localNsfwBlur, setLocalNsfwBlur] = useState(true)
 
   // Input states for adding new entries
   const [newRelayUrl, setNewRelayUrl] = useState('')
@@ -54,6 +55,7 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     const s = loadSettings()
     setLocalWalletString(s.walletString || '')
+    setLocalNsfwBlur(s.nsfwBlur)
   }, [activeSubView])
 
   useEffect(() => {
@@ -713,6 +715,32 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
           <span className="text-[20px] text-[#71717a]">›</span>
+        </div>
+
+        {/* Display */}
+        <div className="flex items-center justify-between py-[18px] px-2">
+          <div className="flex items-center gap-3">
+            <EyeOff className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Blur NSFW videos</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localNsfwBlur ? 'Blurred — tap to reveal' : 'Shown normally'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !localNsfwBlur
+              setLocalNsfwBlur(next)
+              const s = loadSettings()
+              s.nsfwBlur = next
+              saveSettings(s)
+            }}
+            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${localNsfwBlur ? 'bg-[#8b5cf6]' : 'bg-[#27272a]'}`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${localNsfwBlur ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
         </div>
 
         {/* PWA App Installation */}

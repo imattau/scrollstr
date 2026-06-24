@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
-import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2 } from 'lucide-react'
+import { loadSettings } from '../../db/local-preferences'
+import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff } from 'lucide-react'
 
 export interface CreatorProfile {
   pubkey: string
@@ -87,7 +88,10 @@ function ActionPill({
 const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick }) => {
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
-  const [showInfo, setShowInfo] = React.useState(false)
+  const [showInfo, setShowInfo] = useState(false)
+  const [nsfwRevealed, setNsfwRevealed] = useState(false)
+  const settings = loadSettings()
+  const isNsfwBlurred = settings.nsfwBlur && !!video.contentWarning && !nsfwRevealed
 
   return (
     <article
@@ -102,13 +106,25 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
         <VideoPlayer
           url={video.url}
           poster={video.poster}
-          isActive={isActive}
+          isActive={isActive && !isNsfwBlurred}
           isNearActive={isNearActive}
           isMuted={isMuted}
           onLike={() => onActionClick('like', video.id, video.kind)}
           showControls={false}
         />
       </div>
+
+      {isNsfwBlurred && (
+        <button
+          type="button"
+          onClick={() => setNsfwRevealed(true)}
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/70 backdrop-blur-xl cursor-pointer transition-opacity"
+        >
+          <EyeOff className="w-10 h-10 text-[#a1a1aa]" />
+          <span className="text-[15px] font-semibold text-[#f7f7f8]">NSFW</span>
+          <span className="text-[12px] text-[#a1a1aa]">Tap to view</span>
+        </button>
+      )}
 
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#09090b]/18" />
 
