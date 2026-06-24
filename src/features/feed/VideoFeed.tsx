@@ -344,17 +344,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const idx = videos.findIndex((v: VideoItemData) => v.id === initialVideoId)
     if (idx !== -1) {
       setActiveIndex(idx)
-      const timer = setTimeout(() => {
-        listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
-      }, 100)
-      return () => clearTimeout(timer)
+      listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
+      return
     }
 
     if (!deepLinkFetchedRef.current) {
       deepLinkFetchedRef.current = true
       const existing = eventStore.getByFilters({ ids: [initialVideoId], kinds: [21, 22, 34236] })
       if (existing.length > 0) {
-        existing.forEach(ev => saveEventToCache(ev))
+        existing.forEach(ev => { saveEventToCache(ev) })
       } else {
         fetchFromRelays(relayUrls, { ids: [initialVideoId], kinds: [21, 22, 34236] })
           .then(events => {
