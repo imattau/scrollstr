@@ -339,32 +339,29 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
-    if (!(initialVideoId && videos.length > 0)) return
+    if (!initialVideoId) return
 
-    const idx = videos.findIndex((v: VideoItemData) => v.id === initialVideoId)
-    if (idx !== -1) {
+    let cancelled = false
+
+    async function jumpToVideo() {
+      const allShapes = await db.videoShapes.toArray()
+      const sorted = allShapes
+        .filter(s => s.mediaStatus !== 'failed')
+        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+
+      const idx = sorted.findIndex(s => s.id === initialVideoId)
+      if (idx === -1) return
+
+      if (cancelled) return
       setActiveIndex(idx)
+      currentVideoIdRef.current = initialVideoId ?? ''
       listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
-      return
     }
 
-    if (!deepLinkFetchedRef.current) {
-      deepLinkFetchedRef.current = true
-      const existing = eventStore.getByFilters({ ids: [initialVideoId], kinds: [21, 22, 34236] })
-      if (existing.length > 0) {
-        existing.forEach(ev => { saveEventToCache(ev) })
-      } else {
-        fetchFromRelays(relayUrls, { ids: [initialVideoId], kinds: [21, 22, 34236] })
-          .then(events => {
-            events.forEach(event => {
-              eventStore.add(event)
-              saveEventToCache(event)
-            })
-          })
-          .catch(err => console.error('[VideoFeed] Failed to fetch deep-linked video:', err))
-      }
-    }
-  }, [videos, initialVideoId, relayUrls, eventStore])
+    jumpToVideo()
+
+    return () => { cancelled = true }
+  }, [initialVideoId])
 
   // Track scroll position, snap, and run diagnostics
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
