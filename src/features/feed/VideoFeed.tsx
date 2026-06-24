@@ -89,7 +89,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
-  const deepLinkFetchedRef = useRef(false)
+  const deepLinkJumpedRef = useRef(false)
   const scrollRAFRef = useRef<number | null>(null)
 
   // New-events counter: tracks how many new items appeared before the current position
@@ -340,9 +340,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
-    if (!initialVideoId) return
-
-    let cancelled = false
+    if (!initialVideoId || videos.length === 0 || deepLinkJumpedRef.current) return
 
     async function jumpToVideo() {
       const allShapes = await db.videoShapes.toArray()
@@ -353,16 +351,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       const idx = sorted.findIndex(s => s.id === initialVideoId)
       if (idx === -1) return
 
-      if (cancelled) return
+      deepLinkJumpedRef.current = true
       setActiveIndex(idx)
       currentVideoIdRef.current = initialVideoId ?? ''
       listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
     }
 
     jumpToVideo()
-
-    return () => { cancelled = true }
-  }, [initialVideoId])
+  }, [initialVideoId, videos])
 
   // Track scroll position, snap, and run diagnostics
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
