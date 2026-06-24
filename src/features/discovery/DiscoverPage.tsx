@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/rxNostr'
-import { use$ } from 'applesauce-react/hooks'
-import { parseVideoEvent } from '../../nostr/events/video'
+import { subscribeToRelays } from '../../nostr/rxNostr'
+import { db, VideoShape } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events/reactions'
@@ -78,18 +78,38 @@ export const DiscoverPage: React.FC = () => {
     return () => unsub()
   }, [relayUrls])
 
-  // Query short-video events from Applesauce EventStore (last 48 hours)
-  const rawVideoEvents = use$(
-    () => getEventsQuery$({ kinds: VIDEO_KINDS, since: Math.floor(Date.now() / 1000) - 48 * 3600 }),
+  // Query video shapes from the Dexie cache (last 48 hours)
+  const rawVideoShapes = useLiveQuery(
+    () => db.videoShapes
+      .where('created_at')
+      .above(Math.floor(Date.now() / 1000) - 48 * 3600)
+      .toArray(),
     []
   ) ?? EMPTY_VIDEOS
 
-  // Parse events to local format and filter out invalid/null ones
+  // Map shapes to local format
   const videos = useMemo(() => {
-    return rawVideoEvents
-      .map((ev: any) => parseVideoEvent(ev))
-      .filter((v: any): v is VideoItemData => v !== null)
-  }, [rawVideoEvents])
+    return (rawVideoShapes as VideoShape[]).map((shape): VideoItemData => ({
+      id: shape.id,
+      kind: 22,
+      createdAt: shape.created_at,
+      title: shape.title ?? '',
+      description: shape.summary ?? '',
+      url: shape.videoUrl,
+      poster: shape.thumbnailUrl,
+      creator: {
+        pubkey: shape.pubkey,
+        name: shape.authorName || shape.pubkey.slice(0, 8),
+        picture: shape.authorPicture
+      },
+      hashtags: shape.hashtags || [],
+      likesCount: shape.reactionCount || 0,
+      commentsCount: shape.replyCount || 0,
+      boostsCount: shape.repostCount || 0,
+      zapsCount: shape.zapCount || 0,
+      music: 'Original Clip Audio',
+    }))
+  }, [rawVideoShapes])
 
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {
@@ -181,17 +201,18 @@ export const DiscoverPage: React.FC = () => {
   }, [creators, relayUrls])
 
   // Get logged-in user's contact list to determine follow state
-  const myContactListEvent = use$(
+  const myContactListEvents = useLiveQuery(
     () => session?.pubkey
-      ? getEventsQuery$({ kinds: [3], authors: [session.pubkey] })
-      : getEventsQuery$({ kinds: [3], authors: [] }),
+      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
+      : [],
     [session?.pubkey]
-  )?.[0]
+  ) ?? []
+  const myContactListEvent = myContactListEvents[myContactListEvents.length - 1] as any
 
   const isFollowingPubkeys = useMemo(() => {
-    if (!myContactListEvent) return new Set<string>()
+    if (!myContactListEvent?.event) return new Set<string>()
     return new Set(
-      myContactListEvent.tags
+      myContactListEvent.event.tags
         .filter((t: any) => t[0] === 'p')
         .map((t: any) => t[1])
     )
@@ -220,7 +241,7 @@ export const DiscoverPage: React.FC = () => {
         signEvent,
         rxNostr,
         targetPubkey,
-        myContactListEvent || null
+        myContactListEvent?.event || null
       )
       eventStore.add(signed)
     } catch (err: any) {

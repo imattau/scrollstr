@@ -340,17 +340,12 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
-    if (!initialVideoId || deepLinkJumpedRef.current) return
-    if (videos.length === 0) return
-
-    console.log('[deep-link] searching for', initialVideoId, 'in', videos.length, 'videos')
+    if (!initialVideoId || videos.length === 0 || deepLinkJumpedRef.current) return
     const idx = videos.findIndex(v => v.id === initialVideoId)
-    console.log('[deep-link] found at idx:', idx)
     if (idx === -1) return
-
     deepLinkJumpedRef.current = true
     setActiveIndex(idx)
-    currentVideoIdRef.current = initialVideoId
+    currentVideoIdRef.current = initialVideoId ?? ''
     listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
   }, [initialVideoId, videos])
 
