@@ -91,6 +91,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const currentVideoIdRef = useRef<string>('')
   const deepLinkJumpedRef = useRef(false)
 
+  // Tracks the insertOrder at the viewport's top edge for position maintenance
+  // when scrolled down. When at the top (isAtTopRef), we stay at index 0 instead.
+  const anchorInsertOrderRef = useRef<number>(0)
+
   // New-events counter: tracks how many new items appeared before the current position
   const [newEventsCount, setNewEventsCount] = useState(0)
   // Snapshot of video IDs as the user last saw them from index 0
@@ -253,20 +257,27 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
     oldestLoadedCreatedAtRef.current = videos.length > 0 ? videos[videos.length - 1]?.createdAt ?? null : null
 
-    // Track current video and update activeIndex when list re-sorts
+    // Maintain feed position across list changes. When at the top, stay at the
+    // top so new content appears without jarring scroll adjustments. When scrolled
+    // down, use insertOrder (invariant when items are prepended) to keep the same
+    // video in view.
     if (videos.length > 0) {
-      const currentVideoId = currentVideoIdRef.current
-      if (currentVideoId) {
-        const newIndex = videos.findIndex(v => v.id === currentVideoId)
-        if (newIndex !== -1) {
-          if (newIndex !== activeIndex) {
-            setActiveIndex(newIndex)
-            listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
-          }
-          return
+      if (isAtTopRef.current) {
+        if (activeIndex !== 0) {
+          setActiveIndex(0)
         }
+        currentVideoIdRef.current = videos[0]?.id ?? ''
+        return
       }
-      currentVideoIdRef.current = videos[activeIndex]?.id ?? ''
+      const idx = videos.findIndex(v => (v.insertOrder ?? 0) <= anchorInsertOrderRef.current)
+      if (idx !== -1) {
+        if (idx !== activeIndex) {
+          setActiveIndex(idx)
+          listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
+        }
+        return
+      }
+      currentVideoIdRef.current = videos[Math.min(activeIndex, videos.length - 1)]?.id ?? ''
     }
 
     // Keep activeIndex within bounds when videos list changes
@@ -346,6 +357,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
       setActiveIndex(newIndex)
       currentVideoIdRef.current = videos[newIndex]?.id ?? ''
+      anchorInsertOrderRef.current = videos[newIndex]?.insertOrder ?? 0
 
       // Diagnostics log
       void (async () => {
