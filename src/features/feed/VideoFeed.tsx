@@ -342,6 +342,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   useEffect(() => {
     if (!initialVideoId || videos.length === 0 || deepLinkJumpedRef.current) return
     const idx = videos.findIndex(v => v.id === initialVideoId)
+    console.log('[deep-link]', { initialVideoId, idx, videoCount: videos.length, firstFewIds: videos.slice(0, 3).map(v => v.id) })
     if (idx === -1) return
     deepLinkJumpedRef.current = true
     setActiveIndex(idx)
