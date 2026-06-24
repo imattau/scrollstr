@@ -93,7 +93,7 @@ export const DiscoverPage: React.FC = () => {
 
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {
-    const sorted = [...videos].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    const sorted = [...videos].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return sorted.slice(0, 300)
   }, [videos])
 
