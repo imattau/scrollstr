@@ -12,11 +12,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown, ArrowUp, Sparkles } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } from 'lucide-react'
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
-const LOCAL_PREVIEW_ID = 'local-preview-neon-mascot'
+const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000001'
 const MAX_FEED_ITEMS = 500
 
 // Viewport constants
@@ -167,34 +167,17 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.pubkey])
 
-  // 2a. Explore feed: fetch recent videos from all relays (no author filter)
+  // Feed subscription: fetch recent videos from all relays into the cache.
+  // Both explore and following views render from the same cache (filtered locally).
   useEffect(() => {
     if (!isMetadataLoaded) return
-    if (feedType === 'following') return // handled by 2b below
-    console.log('[VideoFeed] Fetching explore feed...')
+    console.log('[VideoFeed] Fetching videos...')
     const unsub = subscribeToRelays(relayUrls, {
       kinds: [21, 22, 34236],
-      limit: 200,
       since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
     })
     return unsub
-  }, [relayUrls, isMetadataLoaded, feedType])
-
-  // 2b. Following feed: fetch videos authored by followed pubkeys.
-  // Re-runs whenever followingPubkeys resolves (reactive kind:3 subscription).
-  useEffect(() => {
-    if (!isMetadataLoaded) return
-    if (feedType !== 'following') return
-    if (followingPubkeys.length === 0) return
-    console.log(`[VideoFeed] Fetching following feed for ${followingPubkeys.length} authors...`)
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [21, 22, 34236],
-      authors: followingPubkeys,
-      limit: 200,
-      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
-    })
-    return unsub
-  }, [relayUrls, isMetadataLoaded, feedType, followingPubkeys])
+  }, [relayUrls, isMetadataLoaded])
 
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
   const dbShapes = useLiveQuery(async () => {
@@ -570,7 +553,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       )}
 
       {/* Floating navigation buttons for desktop */}
-      <div className="hidden md:flex flex-col gap-3 absolute right-6 top-1/2 -translate-y-1/2 z-30">
+      <div className="hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30">
+        <button
+          onClick={() => listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'auto' })}
+          disabled={activeIndex === 0}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Jump to top"
+        >
+          <ChevronsUp className="w-5 h-5" />
+        </button>
         <button
           onClick={() => {
             if (activeIndex > 0 && activeIndex - 1 < videos.length) {
@@ -594,6 +585,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           title="Next Video"
         >
           <ChevronDown className="w-5 h-5" />
+        </button>
+        <button
+          onClick={() => listRef.current?.scrollToRow({ index: videos.length - 1, align: 'auto', behavior: 'auto' })}
+          disabled={activeIndex === videos.length - 1 || videos.length === 0}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Jump to bottom"
+        >
+          <ChevronsDown className="w-5 h-5" />
         </button>
       </div>
     </div>

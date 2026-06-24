@@ -2,6 +2,25 @@ import { SimplePool } from 'nostr-tools'
 import { EventStore } from 'applesauce-core'
 import { queueCachedEventTouches, saveEventToCache } from './cache'
 
+const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
+
+function isHex(s: string): boolean {
+  return s.length % 2 === 0 && /^[0-9a-f]+$/i.test(s)
+}
+
+function sanitizeFilters(filters: any | any[]): any[] {
+  const list = Array.isArray(filters) ? filters : [filters]
+  return list.map((f: any) => {
+    const clean: any = { ...f }
+    for (const key of HEX_FIELDS) {
+      if (Array.isArray(clean[key])) {
+        clean[key] = clean[key].filter((v: any) => typeof v === 'string' && isHex(v))
+      }
+    }
+    return clean
+  })
+}
+
 // List of standard default relays to bootstrap client connection
 export const DEFAULT_RELAYS = [
   'wss://nos.lol',
@@ -44,7 +63,7 @@ eventStore.getReplaceable = ((kind: number, pubkey: string) => {
 const MOCK_EVENTS = [
   {
     kind: 21,
-    id: 'local-preview-neon-mascot',
+    id: 'deadbeef00000000000000000000000000000000000000000000000000000001',
     pubkey: '8459424242424242424242424242424242424242424242424242424242424242',
     created_at: Math.floor(Date.now() / 1000),
     content: 'The Neon Mascot loop, bundled locally so the feed has instant motion while relays connect.',
@@ -65,7 +84,7 @@ const MOCK_EVENTS = [
   },
   {
     kind: 21,
-    id: "mock-video-1",
+    id: "deadbeef00000000000000000000000000000000000000000000000000000002",
     pubkey: "8459424242424242424242424242424242424242424242424242424242424242",
     created_at: Math.floor(Date.now() / 1000) - 3600,
     content: "Exploring the vibrant neon streets of Melbourne at night! #melbourne #nightwalk #nostr",
@@ -87,7 +106,7 @@ const MOCK_EVENTS = [
   },
   {
     kind: 21,
-    id: "mock-video-2",
+    id: "deadbeef00000000000000000000000000000000000000000000000000000003",
     pubkey: "9283928392839283928392839283928392839283928392839283928392839283",
     created_at: Math.floor(Date.now() / 1000) - 7200,
     content: "Beautiful yellow flowers swaying in the gentle spring breeze. #nature #flowers #peaceful",
@@ -109,7 +128,7 @@ const MOCK_EVENTS = [
   },
   {
     kind: 21,
-    id: "mock-video-3",
+    id: "deadbeef00000000000000000000000000000000000000000000000000000004",
     pubkey: "7362736273627362736273627362736273627362736273627362736273627362",
     created_at: Math.floor(Date.now() / 1000) - 10800,
     content: "Sleek dance moves under the colorful neon lights. #dance #neon #vibes",
@@ -171,7 +190,7 @@ export function subscribeToRelays(
   filters: any | any[],
   onEvent?: (event: any) => void
 ): () => void {
-  const filterList = Array.isArray(filters) ? filters : [filters]
+  const filterList = sanitizeFilters(filters)
 
   const handleEvent = (event: any) => {
     if (event.kind === 10002) {
@@ -217,7 +236,7 @@ export async function publishToRelays(relays: string[], event: any): Promise<voi
  * Resolves with all events returned before EOSE.
  */
 export async function fetchFromRelays(relays: string[], filters: any | any[]): Promise<any[]> {
-  const filterList = Array.isArray(filters) ? filters : [filters]
+  const filterList = sanitizeFilters(filters)
   const results = await Promise.all(filterList.map((f) => pool.querySync(relays, f)))
   return results.flat()
 }
