@@ -91,6 +91,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
   const deepLinkFetchedRef = useRef(false)
+  const scrollRAFRef = useRef<number | null>(null)
 
   // New-events counter: tracks how many new items appeared before the current position
   const [newEventsCount, setNewEventsCount] = useState(0)
@@ -296,7 +297,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           if (newIndex !== activeIndex) {
             setActiveIndex(newIndex)
             // Schedule scroll to maintain view of current video
-            requestAnimationFrame(() => {
+            scrollRAFRef.current = requestAnimationFrame(() => {
+              scrollRAFRef.current = null
               listRef.current?.scrollToRow({ index: newIndex, align: 'auto', behavior: 'auto' })
             })
           }
@@ -310,6 +312,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     // Keep activeIndex within bounds when videos list changes
     if (activeIndex >= videos.length) {
       setActiveIndex(Math.max(0, videos.length - 1))
+    }
+
+    return () => {
+      if (scrollRAFRef.current !== null) {
+        cancelAnimationFrame(scrollRAFRef.current)
+        scrollRAFRef.current = null
+      }
     }
   }, [videos, activeIndex])
 
@@ -367,28 +376,31 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
-    if (initialVideoId && videos.length > 0) {
-      const idx = videos.findIndex((v: VideoItemData) => v.id === initialVideoId)
-      if (idx !== -1) {
-        setActiveIndex(idx)
-        setTimeout(() => {
-          listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
-        }, 100)
-      } else if (!deepLinkFetchedRef.current) {
-        deepLinkFetchedRef.current = true
-        const existing = eventStore.getByFilters({ ids: [initialVideoId], kinds: [21, 22, 34236] })
-        if (existing.length > 0) {
-          existing.forEach(ev => saveEventToCache(ev))
-        } else {
-          fetchFromRelays(relayUrls, { ids: [initialVideoId], kinds: [21, 22, 34236] })
-            .then(events => {
-              events.forEach(event => {
-                eventStore.add(event)
-                saveEventToCache(event)
-              })
+    if (!(initialVideoId && videos.length > 0)) return
+
+    const idx = videos.findIndex((v: VideoItemData) => v.id === initialVideoId)
+    if (idx !== -1) {
+      setActiveIndex(idx)
+      const timer = setTimeout(() => {
+        listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
+      }, 100)
+      return () => clearTimeout(timer)
+    }
+
+    if (!deepLinkFetchedRef.current) {
+      deepLinkFetchedRef.current = true
+      const existing = eventStore.getByFilters({ ids: [initialVideoId], kinds: [21, 22, 34236] })
+      if (existing.length > 0) {
+        existing.forEach(ev => saveEventToCache(ev))
+      } else {
+        fetchFromRelays(relayUrls, { ids: [initialVideoId], kinds: [21, 22, 34236] })
+          .then(events => {
+            events.forEach(event => {
+              eventStore.add(event)
+              saveEventToCache(event)
             })
-            .catch(err => console.error('[VideoFeed] Failed to fetch deep-linked video:', err))
-        }
+          })
+          .catch(err => console.error('[VideoFeed] Failed to fetch deep-linked video:', err))
       }
     }
   }, [videos, initialVideoId, relayUrls, eventStore])

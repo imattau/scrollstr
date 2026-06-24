@@ -43,7 +43,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     } else {
       // Out of active viewport
       video.pause()
-      video.currentTime = 0 // Reset to beginning
+      if (video.src) video.currentTime = 0 // Reset to beginning
     }
   }, [isActive, isNearActive])
 
@@ -88,6 +88,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           await updateMediaStatus(url, 'available', { size: bytes })
         }
         
+        if (isAborted) return
+        
         // Proceed with loading
         if (isHls) {
           if (Hls.isSupported()) {
@@ -106,6 +108,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       })
       .catch((err) => {
         if (err.name === 'AbortError') return
+        if (isAborted) return
         console.warn('Failed to probe media metadata:', err)
         // Fallback load even if HEAD fails (e.g. CORS block on HEAD)
         if (isHls) {

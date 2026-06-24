@@ -14,7 +14,15 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
     video.muted = true
     video.playsInline = true
 
+    let timedOut = false
+    const timeout = setTimeout(() => {
+      timedOut = true
+      cleanup()
+      reject(new Error('Thumbnail generation timed out after 10s'))
+    }, 10000)
+
     const cleanup = () => {
+      clearTimeout(timeout)
       video.pause()
       video.removeAttribute('src')
       try { video.load() } catch (_) {}
@@ -22,10 +30,12 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
     }
 
     video.onloadedmetadata = () => {
+      if (timedOut) return
       video.currentTime = 1
     }
 
     video.onseeked = () => {
+      if (timedOut) return
       const canvas = document.createElement('canvas')
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
