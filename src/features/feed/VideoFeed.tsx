@@ -13,10 +13,10 @@ import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } from 'lucide-react'
+import { sortByFirstSeen } from './feedSort'
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
-const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000000001'
 
 // Viewport constants
 const WINDOW_BEFORE = 1
@@ -225,11 +225,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
     }
 
-    list.sort((a: VideoItemData, b: VideoItemData) => {
-      if (a.id === LOCAL_PREVIEW_ID) return -1
-      if (b.id === LOCAL_PREVIEW_ID) return 1
-      return (b.firstSeen ?? 0) - (a.firstSeen ?? 0)
-    })
+    list.sort(sortByFirstSeen)
 
     return list
   }, [filterTag, feedType, session, followingPubkeys]) || []
