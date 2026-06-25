@@ -7,6 +7,7 @@ const pool = new SimplePool()
 const subs = new Map<string, SubCloser>()
 let isBackfillRunning = false
 let isProfileBackfillRunning = false
+let isFollowedVideoBackfillRunning = false
 let activeRelays: string[] = []
 
 const BACKFILL_BATCH_SIZE = 100
@@ -42,6 +43,21 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
     return events
   } catch (err) {
     console.warn('[Worker] Relay error during profile batch fetch:', err)
+    return []
+  }
+}
+
+async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], until: number): Promise<any[]> {
+  try {
+    const events = await pool.querySync(relayUrls, {
+      kinds: [21, 22, 34236],
+      authors: pubkeys,
+      limit: BACKFILL_BATCH_SIZE,
+      until,
+    })
+    return events
+  } catch (err) {
+    console.warn('[Worker] Relay error during followed video batch fetch:', err)
     return []
   }
 }
@@ -125,6 +141,54 @@ async function handleStartBackfill(relayUrls: string[]) {
   }
 }
 
+async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: string[]) {
+  if (isFollowedVideoBackfillRunning) return
+  isFollowedVideoBackfillRunning = true
+
+  const effective: string[] =
+    relayUrls && relayUrls.length > 0 ? relayUrls : activeRelays
+
+  console.log(`[Worker] Starting followed-video backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
+
+  try {
+    for (let batch = 0; batch < MAX_BATCHES; batch++) {
+      const currentCount = await getCacheVideoCount()
+      const remaining = MAX_VIDEOS - currentCount
+      if (remaining <= 0) {
+        console.log(`[Worker] Cache is full (${currentCount}/${MAX_VIDEOS}). Stopping followed-video backfill.`)
+        break
+      }
+
+      const oldestTs = await getCacheOldestVideoTimestamp()
+      const until = oldestTs != null ? oldestTs - 1 : Math.floor(Date.now() / 1000)
+
+      console.log(
+        `[Worker] Followed-video batch ${batch + 1}/${MAX_BATCHES} — ` +
+          `fetching up to ${BACKFILL_BATCH_SIZE} events before ts ${until} ` +
+          `(cache: ${currentCount}/${MAX_VIDEOS})`
+      )
+
+      const events = await fetchFollowedVideoBatch(effective, pubkeys, until)
+      if (events.length === 0) {
+        console.log('[Worker] Relay returned 0 followed-video events – history exhausted. Stopping.')
+        break
+      }
+
+      console.log(`[Worker] Followed-video batch ${batch + 1} received ${events.length} events from relays.`)
+
+      self.postMessage({ type: 'backfillEvents', events })
+
+      await delay(BATCH_DELAY_MS)
+    }
+  } catch (err) {
+    console.error('[Worker] Unexpected error during followed-video backfill:', err)
+  } finally {
+    isFollowedVideoBackfillRunning = false
+    console.log(`[Worker] Followed-video backfill complete.`)
+    self.postMessage({ type: 'followedVideoBackfillComplete' })
+  }
+}
+
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
 function isHex(s: string): boolean {
@@ -170,6 +234,9 @@ self.onmessage = (e: MessageEvent) => {
       break
     case 'startProfileBackfill':
       void handleStartProfileBackfill(msg.relayUrls, msg.pubkeys)
+      break
+    case 'startFollowedVideoBackfill':
+      void handleStartFollowedVideoBackfill(msg.relayUrls, msg.pubkeys)
       break
     case 'subscribe':
       handleSubscribe(msg.id, msg.relays, msg.filters)

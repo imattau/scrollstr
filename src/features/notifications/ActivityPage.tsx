@@ -150,12 +150,10 @@ export const ActivityPage: React.FC = () => {
       const ids = videoIdsKey ? videoIdsKey.split(',') : []
       if (ids.length === 0) return Promise.resolve([] as any[])
       return db.cachedEvents
-        .where('kind')
-        .anyOf(REACTION_KINDS)
+        .where('eTags')
+        .anyOf(ids)
+        .filter(e => REACTION_KINDS.includes(e.kind))
         .toArray()
-        .then(events => events.filter((e: any) =>
-          e.eTags?.some((tag: string) => ids.includes(tag))
-        ))
     },
     [videoIdsKey]
   ) ?? EMPTY_EVENTS

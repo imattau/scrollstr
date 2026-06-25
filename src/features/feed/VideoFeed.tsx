@@ -6,7 +6,7 @@ import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { maybeResumeBackfill, maybeResumeProfileBackfill } from '../../nostr/cacheBackfill'
+import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } from 'lucide-react'
@@ -83,11 +83,12 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [relayUrls])
 
-  // Profile backfill: pre-fetch kind:0 metadata for followed users and
-  // known video creators so profile data is ready before components render.
+  // Profile backfill: pre-fetch kind:0 metadata and video events for
+  // followed users so the Following feed is populated quickly.
   useEffect(() => {
     if (followingPubkeys.length > 0 && relayUrls.length > 0) {
       void maybeResumeProfileBackfill(relayUrls, followingPubkeys)
+      maybeResumeFollowedVideoBackfill(relayUrls, followingPubkeys)
     }
   }, [followingPubkeys, relayUrls])
 
@@ -141,7 +142,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
   const videos = useLiveQuery(async () => {
     try {
-      const rows = await db.videoShapes.toArray()
+      const rows = await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
       let list = rows.map((shape: VideoShape): VideoItemData => ({
         id: shape.id,
         kind: 22,
@@ -175,8 +176,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         size: shape.size,
         mimeType: shape.mimeType
       }))
-
-      list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed')
 
       if (filterTag) {
         list = list.filter((v: VideoItemData) =>

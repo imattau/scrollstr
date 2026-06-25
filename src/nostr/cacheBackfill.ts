@@ -3,6 +3,7 @@ import { db } from './cache'
 
 let isBackfillRunning = false
 let isProfileBackfillRunning = false
+let isFollowedVideoBackfillRunning = false
 
 /**
  * Starts a background backfill in the web worker.
@@ -82,4 +83,41 @@ export async function startProfileBackfill(relayUrls: string[], knownPubkeys: st
 export async function maybeResumeProfileBackfill(relayUrls: string[], knownPubkeys: string[]): Promise<void> {
   if (isProfileBackfillRunning) return
   await startProfileBackfill(relayUrls, knownPubkeys)
+}
+
+/**
+ * Starts a background backfill for video events from followed pubkeys.
+ * Fetches video events (kinds 21, 22, 34236) scoped to specific authors
+ * so the Following feed is populated quickly.
+ */
+export function startFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[]): void {
+  if (isFollowedVideoBackfillRunning) {
+    console.log('[CacheBackfill] Followed-video backfill already running, skipping.')
+    return
+  }
+  if (followedPubkeys.length === 0) return
+
+  isFollowedVideoBackfillRunning = true
+
+  const handleComplete = (e: MessageEvent) => {
+    if (e.data.type === 'followedVideoBackfillComplete') {
+      isFollowedVideoBackfillRunning = false
+      backfillWorker.removeEventListener('message', handleComplete)
+    }
+  }
+  backfillWorker.addEventListener('message', handleComplete)
+
+  backfillWorker.postMessage({
+    type: 'startFollowedVideoBackfill',
+    relayUrls,
+    pubkeys: followedPubkeys,
+  })
+}
+
+/**
+ * Triggers followed-video backfill only if one isn't already running.
+ */
+export function maybeResumeFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[]): void {
+  if (isFollowedVideoBackfillRunning) return
+  startFollowedVideoBackfill(relayUrls, followedPubkeys)
 }

@@ -98,9 +98,9 @@ class ScrollstrCacheDatabase extends Dexie {
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(8).stores({
+    this.version(10).stores({
       cachedEvents: 'id, [kind+pubkey], kind, pubkey, created_at, *eTags, *pTags',
-      videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder',
+      videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder, *hashtags, mediaStatus',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',

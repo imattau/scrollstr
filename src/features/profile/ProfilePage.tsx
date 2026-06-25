@@ -119,15 +119,14 @@ export const ProfilePage: React.FC = () => {
       .filter((v: any): v is VideoItemData => v !== null)
   }, [rawVideoEvents])
 
-  // Retrieve all video events to filter list view to creators with at least 1 video
-  const allVideoEvents: any[] = useLiveQuery(
-    () => db.cachedEvents.where('kind').anyOf([21, 22, 34236]).toArray(),
+  // Retrieve all video creators from the videoShapes pubkey index
+  const creatorsWithVideos = useLiveQuery(
+    async () => {
+      const keys = await db.videoShapes.orderBy('pubkey').uniqueKeys()
+      return new Set(keys as string[])
+    },
     []
-  ) ?? []
-
-  const creatorsWithVideos = useMemo(() => {
-    return new Set(allVideoEvents.map((ev: any) => ev.pubkey))
-  }, [allVideoEvents])
+  ) ?? new Set()
 
   // Retrieve raw kind:6 or kind:16 repost events
   const rawBoosts: any[] = useLiveQuery(
@@ -155,8 +154,7 @@ export const ProfilePage: React.FC = () => {
   const followerEvents: any[] = useLiveQuery(
     async () => {
       if (!targetPubkey) return [] as any[]
-      const events = await db.cachedEvents.where('kind').equals(3).toArray()
-      return events.filter((e: any) => e.pTags?.includes(targetPubkey))
+      return db.cachedEvents.where('pTags').equals(targetPubkey).filter(e => e.kind === 3).toArray()
     },
     [targetPubkey]
   ) ?? []
