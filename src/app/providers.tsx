@@ -124,9 +124,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const registerPasskey = async (nsec?: string): Promise<string> => {
     console.log(nsec ? 'Registering passkey from existing nsec...' : 'Registering new passkey identity...')
     const options = {
-      rpName: 'Scrollstr',
-      userName: 'scrollstr_user_' + Math.floor(Math.random() * 1000000),
-      displayName: 'Scrollstr User'
+      rpName: 'Nostr Clips',
+      userName: 'nostrclips_user_' + Math.floor(Math.random() * 1000000),
+      displayName: 'Nostr Clips User'
     }
     const result = nsec
       ? await importPasskeyIdentityFromNsec(nsec, options)

@@ -7,6 +7,7 @@ import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
 import { db, saveEventToCache, updateUserVideoState } from '../nostr/cache'
+import { SplashScreen } from '../features/splash/SplashScreen'
 
 function AppContent() {
   const { pool, signEvent, session } = useNostr()
@@ -24,6 +25,9 @@ function AppContent() {
   const handleActionTriggerRef = useRef<typeof handleActionTrigger>(null as any)
   const [activeVideo, setActiveVideo] = useState<any>(null)
   const [isMuted, setIsMuted] = useState(true)
+  const [showSplash, setShowSplash] = useState(false)
+  const isFirstRun = useRef(!localStorage.getItem('scrollstr_has_opened'))
+  const loginSheetWasOpened = useRef(false)
 
   // Automatically prompt user to log in on initial page load if not authenticated (or after browser reset)
   React.useEffect(() => {
@@ -33,6 +37,20 @@ function AppContent() {
       setIsLoginOpen(true)
     }
   }, [session])
+
+  // Track when the login sheet is opened (for detecting guest dismissal on first run)
+  useEffect(() => {
+    if (isLoginOpen) {
+      loginSheetWasOpened.current = true
+    }
+  }, [isLoginOpen])
+
+  // Trigger splash on first run when the login sheet closes without a session (guest/dismissal)
+  useEffect(() => {
+    if (isFirstRun.current && loginSheetWasOpened.current && !isLoginOpen && !session) {
+      setShowSplash(true)
+    }
+  }, [isLoginOpen, session])
 
   const handleActionTrigger = useCallback(async (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => {
     setActiveVideoId(videoId)
@@ -102,8 +120,16 @@ function AppContent() {
     handleActionTriggerRef.current = handleActionTrigger
   })
 
+  const handleSplashFinish = () => {
+    setShowSplash(false)
+    localStorage.setItem('scrollstr_has_opened', 'true')
+  }
+
   const handleLoginSuccess = () => {
     setIsLoginOpen(false)
+    if (isFirstRun.current) {
+      setShowSplash(true)
+    }
     // Resume pending action if present
     if (pendingAction) {
       const { type, videoId, creatorPubkey, videoKind } = pendingAction
@@ -148,6 +174,8 @@ function AppContent() {
           creatorPubkey={activeCreatorPubkey}
           onClose={() => setIsZapOpen(false)}
         />
+
+        {showSplash && <SplashScreen onFinish={handleSplashFinish} />}
       </div>
     </BrowserRouter>
   )
