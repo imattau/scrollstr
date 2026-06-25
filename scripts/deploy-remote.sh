@@ -307,6 +307,7 @@ sync_app() {
 	run_local rsync -az --delete --no-owner --no-group -e "ssh -p ${SSH_PORT} -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=${SSH_CONTROL_PATH}" \
 		--exclude='.git' \
 		--exclude='.claude' \
+		--exclude='node_modules' \
 		--exclude='dist' \
 		--exclude='coverage' \
 		"${REPO_ROOT}/" "${SSH_TARGET}:${REMOTE_STAGE_DIR}/"
@@ -436,7 +437,7 @@ trim() {
 managed_marker="# managed by scrollstr"
 proxy_mode_resolved="$PROXY_MODE"
 
-command -v node >/dev/null 2>&1 || die "node is required on the remote server"
+command -v python3 >/dev/null 2>&1 || die "python3 is required on the remote server"
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required on the remote server"
 command -v ss >/dev/null 2>&1 || die "ss is required on the remote server"
 command -v curl >/dev/null 2>&1 || die "curl is required on the remote server"
@@ -502,7 +503,7 @@ Type=simple
 WorkingDirectory=${INSTALL_DIR}
 User=${SERVICE_USER}
 Group=${SERVICE_GROUP}
-ExecStart=${INSTALL_DIR}/node_modules/.bin/serve -l 127.0.0.1:${PORT} ${INSTALL_DIR}/dist
+ExecStart=python3 ${INSTALL_DIR}/scripts/spa-http-server.py ${INSTALL_DIR}/dist --bind 127.0.0.1 --port ${PORT}
 Restart=always
 RestartSec=5
 
