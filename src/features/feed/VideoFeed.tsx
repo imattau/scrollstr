@@ -50,6 +50,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const seenTopIdsRef = useRef<Set<string>>(new Set())
   // Whether the user has scrolled past the top
   const isAtTopRef = useRef(true)
+  // Throttle scroll handler to once per frame
+  const scrollRAFRef = useRef<number | null>(null)
+  // Cache container height to avoid forced reflow from reading clientHeight during scroll
+  const containerHeightRef = useRef(0)
+  const wasAtTopRef = useRef(false)
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
   // Reactively query the user's kind:3 contact list from Dexie cache
@@ -138,6 +143,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     })
     return unsub
   }, [relayUrls, isMetadataLoaded])
+
+  // Cache container height via ResizeObserver so scroll handlers don't force layout
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    containerHeightRef.current = container.clientHeight
+    const observer = new ResizeObserver((entries) => {
+      containerHeightRef.current = entries[0]?.contentRect.height ?? containerHeightRef.current
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
 
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
   const videos = useLiveQuery(async () => {
@@ -243,7 +260,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (idx !== -1) {
         if (idx !== activeIndex) {
           setActiveIndex(idx)
-          scrollContainerRef.current?.scrollTo({ top: idx * scrollContainerRef.current.clientHeight, behavior: 'instant' })
+          scrollContainerRef.current?.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
         }
         return
       }
@@ -336,38 +353,48 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     anchorInsertOrderRef.current = videos[idx]?.insertOrder ?? 0
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
-    container.scrollTo({ top: idx * container.clientHeight, behavior: 'instant' })
+    container.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialVideoId, feedKey])
 
-  // Track scroll position, snap
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const container = e.currentTarget
-    const scrollOffset = container.scrollTop
-    const containerHeight = container.clientHeight
-    const newIndex = Math.round(scrollOffset / containerHeight)
-    const currentVideos = videosRef.current
-    const currentActiveIndex = activeIndexRef.current
-    if (newIndex !== currentActiveIndex && newIndex >= 0 && newIndex < currentVideos.length) {
-      setActiveIndex(newIndex)
-      currentVideoIdRef.current = currentVideos[newIndex]?.id ?? ''
-      anchorInsertOrderRef.current = currentVideos[newIndex]?.insertOrder ?? 0
-    }
+  // Track scroll position, snap (throttled to once per frame via rAF)
+  const handleScroll = useCallback(() => {
+    if (scrollRAFRef.current) return
+    scrollRAFRef.current = requestAnimationFrame(() => {
+      scrollRAFRef.current = null
+      const container = scrollContainerRef.current
+      if (!container) return
+      const scrollOffset = container.scrollTop
+      const containerHeight = containerHeightRef.current
+      if (!containerHeight) return
+      const newIndex = Math.round(scrollOffset / containerHeight)
+      const currentVideos = videosRef.current
+      const currentActiveIndex = activeIndexRef.current
+      if (newIndex !== currentActiveIndex && newIndex >= 0 && newIndex < currentVideos.length) {
+        setActiveIndex(newIndex)
+        currentVideoIdRef.current = currentVideos[newIndex]?.id ?? ''
+        anchorInsertOrderRef.current = currentVideos[newIndex]?.insertOrder ?? 0
+      }
 
-    // Track whether user is at top
-    isAtTopRef.current = newIndex === 0
-    if (newIndex === 0) {
-      // User scrolled back to the top — reset counter and update seen IDs
-      setNewEventsCount(0)
-      seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
-    }
+      // Track whether user is at top
+      isAtTopRef.current = newIndex === 0
+      if (newIndex === 0) {
+        setNewEventsCount(0)
+        if (!wasAtTopRef.current) {
+          seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
+          wasAtTopRef.current = true
+        }
+      } else {
+        wasAtTopRef.current = false
+      }
+    })
   }, [])
 
   // Keyboard navigation for desktop view — react-hotkeys-hook
   const scrollToIndex = useCallback((index: number) => {
     const container = scrollContainerRef.current
     if (!container) return
-    container.scrollTo({ top: index * container.clientHeight, behavior: 'smooth' })
+    container.scrollTo({ top: index * containerHeightRef.current, behavior: 'smooth' })
   }, [])
 
   useHotkeys('j,down', (e) => {
@@ -440,7 +467,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (lastIndex < 0) return
     const container = scrollContainerRef.current
     if (!container) return
-    container.scrollTo({ top: lastIndex * container.clientHeight, behavior: 'smooth' })
+    container.scrollTo({ top: lastIndex * containerHeightRef.current, behavior: 'smooth' })
     setActiveIndex(lastIndex)
     currentVideoIdRef.current = currentVideos[lastIndex]?.id ?? ''
     oldestLoadedCreatedAtRef.current = currentVideos[lastIndex]?.createdAt ?? null

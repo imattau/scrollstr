@@ -227,18 +227,40 @@ export const ProfilePage: React.FC = () => {
 
   const isBlocked = targetPubkey ? mutedPubkeys.has(targetPubkey) : false
 
-  // Subscribe to contact list updates on relays
+  // Subscribe to contact list updates on relays — only if cache is stale
   useEffect(() => {
     if (!targetPubkey) return
-    console.log(`Subscribing to contact lists for stats of pubkey: ${targetPubkey}`)
+    let cancelled = false
 
-    const sub = subscribeToRelays(relayUrls, [
-      { kinds: [3], authors: [targetPubkey], limit: 1 },
-      { kinds: [3], '#p': [targetPubkey], limit: 50 },
-    ])
+    db.cachedEvents.where({ kind: 3, pubkey: targetPubkey }).count().then((count) => {
+      if (cancelled) return
+      const hasOwnContactList = count > 0
+
+      db.cachedEvents.where('pTags').equals(targetPubkey).filter(e => e.kind === 3).count().then((followerCount) => {
+        if (cancelled) return
+
+        // Skip subscription when we already have recent cached data for this profile
+        if (hasOwnContactList && followerCount >= 3) {
+          console.log(`[Profile] Skipping kind:3 sub for ${targetPubkey} — cache has ${count} own + ${followerCount} followers`)
+          return
+        }
+
+        console.log(`[Profile] Subscribing to contact lists for stats of pubkey: ${targetPubkey} (own=${hasOwnContactList}, followers=${followerCount})`)
+
+        const sub = subscribeToRelays(relayUrls, [
+          { kinds: [3], authors: [targetPubkey], limit: 1 },
+          { kinds: [3], '#p': [targetPubkey], limit: 50 },
+        ])
+
+        cleanup = sub
+      })
+    })
+
+    let cleanup: (() => void) | undefined
 
     return () => {
-      sub()
+      cancelled = true
+      cleanup?.()
     }
   }, [targetPubkey, relayUrls])
 

@@ -169,11 +169,13 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
 
     if (!videoUrl) return null
 
-    const cachedMedia = await db.mediaStatus.get(videoUrl)
+    const cachedMedia = (existing?.videoUrl === videoUrl && existing?.mediaStatus !== 'unknown')
+      ? null
+      : await db.mediaStatus.get(videoUrl)
     const mediaStatus = cachedMedia?.status ?? existing?.mediaStatus ?? 'unknown'
     const duration = cachedMedia?.duration ?? existing?.duration
 
-    const cachedUserState = await db.userVideoState.get(event.id)
+    const cachedUserState = existing ? await db.userVideoState.get(event.id) : undefined
     const userState = cachedUserState ? {
       watched: cachedUserState.watched,
       skipped: cachedUserState.skipped,
@@ -269,24 +271,33 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
   try {
     const data = JSON.parse(event.content)
     const name = data.name || data.display_name || event.pubkey.slice(0, 8)
+    const picture = data.picture || data.image
     const profile: CreatorProfileRecord = {
       pubkey: event.pubkey,
       name,
       displayName: data.display_name || name,
-      picture: data.picture || data.image,
+      picture,
       nip05: data.nip05,
       isVerified: !!data.nip05,
       about: data.about,
       website: data.website,
       updatedAt: Date.now()
     }
+
+    // Check if profile data actually changed before writing — avoids expensive
+    // videoShapes modify when a duplicate/older profile event arrives
+    const existingProfile = await db.authorProfiles.get(event.pubkey)
+    if (existingProfile && existingProfile.name === name && existingProfile.picture === picture) {
+      return existingProfile
+    }
+
     await db.authorProfiles.put(profile)
 
     // Update video shapes in-place — avoids loading each shape into memory
     await db.videoShapes
       .where('pubkey')
       .equals(event.pubkey)
-      .modify({ authorName: profile.name, authorPicture: profile.picture, updatedAt: Date.now() })
+      .modify({ authorName: name, authorPicture: picture, updatedAt: Date.now() })
     return profile
   } catch (err) {
     console.error('[Cache] Failed to project profile event:', err)

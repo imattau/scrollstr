@@ -132,6 +132,18 @@ export const DiscoverPage: React.FC = () => {
     }))
   }, [rawVideoShapes])
 
+  // Load author profiles into a lookup map for richer search
+  const authorProfileMap = useLiveQuery(
+    () => db.authorProfiles.toArray().then(profiles => {
+      const map: Record<string, { name: string; displayName?: string; nip05?: string }> = {}
+      for (const p of profiles) {
+        map[p.pubkey] = { name: p.name, displayName: p.displayName, nip05: p.nip05 }
+      }
+      return map
+    }),
+    []
+  ) ?? {}
+
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {
     const sorted = [...videos].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
@@ -265,9 +277,13 @@ export const DiscoverPage: React.FC = () => {
       const matchDesc = v.description?.toLowerCase().includes(q)
       const matchTag = v.hashtags?.some((t) => t.toLowerCase().includes(q))
       const matchCreator = v.creator.name.toLowerCase().includes(q)
-      return matchTitle || matchDesc || matchTag || matchCreator
+      const matchPubkey = v.creator.pubkey.toLowerCase().includes(q)
+      const profile = authorProfileMap[v.creator.pubkey]
+      const matchDisplayName = profile?.displayName?.toLowerCase().includes(q)
+      const matchNip05 = profile?.nip05?.toLowerCase().includes(q)
+      return matchTitle || matchDesc || matchTag || matchCreator || matchPubkey || matchDisplayName || matchNip05
     })
-  }, [videos, searchQuery])
+  }, [videos, searchQuery, authorProfileMap])
 
   const handleFollow = async (targetPubkey: string) => {
     if (!session) {
