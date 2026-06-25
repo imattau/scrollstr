@@ -9,8 +9,6 @@ export interface UserSession {
 }
 
 export interface NostrContextProps {
-  /** @deprecated use pool instead */
-  rxNostr: SimplePool
   pool: SimplePool
   eventStore: EventStore
   isConnected: boolean

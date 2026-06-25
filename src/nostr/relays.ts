@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { loadSettings } from '../db/local-preferences'
 import { use$ } from 'applesauce-react/hooks'
-import { getEventsQuery$ } from './rxNostr'
+import { getEventsQuery$ } from './pool'
 
 const DEFAULT_RELAYS = [
   'wss://nos.lol',

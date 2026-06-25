@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react'
+import { formatDistanceToNowStrict } from 'date-fns'
 import { Heart, MessageCircle, Repeat2, Zap, UserPlus } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
@@ -10,14 +11,6 @@ import { useNavigate } from 'react-router-dom'
 const EMPTY_EVENTS: any[] = []
 const VIDEO_KINDS = [21, 22, 34236]
 const REACTION_KINDS = [7, 16, 1111, 9735]
-
-const formatTime = (createdAt: number) => {
-  const diff = Math.floor(Date.now() / 1000) - createdAt
-  if (diff < 60) return 'now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return `${Math.floor(diff / 86400)}d`
-}
 
 const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
   const navigate = useNavigate()
@@ -99,7 +92,7 @@ const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
           </span>{' '}
           {parsed.details}
         </p>
-        <p className="text-[10px] text-[#71717a] mt-0.5">{formatTime(event.created_at)}</p>
+        <p className="text-[10px] text-[#71717a] mt-0.5">{formatDistanceToNowStrict(event.created_at * 1000, { addSuffix: true })}</p>
       </div>
 
       <div className="flex size-[28px] items-center justify-center rounded-full bg-[#18181d] shrink-0">
@@ -110,7 +103,7 @@ const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
 }
 
 export const ActivityPage: React.FC = () => {
-  const { session, rxNostr, eventStore } = useNostr()
+  const { session, pool, eventStore } = useNostr()
   const userPubkey = session?.pubkey
   const navigate = useNavigate()
   const relayUrls = useUserRelayUrls(eventStore, userPubkey)

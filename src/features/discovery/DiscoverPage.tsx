@@ -1,12 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays } from '../../nostr/rxNostr'
+import { subscribeToRelays } from '../../nostr/pool'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
-import { publishFollow } from '../../nostr/events/reactions'
+import { publishFollow } from '../../nostr/events'
 import { useNavigate } from 'react-router-dom'
 import { useUserRelayUrls } from '../../nostr/relays'
 
@@ -63,7 +63,7 @@ const TrendingCreatorRow: React.FC<{
 }
 
 export const DiscoverPage: React.FC = () => {
-  const { session, rxNostr, signEvent, eventStore } = useNostr()
+  const { session, pool, signEvent, eventStore } = useNostr()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
@@ -83,6 +83,7 @@ export const DiscoverPage: React.FC = () => {
     () => db.videoShapes
       .where('created_at')
       .above(Math.floor(Date.now() / 1000) - 48 * 3600)
+      .filter(shape => shape.mediaStatus !== 'failed')
       .toArray(),
     []
   ) ?? EMPTY_VIDEOS
@@ -239,7 +240,6 @@ export const DiscoverPage: React.FC = () => {
     try {
       const { signed, action } = await publishFollow(
         signEvent,
-        rxNostr,
         targetPubkey,
         myContactListEvent?.event || null
       )

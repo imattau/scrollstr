@@ -1,4 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState, useCallback } from 'react'
+import { useGesture } from '@use-gesture/react'
 import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, MediaTimeRange } from 'media-chrome/react'
 import Hls from 'hls.js'
 import { RotateCw } from 'lucide-react'
@@ -20,7 +21,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   const [isHls, setIsHls] = useState(false)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
   const [isLandscape, setIsLandscape] = useState(false)
-
+  const [isHovering, setIsHovering] = useState(false)
   const [isPaused, setIsPaused] = useState(true)
 
   // Detect if source is HLS (.m3u8)
@@ -222,27 +223,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   }
 
   // Press and Hold: Temporary Pause
-  const handlePressStart = () => {
+  const handlePressStart = useCallback(() => {
     const video = videoRef.current
     if (!video || video.paused) {
       setWasPlayingBeforePress(false)
       return
     }
     setWasPlayingBeforePress(true)
-    // Temporarily pause
     video.pause()
-  }
+  }, [])
 
-  const handlePressEnd = () => {
+  const handlePressEnd = useCallback(() => {
     const video = videoRef.current
     if (!video) return
     if (wasPlayingBeforePress) {
       video.play().catch(console.error)
     }
-  }
+  }, [wasPlayingBeforePress])
+
+  // @use-gesture/react: horizontal swipe to seek + hover tracking
+  const bindGestures = useGesture({
+    onDrag: ({ down, movement: [mx], event }) => {
+      if (!down) return
+      const video = videoRef.current
+      if (!video || !video.duration) return
+
+      if (event.target && (event.target as HTMLElement).closest('media-control-bar')) return
+
+      const containerWidth = window.innerWidth || 1
+      const seekFraction = mx / containerWidth
+      if (Math.abs(seekFraction) > 0.02) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seekFraction * video.duration))
+      }
+    },
+    onHover: ({ hovering }) => {
+      setIsHovering(hovering ?? false)
+    },
+  })
 
   return (
-    <div className="relative w-full h-full bg-black select-none overflow-hidden">
+    <div {...bindGestures()} className="relative w-full h-full bg-black select-none overflow-hidden">
       <MediaController className="w-full h-full">
         <video
           ref={videoRef}
@@ -255,11 +275,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           playsInline
           onClick={handleSingleClick}
           onDoubleClick={handleDoubleClick}
-          onMouseDown={handlePressStart}
-          onMouseUp={handlePressEnd}
-          onMouseLeave={handlePressEnd}
-          onTouchStart={handlePressStart}
-          onTouchEnd={handlePressEnd}
+          onPointerDown={handlePressStart}
+          onPointerUp={handlePressEnd}
+          onPointerLeave={handlePressEnd}
         />
         {isPaused && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">

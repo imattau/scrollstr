@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import * as Tabs from '@radix-ui/react-tabs'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar, ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
-import { parseVideoEvent } from '../../nostr/events/video'
+import { parseVideoEvent, publishFollow } from '../../nostr/events'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
-import { publishFollow } from '../../nostr/events/reactions'
 import { useUserRelayUrls } from '../../nostr/relays'
 
 const EMPTY_VIDEOS: any[] = []
@@ -82,7 +82,7 @@ const CreatorListItem: React.FC<{
 }
 
 export const ProfilePage: React.FC = () => {
-  const { session, rxNostr, signEvent, eventStore } = useNostr()
+  const { session, pool, signEvent, eventStore } = useNostr()
   const { pubkey } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
@@ -241,7 +241,6 @@ export const ProfilePage: React.FC = () => {
     try {
       const { signed, action } = await publishFollow(
         signEvent,
-        rxNostr,
         targetPubkey || '',
         myContactListEvent || null
       )
@@ -256,7 +255,7 @@ export const ProfilePage: React.FC = () => {
   const handleFollow = async (target: string) => {
     if (!session) return
     try {
-      const { signed, action } = await publishFollow(signEvent, rxNostr, target, myContactListEvent || null)
+      const { signed, action } = await publishFollow(signEvent, target, myContactListEvent || null)
       eventStore.add(signed)
       alert(action === 'follow' ? 'Followed!' : 'Unfollowed!')
     } catch (err: any) {
@@ -404,97 +403,92 @@ export const ProfilePage: React.FC = () => {
           </>
         ) : (
           <>
-            {/* Tab Controls */}
-            <div className="flex h-[36px] items-center border-b border-neutral-900 text-[13px] mt-2 font-medium">
-              <button
-                onClick={() => setActiveTab('videos')}
-                className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
-                  activeTab === 'videos' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
-                }`}
-              >
-                <FileVideo className="w-4 h-4" /> Videos
-              </button>
-              <button
-                onClick={() => setActiveTab('boosts')}
-                className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
-                  activeTab === 'boosts' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
-                }`}
-              >
-                <RotateCw className="w-4 h-4" /> Boosts
-              </button>
-              <button
-                onClick={() => setActiveTab('about')}
-                className={`flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 ${
-                  activeTab === 'about' ? 'border-[#8b5cf6] text-[#f7f7f8] font-bold' : 'border-transparent text-[#a1a1aa]'
-                }`}
-              >
-                <Info className="w-4 h-4" /> About
-              </button>
-            </div>
+            {/* Tab Controls + Content */}
+            <Tabs.Root value={activeTab} onValueChange={(v) => setActiveTab(v as 'videos' | 'boosts' | 'about')}>
+              <Tabs.List className="flex h-[36px] items-center border-b border-neutral-900 text-[13px] mt-2 font-medium">
+                <Tabs.Trigger
+                  value="videos"
+                  className="flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 data-[state=active]:border-[#8b5cf6] data-[state=active]:text-[#f7f7f8] data-[state=active]:font-bold data-[state=inactive]:border-transparent data-[state=inactive]:text-[#a1a1aa]"
+                >
+                  <FileVideo className="w-4 h-4" /> Videos
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  value="boosts"
+                  className="flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 data-[state=active]:border-[#8b5cf6] data-[state=active]:text-[#f7f7f8] data-[state=active]:font-bold data-[state=inactive]:border-transparent data-[state=inactive]:text-[#a1a1aa]"
+                >
+                  <RotateCw className="w-4 h-4" /> Boosts
+                </Tabs.Trigger>
+                <Tabs.Trigger
+                  value="about"
+                  className="flex-1 flex justify-center items-center gap-1.5 pb-2 border-b-2 data-[state=active]:border-[#8b5cf6] data-[state=active]:text-[#f7f7f8] data-[state=active]:font-bold data-[state=inactive]:border-transparent data-[state=inactive]:text-[#a1a1aa]"
+                >
+                  <Info className="w-4 h-4" /> About
+                </Tabs.Trigger>
+              </Tabs.List>
 
-            {/* Tab content layouts */}
-            <div className="pt-2">
-              {activeTab === 'videos' && (
-                videos.length === 0 ? (
-                  <p className="text-[13px] text-[#71717a] text-center py-8">No vertical videos published yet.</p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-1">
-                    {videos.map((video) => (
-                      <div
-                        key={video.id}
-                        onClick={() => navigate(`/?v=${video.id}`)}
-                        className="relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[8px] bg-[#18181d] transition-all hover:scale-[1.03]"
-                      >
-                        {video.poster ? (
-                          <img src={video.poster} alt={video.title} className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[20px]">
-                            ▶
-                          </div>
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-transparent to-transparent" />
-                        <p className="absolute bottom-1.5 left-1.5 right-1.5 text-[9px] text-[#f7f7f8] line-clamp-2 leading-tight">
-                          {video.title || video.description}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
+              <div className="pt-2">
+                <Tabs.Content value="videos">
+                  {videos.length === 0 ? (
+                    <p className="text-[13px] text-[#71717a] text-center py-8">No vertical videos published yet.</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1">
+                      {videos.map((video) => (
+                        <div
+                          key={video.id}
+                          onClick={() => navigate(`/?v=${video.id}`)}
+                          className="relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[8px] bg-[#18181d] transition-all hover:scale-[1.03]"
+                        >
+                          {video.poster ? (
+                            <img src={video.poster} alt={video.title} className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[20px]">
+                              ▶
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-transparent to-transparent" />
+                          <p className="absolute bottom-1.5 left-1.5 right-1.5 text-[9px] text-[#f7f7f8] line-clamp-2 leading-tight">
+                            {video.title || video.description}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Tabs.Content>
 
-              {activeTab === 'boosts' && (
-                rawBoosts.length === 0 ? (
-                  <p className="text-[13px] text-[#71717a] text-center py-8">No reposted/boosted clips.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {rawBoosts.map((boost) => (
-                      <div key={boost.id} className="p-3 bg-[#18181d] rounded-xl text-[12px] leading-relaxed">
-                        <p className="text-[#a1a1aa] flex items-center gap-1.5 font-semibold">
-                          <RotateCw className="w-3.5 h-3.5 text-green-400" /> Reposted kind:{boost.kind}
-                        </p>
-                        <p className="text-neutral-500 font-mono text-[9px] mt-1 truncate">Event ID: {boost.id}</p>
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
+                <Tabs.Content value="boosts">
+                  {rawBoosts.length === 0 ? (
+                    <p className="text-[13px] text-[#71717a] text-center py-8">No reposted/boosted clips.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {rawBoosts.map((boost) => (
+                        <div key={boost.id} className="p-3 bg-[#18181d] rounded-xl text-[12px] leading-relaxed">
+                          <p className="text-[#a1a1aa] flex items-center gap-1.5 font-semibold">
+                            <RotateCw className="w-3.5 h-3.5 text-green-400" /> Reposted kind:{boost.kind}
+                          </p>
+                          <p className="text-neutral-500 font-mono text-[9px] mt-1 truncate">Event ID: {boost.id}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Tabs.Content>
 
-              {activeTab === 'about' && (
-                <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-4">
-                  <div>
-                    <p className="text-[11px] font-bold text-[#a1a1aa] uppercase tracking-wider">Public Key Hex</p>
-                    <p className="text-[12px] font-mono text-[#f7f7f8] break-all bg-[#18181d] p-2.5 rounded-lg mt-1 select-all">
-                      {targetPubkey}
-                    </p>
+                <Tabs.Content value="about">
+                  <div className="bg-[#111115] p-4 rounded-xl border border-neutral-900 space-y-4">
+                    <div>
+                      <p className="text-[11px] font-bold text-[#a1a1aa] uppercase tracking-wider">Public Key Hex</p>
+                      <p className="text-[12px] font-mono text-[#f7f7f8] break-all bg-[#18181d] p-2.5 rounded-lg mt-1 select-all">
+                        {targetPubkey}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[12px] text-[#a1a1aa]">
+                      <Calendar className="w-4 h-4" />
+                      <span>Joined Nostr</span>
+                    </div>
                   </div>
-                  
-                  <div className="flex items-center gap-2 text-[12px] text-[#a1a1aa]">
-                    <Calendar className="w-4 h-4" />
-                    <span>Joined Nostr</span>
-                  </div>
-                </div>
-              )}
-            </div>
+                </Tabs.Content>
+              </div>
+            </Tabs.Root>
           </>
         )}
       </div>

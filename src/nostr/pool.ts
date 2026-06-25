@@ -1,6 +1,9 @@
-import { SimplePool } from 'nostr-tools'
+import { SimplePool, type NostrEvent } from 'nostr-tools'
+import NDK from '@nostr-dev-kit/ndk'
+import NDKCacheAdapterDexie from '@nostr-dev-kit/cache-dexie'
 import { EventStore } from 'applesauce-core'
-import { queueCachedEventTouches, saveEventToCache } from './cache'
+import { Observable } from 'rxjs'
+import type { NostrPool } from 'applesauce-signers'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -21,45 +24,27 @@ function sanitizeFilters(filters: any | any[]): any[] {
   })
 }
 
-// List of standard default relays to bootstrap client connection
 export const DEFAULT_RELAYS = [
   'wss://nos.lol',
   'wss://relay.damus.io',
   'wss://relay.snort.social',
-  'wss://purplepag.es', // Optimized for user profiles search/lookup
+  'wss://purplepag.es',
 ]
 
-// Global nostr-tools SimplePool — manages WebSocket connections to relays
 export const pool = new SimplePool()
 
-// Current relay list (mutable, updated when user relay list resolves)
 export let activeRelays: string[] = [...DEFAULT_RELAYS]
 
 export const setActiveRelays = (urls: string[]) => {
   activeRelays = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
 }
 
-// Initialize global Applesauce EventStore
+// NDK instance + cache adapter for IndexedDB persistence only
+const cacheAdapter = new NDKCacheAdapterDexie({ dbName: 'scrollstr-ndk-cache' })
+export const ndk = new NDK({ cacheAdapter })
+
 export const eventStore = new EventStore()
 
-const originalGetByFilters = eventStore.getByFilters.bind(eventStore)
-const originalGetReplaceable = eventStore.getReplaceable.bind(eventStore)
-
-eventStore.getByFilters = ((filters: any) => {
-  const events = originalGetByFilters(filters)
-  queueCachedEventTouches(events.map((event: any) => event.id))
-  return events
-}) as any
-
-eventStore.getReplaceable = ((kind: number, pubkey: string) => {
-  const event = originalGetReplaceable(kind, pubkey)
-  if (event?.id) {
-    queueCachedEventTouches([event.id])
-  }
-  return event
-}) as any
-
-// Seed EventStore with default high-quality mock video events to ensure content loads immediately
 const MOCK_EVENTS = [
   {
     kind: 21,
@@ -74,11 +59,7 @@ const MOCK_EVENTS = [
       ['t', 'neon'],
       ['t', 'mascot'],
       ['t', 'scrollstr'],
-      [
-        'imeta',
-        'url /videos/The_Neon_Mascot_A_short_loop.mp4',
-        'm video/mp4',
-      ],
+      ['imeta', 'url /videos/The_Neon_Mascot_A_short_loop.mp4', 'm video/mp4'],
     ],
     sig: 'local-preview-sig',
   },
@@ -95,12 +76,7 @@ const MOCK_EVENTS = [
       ["t", "melbourne"],
       ["t", "nightwalk"],
       ["t", "nostr"],
-      [
-        "imeta",
-        "url https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-lit-city-street-at-night-42218-large.mp4",
-        "m video/mp4",
-        "image https://images.unsplash.com/photo-1518770660439-4636190af475?w=500"
-      ]
+      ["imeta", "url https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-lit-city-street-at-night-42218-large.mp4", "m video/mp4", "image https://images.unsplash.com/photo-1518770660439-4636190af475?w=500"]
     ],
     sig: "mock-sig-1"
   },
@@ -117,12 +93,7 @@ const MOCK_EVENTS = [
       ["t", "nature"],
       ["t", "flowers"],
       ["t", "peaceful"],
-      [
-        "imeta",
-        "url https://assets.mixkit.co/videos/preview/mixkit-tree-with-yellow-flowers-42330-large.mp4",
-        "m video/mp4",
-        "image https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=500"
-      ]
+      ["imeta", "url https://assets.mixkit.co/videos/preview/mixkit-tree-with-yellow-flowers-42330-large.mp4", "m video/mp4", "image https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=500"]
     ],
     sig: "mock-sig-2"
   },
@@ -139,12 +110,7 @@ const MOCK_EVENTS = [
       ["t", "dance"],
       ["t", "neon"],
       ["t", "vibes"],
-      [
-        "imeta",
-        "url https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-neon-lights-42223-large.mp4",
-        "m video/mp4",
-        "image https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=500"
-      ]
+      ["imeta", "url https://assets.mixkit.co/videos/preview/mixkit-man-dancing-under-neon-lights-42223-large.mp4", "m video/mp4", "image https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=500"]
     ],
     sig: "mock-sig-3"
   }
@@ -152,10 +118,7 @@ const MOCK_EVENTS = [
 
 MOCK_EVENTS.forEach((ev) => {
   eventStore.add(ev as any)
-  saveEventToCache(ev as any)
 })
-
-import { Observable } from 'rxjs'
 
 export const getEventsQuery$ = (filters: any): Observable<any[]> => {
   return new Observable<any[]>((subscriber) => {
@@ -181,15 +144,6 @@ export const getReplaceableQuery$ = (kind: number, pubkey: string): Observable<a
   })
 }
 
-/**
- * Managed subscription — aggregates all active filter registrations into a single
- * REQ per relay via pool.subscribeMap, so that N components × R relays does not
- * exceed relay REQ-concurrency limits.
- *
- * Each registration stores its own relays, filters, and optional onEvent callback.
- * On any add/remove the underlying subscription is torn down and rebuilt with the
- * full merged set of filters.
- */
 const subRegistrations = new Map<symbol, { relays: string[]; filters: any[]; onEvent?: (event: any) => void }>()
 let managedClose: (() => void) | null = null
 let rebuildScheduled = false
@@ -213,14 +167,7 @@ function rebuildManagedSub() {
 
   const sub = pool.subscribeMap(requests, {
     onevent(event: any) {
-      if (event.kind === 10002) {
-        console.log(
-          `[pool] kind:10002 received for ${event.pubkey}:`,
-          event.tags?.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
-        )
-      }
       eventStore.add(event)
-      saveEventToCache(event)
 
       if (eventStore.memory && eventStore.memory.size > 1000) {
         const pruned = eventStore.prune(200)
@@ -246,13 +193,6 @@ function scheduleRebuild() {
   })
 }
 
-/**
- * Subscribe to relay events and feed them into the EventStore + IndexedDB cache.
- * All registrations are merged into a single REQ per relay to stay under relay
- * concurrency limits.
- *
- * Returns an unsubscribe function.
- */
 export function subscribeToRelays(
   relays: string[],
   filters: any | any[],
@@ -269,11 +209,6 @@ export function subscribeToRelays(
   }
 }
 
-/**
- * Publish a signed Nostr event to one or more relays.
- * Returns a promise that resolves when at least one relay accepts it,
- * or rejects if all fail (with a best-effort warning).
- */
 export async function publishToRelays(relays: string[], event: any): Promise<void> {
   try {
     await Promise.any(pool.publish(relays, event))
@@ -283,12 +218,25 @@ export async function publishToRelays(relays: string[], event: any): Promise<voi
   }
 }
 
-/**
- * One-shot fetch of events from relays (uses querySync under the hood).
- * Resolves with all events returned before EOSE.
- */
 export async function fetchFromRelays(relays: string[], filters: any | any[]): Promise<any[]> {
   const filterList = sanitizeFilters(filters)
   const results = await Promise.all(filterList.map((f) => pool.querySync(relays, f)))
   return results.flat()
+}
+
+export const nostrPool: NostrPool = {
+  async publish(relays, event) {
+    const results = pool.publish(relays, event)
+    await Promise.allSettled(results)
+  },
+  subscription: (relays, filters) =>
+    new Observable<NostrEvent>((subscriber) => {
+      const requests = relays.flatMap((url) =>
+        filters.map((filter) => ({ url, filter: filter as import('nostr-tools').Filter }))
+      )
+      const sub = pool.subscribeMap(requests, {
+        onevent: (event) => subscriber.next(event),
+      })
+      return () => sub.close()
+    }),
 }

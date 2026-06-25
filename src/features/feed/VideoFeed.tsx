@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react'
+import { useHotkeys } from 'react-hotkeys-hook'
 import { use$ } from 'applesauce-react/hooks'
 import { List, ListImperativeAPI } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
-import { parseVideoEvent } from '../../nostr/events/video'
+import { parseVideoEvent } from '../../nostr/events'
 import { subscribeToRelays, setActiveRelays, fetchFromRelays } from '../../nostr/pool'
-import { getEventsQuery$ } from '../../nostr/rxNostr'
+import { getEventsQuery$ } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -379,40 +380,22 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [activeIndex, videos])
 
-  // Keyboard navigation for desktop view
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeEl = document.activeElement
-      if (
-        activeEl &&
-        (activeEl.tagName === 'INPUT' ||
-          activeEl.tagName === 'TEXTAREA' ||
-          activeEl.tagName === 'SELECT' ||
-          activeEl.hasAttribute('contenteditable'))
-      ) {
-        return
-      }
-
-      if (e.key === 'ArrowDown' || e.key === 'j') {
-        e.preventDefault()
-        const nextIndex = activeIndex + 1
-        if (nextIndex < videos.length) {
-          listRef.current?.scrollToRow({ index: nextIndex, align: 'auto', behavior: 'auto' })
-        }
-      } else if (e.key === 'ArrowUp' || e.key === 'k') {
-        e.preventDefault()
-        const prevIndex = activeIndex - 1
-        if (prevIndex >= 0) {
-          listRef.current?.scrollToRow({ index: prevIndex, align: 'auto', behavior: 'auto' })
-        }
-      }
+  // Keyboard navigation for desktop view — react-hotkeys-hook
+  useHotkeys('j,down', (e) => {
+    e.preventDefault()
+    const nextIndex = activeIndex + 1
+    if (nextIndex < videos.length) {
+      listRef.current?.scrollToRow({ index: nextIndex, align: 'auto', behavior: 'auto' })
     }
+  }, { enableOnFormTags: false }, [activeIndex, videos.length])
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
+  useHotkeys('k,up', (e) => {
+    e.preventDefault()
+    const prevIndex = activeIndex - 1
+    if (prevIndex >= 0) {
+      listRef.current?.scrollToRow({ index: prevIndex, align: 'auto', behavior: 'auto' })
     }
-  }, [activeIndex, videos.length])
+  }, { enableOnFormTags: false }, [activeIndex, videos.length])
 
   // Propagate active video to parent — skip during feed reorder so the comment
   // panel doesn't flash the wrong video's comments while the index corrects.

@@ -37,6 +37,7 @@ export default defineConfig({
       },
       workbox: {
         // Exclude large video files from precaching
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
         runtimeCaching: [

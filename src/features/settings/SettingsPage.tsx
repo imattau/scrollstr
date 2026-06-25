@@ -1,15 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import * as Switch from '@radix-ui/react-switch'
 import { useNostr } from '../../app/providers'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
 import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
-import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events/settings'
+import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
 
 export const SettingsPage: React.FC = () => {
-  const { session, rxNostr, signEvent, eventStore, logout } = useNostr()
+  const { session, pool, signEvent, eventStore, logout } = useNostr()
   const userPubkey = session?.pubkey
   const { isInstallable, installApp } = usePWAInstall()
   const relayUrls = useUserRelayUrls(eventStore, userPubkey)
@@ -135,7 +136,7 @@ export const SettingsPage: React.FC = () => {
     if (!session) return
     setSaving(true)
     try {
-      const ev = await publishRelayList(signEvent, rxNostr, localRelays)
+      const ev = await publishRelayList(signEvent, localRelays)
       eventStore.add(ev)
       alert('Relay list published to relays!')
     } catch (e) {
@@ -166,7 +167,7 @@ export const SettingsPage: React.FC = () => {
     if (!session) return
     setSaving(true)
     try {
-      const ev = await publishBlossomList(signEvent, rxNostr, localBlossom)
+      const ev = await publishBlossomList(signEvent, localBlossom)
       eventStore.add(ev)
       alert('Blossom media servers published!')
     } catch (e) {
@@ -197,7 +198,7 @@ export const SettingsPage: React.FC = () => {
     if (!session) return
     setSaving(true)
     try {
-      const ev = await publishNip96List(signEvent, rxNostr, localNip96)
+      const ev = await publishNip96List(signEvent, localNip96)
       eventStore.add(ev)
       alert('NIP-96 media servers published!')
     } catch (e) {
@@ -237,7 +238,7 @@ export const SettingsPage: React.FC = () => {
     if (!session) return
     setSaving(true)
     try {
-      const ev = await publishMuteList(signEvent, rxNostr, localMutePubkeys, localMuteTags)
+      const ev = await publishMuteList(signEvent, localMutePubkeys, localMuteTags)
       eventStore.add(ev)
       alert('Mute list successfully published!')
     } catch (e) {
@@ -728,19 +729,18 @@ export const SettingsPage: React.FC = () => {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              const next = !localNsfwBlur
-              setLocalNsfwBlur(next)
+          <Switch.Root
+            checked={localNsfwBlur}
+            onCheckedChange={(checked) => {
+              setLocalNsfwBlur(checked)
               const s = loadSettings()
-              s.nsfwBlur = next
+              s.nsfwBlur = checked
               saveSettings(s)
             }}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${localNsfwBlur ? 'bg-[#8b5cf6]' : 'bg-[#27272a]'}`}
+            className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors data-[state=checked]:bg-[#8b5cf6] data-[state=unchecked]:bg-[#27272a]"
           >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${localNsfwBlur ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
+            <Switch.Thumb className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform data-[state=checked]:translate-x-6 data-[state=unchecked]:translate-x-1" />
+          </Switch.Root>
         </div>
 
         {/* PWA App Installation */}

@@ -13,7 +13,7 @@ import {
 } from 'nostr-passkey'
 import { PasskeySigner } from 'nostr-passkey/applesauce'
 import { NostrContext, type UserSession } from './nostrContext'
-import { Nip46Signer, parseBunkerUrl } from '../nostr/nip46'
+import { NostrConnectSigner } from '../nostr/nip46'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -21,15 +21,6 @@ export const useNostr = () => {
     throw new Error('useNostr must be used within a NostrProvider')
   }
   return context
-}
-
-declare global {
-  interface Window {
-    nostr?: {
-      getPublicKey: () => Promise<string>
-      signEvent: (event: any) => Promise<any>
-    }
-  }
 }
 
 export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -58,18 +49,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (method === 'nip46') {
           const { bunkerUrl } = JSON.parse(stored)
           if (bunkerUrl) {
-            try {
-              const params = parseBunkerUrl(bunkerUrl)
-              const remoteSigner = new Nip46Signer(pool, params)
-              remoteSigner.connect().then(connectedPubkey => {
-                setSession({ pubkey: connectedPubkey, method: 'nip46', signer: remoteSigner })
-              }).catch(err => {
+            NostrConnectSigner.fromBunkerURI(bunkerUrl)
+              .then(async (signer) => {
+                const connectedPubkey = await signer.connect()
+                setSession({ pubkey: connectedPubkey, method: 'nip46', signer })
+              })
+              .catch((err) => {
                 console.warn('[NIP-46] Reconnect failed for restored session:', err)
                 setSession({ pubkey, method: 'nip46', signer: null })
               })
-            } catch {
-              setSession({ pubkey, method: 'nip46', signer: null })
-            }
           } else {
             setSession({ pubkey, method: 'nip46', signer: null })
           }
@@ -95,9 +83,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
 
   const loginWithNip46 = async (bunkerUrl: string): Promise<string> => {
-    const params = parseBunkerUrl(bunkerUrl)
-
-    const signer = new Nip46Signer(pool, params)
+    const signer = await NostrConnectSigner.fromBunkerURI(bunkerUrl)
     const pubkey = await signer.connect()
 
     const newSession: UserSession = {
@@ -200,8 +186,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
       return await activeSigner.signEvent(event)
     } else if (session.method === 'nip46') {
-      const remoteSigner = session.signer as Nip46Signer
-      if (!remoteSigner || !remoteSigner.connected) {
+      const remoteSigner = session.signer as NostrConnectSigner
+      if (!remoteSigner || !remoteSigner.isConnected) {
         throw new Error('NIP-46 remote signer is not connected')
       }
       return await remoteSigner.signEvent(event)
@@ -214,7 +200,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <NostrContext.Provider
       value={{
         pool,
-        rxNostr: pool, // legacy alias
         eventStore,
         isConnected,
         session,

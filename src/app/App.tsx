@@ -5,11 +5,10 @@ import { LoginSheet } from '../features/auth/LoginSheet'
 import { CommentsSheet } from '../features/comments/CommentsSheet'
 import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
-import { publishLike, publishBoost, publishFollow } from '../nostr/events/reactions'
-import { parseVideoEvent } from '../nostr/events/video'
+import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
 
 function AppContent() {
-  const { rxNostr, signEvent, session, eventStore } = useNostr()
+  const { pool, signEvent, session, eventStore } = useNostr()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
   const [isZapOpen, setIsZapOpen] = useState(false)
@@ -58,7 +57,7 @@ function AppContent() {
       setIsZapOpen(true)
     } else if (actionType === 'like') {
       try {
-        const signed = await publishLike(signEvent, rxNostr, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
+        const signed = await publishLike(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         eventStore.add(signed)
       } catch (err) {
         console.error('Like failed:', err)
@@ -66,7 +65,7 @@ function AppContent() {
       }
     } else if (actionType === 'boost') {
       try {
-        const signed = await publishBoost(signEvent, rxNostr, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
+        const signed = await publishBoost(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         eventStore.add(signed)
       } catch (err) {
         console.error('Boost failed:', err)
@@ -85,7 +84,6 @@ function AppContent() {
 
         const { signed, action } = await publishFollow(
           signEvent,
-          rxNostr,
           creatorPubkey || '',
           currentContactListEvent || null
         )

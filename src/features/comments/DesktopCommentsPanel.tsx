@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
-import { publishComment } from '../../nostr/events/comments'
+import { publishComment } from '../../nostr/events'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { use$ } from 'applesauce-react/hooks'
@@ -35,7 +35,7 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
 }
 
 export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
-  const { rxNostr, eventStore, session, signEvent } = useNostr()
+  const { pool, eventStore, session, signEvent } = useNostr()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
   const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
@@ -78,7 +78,7 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
     }
 
     try {
-      const newComment = await publishComment(signEvent, rxNostr, video.id, video.creator.pubkey, inputText)
+      const newComment = await publishComment(signEvent, video.id, video.creator.pubkey, inputText)
       eventStore.add(newComment)
       setInputText('')
     } catch (err) {
