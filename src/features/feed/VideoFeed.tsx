@@ -156,62 +156,75 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     return () => observer.disconnect()
   }, [])
 
-  // 3. Query VideoShapes from Dexie and rank/sort them on the client side
-  const videos = useLiveQuery(async () => {
+  // Query all non-failed videos for Explore feed (reactive to Dexie changes)
+  const allShapes = useLiveQuery(async () => {
     try {
-      const rows = await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
-      let list = rows.map((shape: VideoShape): VideoItemData => ({
-        id: shape.id,
-        kind: 22,
-        createdAt: shape.created_at,
-        firstSeen: shape.firstSeen,
-        insertOrder: shape.insertOrder,
-        title: shape.title ?? '',
-        description: shape.summary ?? '',
-        url: shape.videoUrl,
-        poster: shape.thumbnailUrl,
-        creator: {
-          pubkey: shape.pubkey,
-          name: shape.authorName || shape.pubkey.slice(0, 8),
-          picture: shape.authorPicture
-        },
-        hashtags: shape.hashtags || [],
-        likesCount: shape.reactionCount || 0,
-        commentsCount: shape.replyCount || 0,
-        boostsCount: shape.repostCount || 0,
-        zapsCount: shape.zapCount || 0,
-        hasLiked: shape.userState?.liked || false,
-        hasBoosted: shape.userState?.boosted || false,
-        hasZapped: shape.userState?.zapped || false,
-        music: 'Original Clip Audio',
-
-        mediaStatus: shape.mediaStatus,
-        contentWarning: shape.contentWarning,
-        width: shape.width,
-        height: shape.height,
-        duration: shape.duration,
-        size: shape.size,
-        mimeType: shape.mimeType
-      }))
-
-      if (filterTag) {
-        list = list.filter((v: VideoItemData) =>
-          v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
-        )
-      }
-
-      if (feedType === 'following' && session) {
-        list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
-      }
-
-      list = [...list].sort(sortByInsertOrder)
-
-      return list
+      return await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [filterTag, feedType, session, followingPubkeys]) || []
+  }, []) || []
+
+  // Query videos from followed pubkeys using the pubkey index (reactive to Dexie changes)
+  const followedShapes = useLiveQuery(async () => {
+    if (!session || followingPubkeys.length === 0) return []
+    try {
+      return await db.videoShapes
+        .where('pubkey').anyOf(followingPubkeys)
+        .filter(shape => shape.mediaStatus !== 'failed')
+        .toArray()
+    } catch (err) {
+      console.error('[VideoFeed] Error in following video query:', err)
+      return []
+    }
+  }, [session, followingPubkeys]) || []
+
+  const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
+    id: shape.id,
+    kind: 22,
+    createdAt: shape.created_at,
+    firstSeen: shape.firstSeen,
+    insertOrder: shape.insertOrder,
+    title: shape.title ?? '',
+    description: shape.summary ?? '',
+    url: shape.videoUrl,
+    poster: shape.thumbnailUrl,
+    creator: {
+      pubkey: shape.pubkey,
+      name: shape.authorName || shape.pubkey.slice(0, 8),
+      picture: shape.authorPicture
+    },
+    hashtags: shape.hashtags || [],
+    likesCount: shape.reactionCount || 0,
+    commentsCount: shape.replyCount || 0,
+    boostsCount: shape.repostCount || 0,
+    zapsCount: shape.zapCount || 0,
+    hasLiked: shape.userState?.liked || false,
+    hasBoosted: shape.userState?.boosted || false,
+    hasZapped: shape.userState?.zapped || false,
+    music: 'Original Clip Audio',
+    mediaStatus: shape.mediaStatus,
+    contentWarning: shape.contentWarning,
+    width: shape.width,
+    height: shape.height,
+    duration: shape.duration,
+    size: shape.size,
+    mimeType: shape.mimeType
+  })
+
+  const videos = useMemo(() => {
+    const source = feedType === 'following' && session ? followedShapes : allShapes
+    let list = source.map(mapShapeToVideoItem)
+
+    if (filterTag) {
+      list = list.filter((v: VideoItemData) =>
+        v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
+      )
+    }
+
+    return [...list].sort(sortByInsertOrder)
+  }, [allShapes, followedShapes, feedType, session, filterTag])
 
   const videosRef = useRef(videos)
   videosRef.current = videos
