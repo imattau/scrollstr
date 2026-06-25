@@ -428,7 +428,7 @@ export const ProfilePage: React.FC = () => {
           )}
           {profile.website && (
             <a
-              href={profile.website.startsWith('http') ? profile.website : `https://${profile.website}`}
+              href={profile.website.includes('://') ? profile.website : `https://${profile.website}`}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-[12px] font-semibold text-[#a78bfa] hover:underline truncate"

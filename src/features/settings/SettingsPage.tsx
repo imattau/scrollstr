@@ -137,7 +137,7 @@ export const SettingsPage: React.FC = () => {
   // Handlers for Relays
   const handleAddRelay = () => {
     if (!newRelayUrl.trim()) return
-    const formattedUrl = newRelayUrl.trim().startsWith('ws') ? newRelayUrl.trim() : `wss://${newRelayUrl.trim()}`
+    const formattedUrl = newRelayUrl.trim().includes('://') ? newRelayUrl.trim() : `wss://${newRelayUrl.trim()}`
     if (localRelays.some((r) => r.url === formattedUrl)) {
       alert('Relay already in list')
       return
@@ -168,7 +168,7 @@ export const SettingsPage: React.FC = () => {
   // Handlers for Blossom
   const handleAddBlossom = () => {
     if (!newBlossomUrl.trim()) return
-    const formattedUrl = newBlossomUrl.trim().startsWith('http') ? newBlossomUrl.trim() : `https://${newBlossomUrl.trim()}`
+    const formattedUrl = newBlossomUrl.trim().includes('://') ? newBlossomUrl.trim() : `https://${newBlossomUrl.trim()}`
     if (localBlossom.includes(formattedUrl)) {
       alert('Server already in list')
       return
@@ -199,7 +199,7 @@ export const SettingsPage: React.FC = () => {
   // Handlers for NIP-96
   const handleAddNip96 = () => {
     if (!newNip96Url.trim()) return
-    const formattedUrl = newNip96Url.trim().startsWith('http') ? newNip96Url.trim() : `https://${newNip96Url.trim()}`
+    const formattedUrl = newNip96Url.trim().includes('://') ? newNip96Url.trim() : `https://${newNip96Url.trim()}`
     if (localNip96.includes(formattedUrl)) {
       alert('Server already in list')
       return
