@@ -118,6 +118,22 @@ class ScrollstrCacheDatabase extends Dexie {
 export const db = new ScrollstrCacheDatabase()
 
 export const MAX_VIDEOS = 5000
+const PRUNE_INTERVAL = 30
+let _saveCounter = 0
+
+export async function pruneCache(): Promise<void> {
+  const totalShapes = await db.videoShapes.count()
+  const excess = totalShapes - MAX_VIDEOS
+  if (excess <= 0) return
+
+  const oldestIds = await db.videoShapes
+    .orderBy('insertOrder')
+    .limit(excess)
+    .primaryKeys()
+
+  await db.cachedEvents.bulkDelete(oldestIds)
+  await db.videoShapes.bulkDelete(oldestIds)
+}
 
 function parseImetaTag(imetaTag: string[]): Record<string, string> {
   const data: Record<string, string> = {}
@@ -324,7 +340,13 @@ export async function saveEventToCache(event: any): Promise<void> {
 
     if (isVideo) {
       await buildOrUpdateVideoShape(event)
-    } else if (isReactionOrComment) {
+    }
+
+    if (++_saveCounter % PRUNE_INTERVAL === 0) {
+      void pruneCache()
+    }
+
+    if (isReactionOrComment) {
       for (const eId of eTags) {
         await incrementVideoCounts(eId, event)
       }

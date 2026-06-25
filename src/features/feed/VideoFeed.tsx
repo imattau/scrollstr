@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
+import { List, type ListImperativeAPI, type RowComponentProps } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
@@ -32,7 +33,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastOlderFetchAtRef = useRef(0)
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
@@ -40,10 +40,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const deepLinkJumpedRef = useRef(false)
   const lastDeepLinkVideoIdRef = useRef<string | null>(null)
 
-  // Throttle scroll handler to once per frame
-  const scrollRAFRef = useRef<number | null>(null)
-  // Cache container height to avoid forced reflow from reading clientHeight during scroll
-  const containerHeightRef = useRef(0)
+  const listRef = useRef<ListImperativeAPI | null>(null)
+  const [listHeight, setListHeight] = useState(
+    typeof window !== 'undefined' ? window.innerHeight : 800
+  )
+  const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isProgrammaticScrollRef = useRef(false)
+
+  useEffect(() => {
+    return () => {
+      if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current)
+    }
+  }, [])
 
   // New-events counter: tracks how many new items appeared before the current position
   const [newEventsCount, setNewEventsCount] = useState(0)
@@ -164,16 +172,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }
   }, [relayUrls])
 
-  // Cache container height via ResizeObserver so scroll handlers don't force layout
-  useEffect(() => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    containerHeightRef.current = container.clientHeight
-    const observer = new ResizeObserver((entries) => {
-      containerHeightRef.current = entries[0]?.contentRect.height ?? containerHeightRef.current
-    })
-    observer.observe(container)
-    return () => observer.disconnect()
+  const handleListResize = useCallback(({ height }: { height: number }) => {
+    setListHeight(height)
   }, [])
 
   // Query all non-failed videos for Explore feed (reactive to Dexie changes)
@@ -294,7 +294,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         const idx = videos.findIndex(v => v.id === currentVideoIdRef.current)
         if (idx !== -1 && idx !== activeIndex) {
           setActiveIndex(idx)
-          scrollContainerRef.current?.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
+          isProgrammaticScrollRef.current = true
+          listRef.current?.scrollToRow({ index: idx, align: 'start', behavior: 'auto' })
           return
         }
       }
@@ -369,8 +370,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // Scroll to deep-linked video if present on load
   useEffect(() => {
     if (!initialVideoId || videos.length === 0) return
-    const container = scrollContainerRef.current
-    if (!container) return
 
     // Reset jump flag when the target video changes (e.g. navigating from one
     // `?v=X` to `?v=Y` without the feed component remounting).
@@ -385,40 +384,50 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     lastDeepLinkVideoIdRef.current = initialVideoId
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
-    container.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
+    isProgrammaticScrollRef.current = true
+    listRef.current?.scrollToRow({ index: idx, align: 'start', behavior: 'auto' })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialVideoId, feedKey])
 
-  // Track scroll position, snap (throttled to once per frame via rAF)
-  const handleScroll = useCallback(() => {
-    if (scrollRAFRef.current) return
-    scrollRAFRef.current = requestAnimationFrame(() => {
-      scrollRAFRef.current = null
-      const container = scrollContainerRef.current
-      if (!container) return
-      const scrollOffset = container.scrollTop
-      const containerHeight = containerHeightRef.current
-      if (!containerHeight) return
-      const newIndex = Math.round(scrollOffset / containerHeight)
-      const currentVideos = videosRef.current
-      const currentActiveIndex = activeIndexRef.current
-      if (newIndex !== currentActiveIndex && newIndex >= 0 && newIndex < currentVideos.length) {
-        setActiveIndex(newIndex)
-        currentVideoIdRef.current = currentVideos[newIndex]?.id ?? ''
-      }
+  // Track scroll position, with debounced snap to nearest item
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (isProgrammaticScrollRef.current) {
+      isProgrammaticScrollRef.current = false
+      return
+    }
 
-      if (newIndex === 0) {
-        setNewEventsCount(0)
-        topVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
+    const scrollOffset = e.currentTarget.scrollTop
+    const currentVideos = videosRef.current
+    if (currentVideos.length === 0 || listHeight <= 0) return
+
+    const newIndex = Math.round(scrollOffset / listHeight)
+    const clampedIndex = Math.max(0, Math.min(newIndex, currentVideos.length - 1))
+
+    if (clampedIndex !== activeIndexRef.current) {
+      setActiveIndex(clampedIndex)
+      currentVideoIdRef.current = currentVideos[clampedIndex]?.id ?? ''
+    }
+
+    if (clampedIndex === 0) {
+      setNewEventsCount(0)
+      topVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
+    }
+
+    // Debounced snap to nearest item after scrolling stops
+    if (scrollStopTimerRef.current) clearTimeout(scrollStopTimerRef.current)
+    scrollStopTimerRef.current = setTimeout(() => {
+      const snapIndex = Math.round(scrollOffset / listHeight)
+      if (snapIndex >= 0 && snapIndex < currentVideos.length) {
+        isProgrammaticScrollRef.current = true
+        listRef.current?.scrollToRow({ index: snapIndex, align: 'start', behavior: 'auto' })
       }
-    })
-  }, [])
+    }, 150)
+  }, [listHeight])
 
   // Keyboard navigation for desktop view — react-hotkeys-hook
   const scrollToIndex = useCallback((index: number) => {
-    const container = scrollContainerRef.current
-    if (!container) return
-    container.scrollTo({ top: index * containerHeightRef.current, behavior: 'smooth' })
+    isProgrammaticScrollRef.current = true
+    listRef.current?.scrollToRow({ index, align: 'start', behavior: 'smooth' })
   }, [])
 
   useHotkeys('j,down', (e) => {
@@ -474,10 +483,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [feedKey])
 
   const handleScrollToTop = useCallback(() => {
-    const container = scrollContainerRef.current
     const currentVideos = videosRef.current
-    if (!container) return
-    container.scrollTo({ top: 0, behavior: 'smooth' })
+    if (currentVideos.length === 0) return
+    isProgrammaticScrollRef.current = true
+    listRef.current?.scrollToRow({ index: 0, align: 'start', behavior: 'smooth' })
     setActiveIndex(0)
     currentVideoIdRef.current = currentVideos[0]?.id ?? ''
     setNewEventsCount(0)
@@ -488,9 +497,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const currentVideos = videosRef.current
     const lastIndex = currentVideos.length - 1
     if (lastIndex < 0) return
-    const container = scrollContainerRef.current
-    if (!container) return
-    container.scrollTo({ top: lastIndex * containerHeightRef.current, behavior: 'smooth' })
+    isProgrammaticScrollRef.current = true
+    listRef.current?.scrollToRow({ index: lastIndex, align: 'start', behavior: 'smooth' })
     setActiveIndex(lastIndex)
     currentVideoIdRef.current = currentVideos[lastIndex]?.id ?? ''
     oldestLoadedCreatedAtRef.current = currentVideos[lastIndex]?.createdAt ?? null
@@ -500,6 +508,31 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const video = videosRef.current.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
   }, [onActionTrigger])
+
+  const Row = useCallback(({ index, style }: RowComponentProps) => {
+    if (isFetchingOlder && index === videos.length) {
+      return (
+        <div style={style} className="flex h-full w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]">
+          <p className="text-[14px]">Loading older videos...</p>
+        </div>
+      )
+    }
+    const video = videos[index]
+    if (!video) return null
+    return (
+      <div style={style}>
+        <VideoFeedItem
+          video={video}
+          isActive={index === activeIndex}
+          isNearActive={Math.abs(index - activeIndex) <= 2}
+          isMuted={isMuted}
+          onActionClick={handleActionClick}
+        />
+      </div>
+    )
+  }, [videos, activeIndex, isMuted, handleActionClick, isFetchingOlder])
+
+  const itemCount = isFetchingOlder ? videos.length + 1 : videos.length
 
   if (videos.length === 0) {
     return (
@@ -519,35 +552,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   return (
     <div className="w-full h-full relative overflow-hidden">
       {isFeedLoading && <div className="feed-loading-bar" />}
-      <div
-        ref={scrollContainerRef}
-        className="feed-container"
+      <List
+        listRef={listRef}
+        style={{ height: '100%', scrollbarWidth: 'none' } as React.CSSProperties}
+        rowHeight={listHeight}
+        rowCount={itemCount}
+        rowComponent={Row}
+        rowProps={{}}
         onScroll={handleScroll}
-      >
-        {videos.map((video, index) => (
-          <div
-            key={video.id}
-            className="relative h-full w-full"
-            style={{ scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
-          >
-            <VideoFeedItem
-              video={video}
-              isActive={index === activeIndex}
-              isNearActive={Math.abs(index - activeIndex) <= 2}
-              isMuted={isMuted}
-              onActionClick={handleActionClick}
-            />
-          </div>
-        ))}
-        {isFetchingOlder && (
-          <div
-            className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa] md:h-full"
-            style={{ scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
-          >
-            <p className="text-[14px]">Loading older videos...</p>
-          </div>
-        )}
-      </div>
+        onResize={handleListResize}
+        overscanCount={3}
+        defaultHeight={listHeight}
+      />
 
       {/* New events pill — shown when user has scrolled past index 0 and new videos arrived */}
       {newEventsCount > 0 && activeIndex > 0 && (

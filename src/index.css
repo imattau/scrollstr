@@ -14,24 +14,6 @@ body {
 }
 
 @layer utilities {
-  .feed-container {
-    height: 100%;
-    overflow-y: auto;
-    scroll-snap-type: y mandatory;
-    overscroll-behavior-y: contain;
-    scrollbar-width: none; /* Hide scrollbar for clean vertical feed */
-  }
-
-  .feed-container::-webkit-scrollbar {
-    display: none;
-  }
-
-  .feed-item {
-    height: 100%;
-    scroll-snap-align: start;
-    scroll-snap-stop: always;
-  }
-
   /* New events pill badge */
   .new-events-pill {
     position: absolute;
