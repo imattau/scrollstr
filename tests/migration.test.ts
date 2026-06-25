@@ -23,7 +23,7 @@ test('Migration verification - full app flow', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await page.waitForTimeout(2000);
 
-  let mainFeedVisible = await page.isVisible('[data-testid="video-feed"], .video-feed, video');
+  const mainFeedVisible = await page.isVisible('[data-testid="video-feed"], .video-feed, video');
   console.log(`[TEST] Main feed loaded: ${mainFeedVisible}`);
 
   // Test 2: Check for critical elements

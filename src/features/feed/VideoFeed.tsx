@@ -30,7 +30,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   const [activeIndex, setActiveIndex] = useState(0)
   const activeIndexRef = useRef(activeIndex)
-  activeIndexRef.current = activeIndex
+  useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastOlderFetchAtRef = useRef(0)
@@ -129,7 +129,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       unsub()
       clearTimeout(timer)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.pubkey])
 
   // Feed subscription: fetch recent videos from all relays into the cache.
@@ -157,17 +156,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [])
 
   // Query all non-failed videos for Explore feed (reactive to Dexie changes)
-  const allShapes = useLiveQuery(async () => {
+  const _allShapes = useLiveQuery(async () => {
     try {
       return await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, []) || []
+  }, [])
+  const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
   // Query videos from followed pubkeys using the pubkey index (reactive to Dexie changes)
-  const followedShapes = useLiveQuery(async () => {
+  const _followedShapes = useLiveQuery(async () => {
     if (!session || followingPubkeys.length === 0) return []
     try {
       return await db.videoShapes
@@ -178,7 +178,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [session, followingPubkeys]) || []
+  }, [session, followingPubkeys])
+  const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
     id: shape.id,
@@ -227,7 +228,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [allShapes, followedShapes, feedType, session, filterTag])
 
   const videosRef = useRef(videos)
-  videosRef.current = videos
+  useEffect(() => { videosRef.current = videos }, [videos])
 
   const feedKey = useMemo(
     () => videos.map((v) => v.id).join(','),

@@ -133,7 +133,7 @@ export const DiscoverPage: React.FC = () => {
   }, [rawVideoShapes])
 
   // Load author profiles into a lookup map for richer search
-  const authorProfileMap = useLiveQuery(
+  const _authorProfileMap = useLiveQuery(
     () => db.authorProfiles.toArray().then(profiles => {
       const map: Record<string, { name: string; displayName?: string; nip05?: string }> = {}
       for (const p of profiles) {
@@ -142,7 +142,8 @@ export const DiscoverPage: React.FC = () => {
       return map
     }),
     []
-  ) ?? {}
+  )
+  const authorProfileMap = useMemo(() => _authorProfileMap ?? {}, [_authorProfileMap])
 
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {

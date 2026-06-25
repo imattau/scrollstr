@@ -83,9 +83,9 @@ export const useProfile = (pubkey: string): CreatorProfile => {
   const { session } = useNostr()
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const relayUrlsRef = useRef(relayUrls)
-  relayUrlsRef.current = relayUrls
+  useEffect(() => { relayUrlsRef.current = relayUrls }, [relayUrls])
   const pubkeyRef = useRef(pubkey)
-  pubkeyRef.current = pubkey
+  useEffect(() => { pubkeyRef.current = pubkey }, [pubkey])
 
   const cachedProfile = useLiveQuery(async () => {
     if (!pubkey) return null

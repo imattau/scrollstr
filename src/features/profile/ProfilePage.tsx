@@ -105,12 +105,13 @@ export const ProfilePage: React.FC = () => {
   const creatorLabel = `@${profile.name}`
 
   // Retrieve raw short-video events authored by target pubkey from Dexie cache
-  const rawVideoEvents: any[] = useLiveQuery(
+  const _rawVideoEvents = useLiveQuery(
     () => targetPubkey
       ? db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => e.kind === 21 || e.kind === 22 || e.kind === 34236).toArray()
       : Promise.resolve([] as any[]),
     [targetPubkey]
-  ) ?? []
+  )
+  const rawVideoEvents = useMemo(() => _rawVideoEvents ?? [], [_rawVideoEvents])
 
   // Parse events into standard feed item list (unwrap from CachedEvent)
   const videos = useMemo(() => {
@@ -120,13 +121,14 @@ export const ProfilePage: React.FC = () => {
   }, [rawVideoEvents])
 
   // Retrieve all video creators from the videoShapes pubkey index
-  const creatorsWithVideos = useLiveQuery(
+  const _creatorsWithVideos = useLiveQuery(
     async () => {
       const keys = await db.videoShapes.orderBy('pubkey').uniqueKeys()
       return new Set(keys as string[])
     },
     []
-  ) ?? new Set()
+  )
+  const creatorsWithVideos = useMemo(() => _creatorsWithVideos ?? new Set(), [_creatorsWithVideos])
 
   // Retrieve raw kind:6 or kind:16 repost events
   const rawBoosts: any[] = useLiveQuery(
@@ -151,13 +153,14 @@ export const ProfilePage: React.FC = () => {
   }, [targetContactListEvent])
 
   // Retrieve contact list (kind 3) events referencing target pubkey to calculate Followers count
-  const followerEvents: any[] = useLiveQuery(
+  const _followerEvents = useLiveQuery(
     async () => {
       if (!targetPubkey) return [] as any[]
       return db.cachedEvents.where('pTags').equals(targetPubkey).filter(e => e.kind === 3).toArray()
     },
     [targetPubkey]
-  ) ?? []
+  )
+  const followerEvents = useMemo(() => _followerEvents ?? [], [_followerEvents])
 
   const followersCount = useMemo(() => {
     const uniqueAuthors = new Set(followerEvents.map((ev: any) => ev.pubkey))

@@ -92,7 +92,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       return
     }
 
-    // Media Guard Check: Head request to evaluate content length
+    // Fire-and-forget HEAD probe to update media status; don't block source loading
     let isAborted = false
     const abortController = new AbortController()
     
@@ -101,46 +101,30 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         if (isAborted) return
         const contentLength = res.headers.get('content-length')
         if (contentLength) {
-          const bytes = parseInt(contentLength, 10)
-          await updateMediaStatus(url, 'available', { size: bytes })
-        }
-        
-        if (isAborted) return
-        
-        // Proceed with loading
-        if (isHls) {
-          if (Hls.isSupported()) {
-            const hls = new Hls({
-              maxMaxBufferLength: 10, // Optimize memory for vertical feed
-            })
-            hls.loadSource(url)
-            hls.attachMedia(video)
-            hlsInstanceRef.current = hls
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url
-          }
-        } else {
-          video.src = url
+          await updateMediaStatus(url, 'available', { size: parseInt(contentLength, 10) })
         }
       })
       .catch((err) => {
-        if (err.name === 'AbortError') return
-        if (isAborted) return
-        console.warn('Failed to probe media metadata:', err)
-        // Fallback load even if HEAD fails (e.g. CORS block on HEAD)
-        if (isHls) {
-          if (Hls.isSupported()) {
-            const hls = new Hls({ maxMaxBufferLength: 10 })
-            hls.loadSource(url)
-            hls.attachMedia(video)
-            hlsInstanceRef.current = hls
-          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            video.src = url
-          }
-        } else {
-          video.src = url
+        if (err.name !== 'AbortError') {
+          console.warn('Failed to probe media metadata:', err)
         }
       })
+
+    // Load source immediately, in parallel with the HEAD request
+    if (isHls) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          maxMaxBufferLength: 10, // Optimize memory for vertical feed
+        })
+        hls.loadSource(url)
+        hls.attachMedia(video)
+        hlsInstanceRef.current = hls
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url
+      }
+    } else {
+      video.src = url
+    }
 
     // Listen to metadata load
     const handleLoadedMetadata = async () => {
