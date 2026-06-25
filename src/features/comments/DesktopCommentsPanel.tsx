@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { use$ } from 'applesauce-react/hooks'
+import { db, saveEventToCache } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useProfile } from '../../nostr/profile'
 
 const EMPTY_COMMENTS: any[] = []
@@ -35,16 +36,18 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
 }
 
 export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
-  const { pool, eventStore, session, signEvent } = useNostr()
+  const { pool, session, signEvent } = useNostr()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
-  // Query events in EventStore for kind:1111 referencing this video id
-  const rawComments = use$(() => getEventsQuery$({
-    kinds: [1111],
-    '#e': [video?.id || '']
-  }), [video?.id]) ?? EMPTY_COMMENTS
+  // Query cached events for kind:1111 referencing this video id
+  const rawComments = useLiveQuery(
+    () => video?.id
+      ? db.cachedEvents.where('eTags').equals(video.id).filter(e => e.kind === 1111).toArray()
+      : Promise.resolve([] as any[]),
+    [video?.id]
+  ) ?? EMPTY_COMMENTS
 
   // Subscribe to real-time comments on relays
   useEffect(() => {
@@ -79,7 +82,7 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
 
     try {
       const newComment = await publishComment(signEvent, video.id, video.creator.pubkey, inputText)
-      eventStore.add(newComment)
+      await saveEventToCache(newComment)
       setInputText('')
     } catch (err) {
       console.error('Failed to post comment:', err)

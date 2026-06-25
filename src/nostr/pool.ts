@@ -1,9 +1,7 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
-import NDK from '@nostr-dev-kit/ndk'
-import NDKCacheAdapterDexie from '@nostr-dev-kit/cache-dexie'
-import { EventStore } from 'applesauce-core'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
+import { saveEventToCache } from './cache'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -35,15 +33,44 @@ export const pool = new SimplePool()
 
 export let activeRelays: string[] = [...DEFAULT_RELAYS]
 
-export const setActiveRelays = (urls: string[]) => {
-  activeRelays = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
+// ── Web Worker ───────────────────────────────────────────────────────────
+
+const worker = new Worker(
+  new URL('./backfill.worker.ts', import.meta.url),
+  { type: 'module' }
+)
+
+export { worker as backfillWorker }
+
+worker.onmessage = (e: MessageEvent) => {
+  const msg = e.data
+  switch (msg.type) {
+    case 'backfillEvents': {
+      for (const event of (msg as any).events) {
+        saveEventToCache(event).catch((err) =>
+          console.warn(`[pool] Failed to cache event ${event.id}:`, err)
+        )
+      }
+      break
+    }
+    case 'subscriptionEvent': {
+      const event = (msg as any).event
+      saveEventToCache(event).catch((err) =>
+        console.warn(`[pool] Failed to cache event ${event.id}:`, err)
+      )
+      break
+    }
+    case 'backfillComplete':
+      break
+  }
 }
 
-// NDK instance + cache adapter for IndexedDB persistence only
-const cacheAdapter = new NDKCacheAdapterDexie({ dbName: 'scrollstr-ndk-cache' })
-export const ndk = new NDK({ cacheAdapter })
+export const setActiveRelays = (urls: string[]) => {
+  activeRelays = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
+  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+}
 
-export const eventStore = new EventStore()
+// ── Mock events (seed cache with local preview data) ─────────────────────
 
 const MOCK_EVENTS = [
   {
@@ -117,97 +144,26 @@ const MOCK_EVENTS = [
 ]
 
 MOCK_EVENTS.forEach((ev) => {
-  eventStore.add(ev as any)
+  saveEventToCache(ev as any).catch(() => {})
 })
 
-export const getEventsQuery$ = (filters: any): Observable<any[]> => {
-  return new Observable<any[]>((subscriber) => {
-    subscriber.next(eventStore.getByFilters(filters))
-    const subs = [
-      eventStore.insert$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
-      eventStore.update$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
-      eventStore.remove$.subscribe(() => subscriber.next(eventStore.getByFilters(filters))),
-    ]
-    return () => subs.forEach((s) => s.unsubscribe())
-  })
-}
+// ── Subscriptions (proxied to worker) ────────────────────────────────────
 
-export const getReplaceableQuery$ = (kind: number, pubkey: string): Observable<any> => {
-  return new Observable<any>((subscriber) => {
-    subscriber.next(eventStore.getReplaceable(kind, pubkey))
-    const subs = [
-      eventStore.insert$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
-      eventStore.update$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
-      eventStore.remove$.subscribe(() => subscriber.next(eventStore.getReplaceable(kind, pubkey))),
-    ]
-    return () => subs.forEach((s) => s.unsubscribe())
-  })
-}
-
-const subRegistrations = new Map<symbol, { relays: string[]; filters: any[]; onEvent?: (event: any) => void }>()
-let managedClose: (() => void) | null = null
-let rebuildScheduled = false
-
-function rebuildManagedSub() {
-  if (managedClose) {
-    managedClose()
-    managedClose = null
-  }
-  if (subRegistrations.size === 0) return
-
-  const requests: { url: string; filter: any }[] = []
-  for (const reg of subRegistrations.values()) {
-    const cleaned = sanitizeFilters(reg.filters)
-    for (const url of reg.relays) {
-      for (const filter of cleaned) {
-        requests.push({ url, filter })
-      }
-    }
-  }
-
-  const sub = pool.subscribeMap(requests, {
-    onevent(event: any) {
-      eventStore.add(event)
-
-      if (eventStore.memory && eventStore.memory.size > 1000) {
-        const pruned = eventStore.prune(200)
-        if (pruned > 0) {
-          console.log(`[EventStore] Memory pruned: removed ${pruned} unclaimed events.`)
-        }
-      }
-
-      for (const reg of subRegistrations.values()) {
-        reg.onEvent?.(event)
-      }
-    },
-  })
-  managedClose = () => sub.close()
-}
-
-function scheduleRebuild() {
-  if (rebuildScheduled) return
-  rebuildScheduled = true
-  queueMicrotask(() => {
-    rebuildScheduled = false
-    rebuildManagedSub()
-  })
-}
+let subIdCounter = 0
 
 export function subscribeToRelays(
   relays: string[],
-  filters: any | any[],
-  onEvent?: (event: any) => void
+  filters: any | any[]
 ): () => void {
-  const key = Symbol()
+  const id = `sub_${++subIdCounter}`
   const filterList = Array.isArray(filters) ? filters : [filters]
-  subRegistrations.set(key, { relays, filters: filterList, onEvent })
-  scheduleRebuild()
-
+  worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
   return () => {
-    subRegistrations.delete(key)
-    scheduleRebuild()
+    worker.postMessage({ type: 'unsubscribe', id })
   }
 }
+
+// ── Publishing & queries (stay on main thread for nip46) ─────────────────
 
 export async function publishToRelays(relays: string[], event: any): Promise<void> {
   try {

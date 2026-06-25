@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { Search } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { subscribeToRelays } from '../../nostr/pool'
-import { db, VideoShape } from '../../nostr/cache'
+import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
@@ -63,10 +63,10 @@ const TrendingCreatorRow: React.FC<{
 }
 
 export const DiscoverPage: React.FC = () => {
-  const { session, pool, signEvent, eventStore } = useNostr()
+  const { session, pool, signEvent } = useNostr()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
   // Subscribe to video events from relays so the discover page stays fresh
   useEffect(() => {
@@ -243,7 +243,7 @@ export const DiscoverPage: React.FC = () => {
         targetPubkey,
         myContactListEvent?.event || null
       )
-      eventStore.add(signed)
+      await saveEventToCache(signed)
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
       alert('Failed to update follow status: ' + (err.message || err))

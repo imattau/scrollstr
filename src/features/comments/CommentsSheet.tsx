@@ -2,9 +2,10 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { Drawer } from 'vaul'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { use$ } from 'applesauce-react/hooks'
+import { db, saveEventToCache } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useProfile } from '../../nostr/profile'
 
 const EMPTY_COMMENTS: any[] = []
@@ -41,15 +42,15 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
 }
 
 export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
-  const { pool, eventStore, session, signEvent } = useNostr()
+  const { pool, session, signEvent } = useNostr()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
-  const rawComments = use$(() => getEventsQuery$({
-    kinds: [1111],
-    '#e': [videoId]
-  }), [videoId]) ?? EMPTY_COMMENTS
+  const rawComments = useLiveQuery(
+    () => db.cachedEvents.where('eTags').equals(videoId).filter(e => e.kind === 1111).toArray(),
+    [videoId]
+  ) ?? EMPTY_COMMENTS
 
   useEffect(() => {
     if (!isOpen || !videoId) return
@@ -81,7 +82,7 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
 
     try {
       const newComment = await publishComment(signEvent, videoId, creatorPubkey, inputText)
-      eventStore.add(newComment)
+      await saveEventToCache(newComment)
       setInputText('')
     } catch (err) {
       console.error('Failed to post comment:', err)

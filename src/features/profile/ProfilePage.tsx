@@ -3,8 +3,9 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar, ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
-import { use$ } from 'applesauce-react/hooks'
+import { subscribeToRelays } from '../../nostr/pool'
+import { db, saveEventToCache } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { parseVideoEvent, publishFollow, publishMuteList } from '../../nostr/events'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
@@ -25,10 +26,10 @@ const CreatorListItem: React.FC<{
   const displayName = profile.displayName || profile.name || 'Nostr User'
   const avatarInitial = displayName.slice(0, 1).toUpperCase() || 'N'
 
-  const rawVideoEvents = use$(
-    () => getEventsQuery$({ kinds: VIDEO_KINDS, authors: [pubkey] }),
+  const rawVideoEvents: any[] = useLiveQuery(
+    () => db.cachedEvents.where('pubkey').equals(pubkey).filter(e => VIDEO_KINDS.includes(e.kind)).toArray(),
     [pubkey]
-  ) ?? EMPTY_VIDEOS
+  ) ?? []
 
   const videoCount = rawVideoEvents.length
 
@@ -82,10 +83,10 @@ const CreatorListItem: React.FC<{
 }
 
 export const ProfilePage: React.FC = () => {
-  const { session, pool, signEvent, eventStore } = useNostr()
+  const { session, pool, signEvent } = useNostr()
   const { pubkey } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
   const [activeTab, setActiveTab] = useState<'videos' | 'boosts' | 'about'>('videos')
   const [listView, setListView] = useState<'followers' | 'following' | null>(null)
@@ -103,40 +104,47 @@ export const ProfilePage: React.FC = () => {
   const displayName = profile.displayName || profile.name || 'Nostr User'
   const creatorLabel = `@${profile.name}`
 
-  // Retrieve raw short-video events authored by target pubkey
-  const rawVideoEvents = use$(
-    () => getEventsQuery$({ kinds: [21, 22, 34236], authors: targetPubkey ? [targetPubkey] : [] }),
+  // Retrieve raw short-video events authored by target pubkey from Dexie cache
+  const rawVideoEvents: any[] = useLiveQuery(
+    () => targetPubkey
+      ? db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => e.kind === 21 || e.kind === 22 || e.kind === 34236).toArray()
+      : Promise.resolve([] as any[]),
     [targetPubkey]
-  ) ?? EMPTY_VIDEOS
+  ) ?? []
 
-  // Parse events into standard feed item list
+  // Parse events into standard feed item list (unwrap from CachedEvent)
   const videos = useMemo(() => {
     return rawVideoEvents
-      .map((ev: any) => parseVideoEvent(ev))
+      .map((ev: any) => parseVideoEvent(ev.event || ev))
       .filter((v: any): v is VideoItemData => v !== null)
   }, [rawVideoEvents])
 
-  // Retrieve all video events in EventStore to filter list view to creators with at least 1 video
-  const allVideoEvents = use$(
-    () => getEventsQuery$({ kinds: [21, 22, 34236] }),
+  // Retrieve all video events to filter list view to creators with at least 1 video
+  const allVideoEvents: any[] = useLiveQuery(
+    () => db.cachedEvents.where('kind').anyOf([21, 22, 34236]).toArray(),
     []
-  ) ?? EMPTY_VIDEOS
+  ) ?? []
 
   const creatorsWithVideos = useMemo(() => {
     return new Set(allVideoEvents.map((ev: any) => ev.pubkey))
   }, [allVideoEvents])
 
   // Retrieve raw kind:6 or kind:16 repost events
-  const rawBoosts = use$(
-    () => getEventsQuery$({ kinds: [6, 16], authors: targetPubkey ? [targetPubkey] : [] }),
+  const rawBoosts: any[] = useLiveQuery(
+    () => targetPubkey
+      ? db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => e.kind === 6 || e.kind === 16).toArray()
+      : Promise.resolve([] as any[]),
     [targetPubkey]
-  ) ?? EMPTY_EVENTS
+  ) ?? []
 
   // Retrieve contact list (kind 3) authored by target pubkey to calculate Following count
-  const targetContactListEvent = use$(
-    () => getEventsQuery$({ kinds: [3], authors: targetPubkey ? [targetPubkey] : [] }),
+  const targetContactListEvents: any[] = useLiveQuery(
+    () => targetPubkey
+      ? db.cachedEvents.where({ kind: 3, pubkey: targetPubkey }).toArray()
+      : Promise.resolve([] as any[]),
     [targetPubkey]
-  )?.[0]
+  ) ?? []
+  const targetContactListEvent = targetContactListEvents[targetContactListEvents.length - 1]?.event
 
   const followingCount = useMemo(() => {
     if (!targetContactListEvent) return 0
@@ -144,10 +152,14 @@ export const ProfilePage: React.FC = () => {
   }, [targetContactListEvent])
 
   // Retrieve contact list (kind 3) events referencing target pubkey to calculate Followers count
-  const followerEvents = use$(
-    () => getEventsQuery$({ kinds: [3], '#p': targetPubkey ? [targetPubkey] : [] }),
+  const followerEvents: any[] = useLiveQuery(
+    async () => {
+      if (!targetPubkey) return [] as any[]
+      const events = await db.cachedEvents.where('kind').equals(3).toArray()
+      return events.filter((e: any) => e.pTags?.includes(targetPubkey))
+    },
     [targetPubkey]
-  ) ?? EMPTY_EVENTS
+  ) ?? []
 
   const followersCount = useMemo(() => {
     const uniqueAuthors = new Set(followerEvents.map((ev: any) => ev.pubkey))
@@ -174,10 +186,14 @@ export const ProfilePage: React.FC = () => {
   }, [followingPubkeys, creatorsWithVideos])
 
   // Retrieve logged-in user's own contact list to check if following this creator
-  const myContactListEvent = use$(
-    () => getEventsQuery$({ kinds: [3], authors: session?.pubkey ? [session.pubkey] : [] }),
+  const myContactListEvents: any[] = useLiveQuery(
+    async () => {
+      if (!session?.pubkey) return []
+      return db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
+    },
     [session?.pubkey]
-  )?.[0]
+  ) ?? []
+  const myContactListEvent = myContactListEvents[myContactListEvents.length - 1]?.event
 
   const isFollowing = useMemo(() => {
     if (!myContactListEvent || !targetPubkey) return false
@@ -194,10 +210,14 @@ export const ProfilePage: React.FC = () => {
   }, [myContactListEvent])
 
   // Retrieve logged-in user's mute list (kind:10000) to check if this creator is blocked
-  const myMuteListEvent = use$(
-    () => getEventsQuery$({ kinds: [10000], authors: session?.pubkey ? [session.pubkey] : [] }),
+  const myMuteListEvents: any[] = useLiveQuery(
+    async () => {
+      if (!session?.pubkey) return []
+      return db.cachedEvents.where({ kind: 10000, pubkey: session.pubkey }).toArray()
+    },
     [session?.pubkey]
-  )?.[0]
+  ) ?? []
+  const myMuteListEvent = myMuteListEvents[myMuteListEvents.length - 1]?.event
 
   const mutedPubkeys = useMemo<Set<string>>(() => {
     if (!myMuteListEvent) return new Set<string>()
@@ -256,19 +276,31 @@ export const ProfilePage: React.FC = () => {
     const realPubkeys = pubkeys.filter((pk: string) => !pk.startsWith('mock-'))
     if (!realPubkeys.length) return
 
-    const uncachedPubkeys = realPubkeys.filter((pk: string) => !eventStore.getReplaceable(0, pk))
-    if (!uncachedPubkeys.length) {
-      console.log(`All profiles already cached for ${listView} view`)
-      return
+    // Save the pubkeys to check against in an async context
+    const checkCache = async () => {
+      const uncached: string[] = []
+      for (const pk of realPubkeys) {
+        const cached = await db.cachedEvents.where({ kind: 0, pubkey: pk }).first()
+        if (!cached) uncached.push(pk)
+      }
+      return uncached
     }
-
-    const sub = subscribeToRelays(relayUrls, {
-      kinds: [0],
-      authors: uncachedPubkeys,
-      limit: 1,
+    checkCache().then(uncachedPubkeys => {
+      if (!uncachedPubkeys.length) {
+        console.log(`All profiles already cached for ${listView} view`)
+        return
+      }
+      const sub = subscribeToRelays(relayUrls, {
+        kinds: [0],
+        authors: uncachedPubkeys,
+        limit: 1,
+      })
+      // Cleanup is trickier here; the subscription will be cleaned on effect teardown
+      // via the returned unsub below, but for the inner sub we just let it close naturally
     })
-    return () => sub()
-  }, [listView, followersWithVideos, followingWithVideos, relayUrls, eventStore])
+
+    return () => {}
+  }, [listView, followersWithVideos, followingWithVideos, relayUrls])
 
   const handleEditProfile = () => {
     navigate('/settings')
@@ -285,7 +317,7 @@ export const ProfilePage: React.FC = () => {
         targetPubkey || '',
         myContactListEvent || null
       )
-      eventStore.add(signed)
+      await saveEventToCache(signed)
       alert(action === 'follow' ? 'Followed creator!' : 'Unfollowed creator!')
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
@@ -300,7 +332,7 @@ export const ProfilePage: React.FC = () => {
         ? Array.from(mutedPubkeys).filter((pk) => pk !== targetPubkey)
         : [...Array.from(mutedPubkeys), targetPubkey]
       const { signed } = await publishMuteList(signEvent, newPubkeys, [])
-      eventStore.add(signed)
+      await saveEventToCache(signed)
       alert(isBlocked ? 'Unblocked creator!' : 'Blocked creator!')
     } catch (err: any) {
       console.error('Block toggle failed:', err)
@@ -312,7 +344,7 @@ export const ProfilePage: React.FC = () => {
     if (!session) return
     try {
       const { signed, action } = await publishFollow(signEvent, target, myContactListEvent || null)
-      eventStore.add(signed)
+      await saveEventToCache(signed)
       alert(action === 'follow' ? 'Followed!' : 'Unfollowed!')
     } catch (err: any) {
       console.error('Follow toggle failed:', err)

@@ -1,19 +1,10 @@
 import { useEffect } from 'react'
-import { merge } from 'rxjs'
-import { map, startWith } from 'rxjs/operators'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
-import { use$ } from 'applesauce-react/hooks'
-import { CreatorProfile } from '../features/feed/VideoFeedItem'
 import { useUserRelayUrls } from './relays'
-
-// Query the eventStore for replaceable kind:0 event for a pubkey
-export const getProfileQuery$ = (eventStore: any, pubkey: string) => {
-  return merge(eventStore.insert$, eventStore.update$).pipe(
-    startWith(null),
-    map(() => eventStore.getReplaceable(0, pubkey))
-  )
-}
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from './cache'
+import type { CreatorProfile } from '../features/feed/VideoFeedItem'
 
 // Parse metadata JSON content from kind:0 event
 export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorProfile => {
@@ -50,29 +41,23 @@ export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorP
   }
 }
 
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from './cache'
-
-// React hook to fetch creator profile reactively and cache it
+// React hook to fetch creator profile reactively from Dexie cache
 export const useProfile = (pubkey: string): CreatorProfile => {
-  const { eventStore, session } = useNostr()
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
-  const profileEvent = use$(() => getProfileQuery$(eventStore, pubkey), [pubkey])
+  const { session } = useNostr()
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
-  // Reactively query Dexie's authorProfiles cache table
   const cachedProfile = useLiveQuery(async () => {
     if (!pubkey) return null
     return await db.authorProfiles.get(pubkey)
   }, [pubkey])
 
   useEffect(() => {
-    // Only fetch if profile is not available in both EventStore AND Dexie cache
-    if (!profileEvent && !cachedProfile && pubkey) {
-      console.log(`Profile event not cached in memory or Dexie for ${pubkey}, fetching from relays...`)
+    if (!cachedProfile && pubkey) {
+      console.log(`Profile not cached in Dexie for ${pubkey}, fetching from relays...`)
       const unsub = subscribeToRelays(relayUrls, { kinds: [0], authors: [pubkey], limit: 1 })
       return unsub
     }
-  }, [pubkey, profileEvent, cachedProfile, relayUrls])
+  }, [pubkey, cachedProfile, relayUrls])
 
   if (cachedProfile) {
     return {
@@ -87,5 +72,5 @@ export const useProfile = (pubkey: string): CreatorProfile => {
     }
   }
 
-  return parseProfileContent(profileEvent, pubkey)
+  return parseProfileContent(null, pubkey)
 }

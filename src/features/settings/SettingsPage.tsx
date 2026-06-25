@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import * as Switch from '@radix-ui/react-switch'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
-import { use$ } from 'applesauce-react/hooks'
+import { subscribeToRelays } from '../../nostr/pool'
+import { db, saveEventToCache } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
@@ -10,10 +11,10 @@ import { useUserRelayUrls } from '../../nostr/relays'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
 
 export const SettingsPage: React.FC = () => {
-  const { session, pool, signEvent, eventStore, logout } = useNostr()
+  const { session, pool, signEvent, logout } = useNostr()
   const userPubkey = session?.pubkey
   const { isInstallable, installApp } = usePWAInstall()
-  const relayUrls = useUserRelayUrls(eventStore, userPubkey)
+  const relayUrls = useUserRelayUrls(userPubkey)
 
   const [activeSubView, setActiveSubView] = useState<'main' | 'relays' | 'blossom' | 'nip96' | 'mute' | 'identity' | 'wallet'>('main')
   const [saving, setSaving] = useState(false)
@@ -36,11 +37,28 @@ export const SettingsPage: React.FC = () => {
   const [newMutePubkey, setNewMutePubkey] = useState('')
   const [newMuteTag, setNewMuteTag] = useState('')
 
-  // Query events in EventStore
-  const relayListEvent = use$(() => getEventsQuery$({ kinds: [10002], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
-  const blossomListEvent = use$(() => getEventsQuery$({ kinds: [10063], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
-  const nip96ListEvent = use$(() => getEventsQuery$({ kinds: [10096], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
-  const muteListEvent = use$(() => getEventsQuery$({ kinds: [10000], authors: userPubkey ? [userPubkey] : [] }), [userPubkey])?.[0]
+  // Query events from Dexie cache
+  const relayListEvents = useLiveQuery(
+    () => userPubkey ? db.cachedEvents.where({ kind: 10002, pubkey: userPubkey }).toArray() : Promise.resolve([] as any[]),
+    [userPubkey]
+  ) ?? []
+  const blossomListEvents = useLiveQuery(
+    () => userPubkey ? db.cachedEvents.where({ kind: 10063, pubkey: userPubkey }).toArray() : Promise.resolve([] as any[]),
+    [userPubkey]
+  ) ?? []
+  const nip96ListEvents = useLiveQuery(
+    () => userPubkey ? db.cachedEvents.where({ kind: 10096, pubkey: userPubkey }).toArray() : Promise.resolve([] as any[]),
+    [userPubkey]
+  ) ?? []
+  const muteListEvents = useLiveQuery(
+    () => userPubkey ? db.cachedEvents.where({ kind: 10000, pubkey: userPubkey }).toArray() : Promise.resolve([] as any[]),
+    [userPubkey]
+  ) ?? []
+
+  const relayListEvent = relayListEvents[relayListEvents.length - 1]?.event
+  const blossomListEvent = blossomListEvents[blossomListEvents.length - 1]?.event
+  const nip96ListEvent = nip96ListEvents[nip96ListEvents.length - 1]?.event
+  const muteListEvent = muteListEvents[muteListEvents.length - 1]?.event
 
   // Subscribe to real-time events on mount if logged in
   useEffect(() => {
@@ -137,7 +155,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       const ev = await publishRelayList(signEvent, localRelays)
-      eventStore.add(ev)
+      await saveEventToCache(ev)
       alert('Relay list published to relays!')
     } catch (e) {
       console.error(e)
@@ -168,7 +186,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       const ev = await publishBlossomList(signEvent, localBlossom)
-      eventStore.add(ev)
+      await saveEventToCache(ev)
       alert('Blossom media servers published!')
     } catch (e) {
       console.error(e)
@@ -199,7 +217,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       const ev = await publishNip96List(signEvent, localNip96)
-      eventStore.add(ev)
+      await saveEventToCache(ev)
       alert('NIP-96 media servers published!')
     } catch (e) {
       console.error(e)
@@ -239,7 +257,7 @@ export const SettingsPage: React.FC = () => {
     setSaving(true)
     try {
       const ev = await publishMuteList(signEvent, localMutePubkeys, localMuteTags)
-      eventStore.add(ev)
+      await saveEventToCache(ev)
       alert('Mute list successfully published!')
     } catch (e) {
       console.error(e)

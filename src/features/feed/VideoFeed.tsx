@@ -1,14 +1,10 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { use$ } from 'applesauce-react/hooks'
-import { List, ListImperativeAPI } from 'react-window'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
-import { parseVideoEvent } from '../../nostr/events'
-import { subscribeToRelays, setActiveRelays, fetchFromRelays } from '../../nostr/pool'
-import { getEventsQuery$ } from '../../nostr/pool'
+import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
+import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
 
@@ -19,57 +15,6 @@ import { sortByInsertOrder } from './feedSort'
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
 
-// Viewport constants
-const WINDOW_BEFORE = 1
-const WINDOW_AFTER = 2
-
-const VideoFeedRow = React.memo(({ index, style, videos, isFetchingOlder, activeIndex, isMuted, handleActionClick }: any) => {
-  if (index === videos.length) {
-    return (
-      <div
-        style={{
-          ...style,
-          scrollSnapAlign: 'start',
-          scrollSnapStop: 'always',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa]"
-      >
-        <p className="text-[14px]">Loading older videos...</p>
-      </div>
-    )
-  }
-  const video = videos[index]
-  if (!video) return null
-
-  const isNearActive = index >= activeIndex - WINDOW_BEFORE && index <= activeIndex + WINDOW_AFTER
-  const isActive = index === activeIndex
-
-  return (
-    <div
-      style={{
-        ...style,
-        scrollSnapAlign: 'start',
-        scrollSnapStop: 'always',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-      key={video.id}
-    >
-      <VideoFeedItem
-        video={video}
-        isActive={isActive}
-        isNearActive={isNearActive}
-        isMuted={isMuted}
-        onActionClick={handleActionClick}
-      />
-    </div>
-  )
-})
-
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
   onVideoChange?: (video: VideoItemData) => void
@@ -77,7 +22,7 @@ interface VideoFeedProps {
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange, isMuted }) => {
-  const { session, eventStore } = useNostr()
+  const { session } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
@@ -85,12 +30,13 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   const [activeIndex, setActiveIndex] = useState(0)
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
-  const listRef = useRef<ListImperativeAPI>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastOlderFetchAtRef = useRef(0)
   const oldestLoadedCreatedAtRef = useRef<number | null>(null)
   const userMetadataSubscribedRef = useRef<string | null>(null)
   const currentVideoIdRef = useRef<string>('')
   const deepLinkJumpedRef = useRef(false)
+  const lastDeepLinkVideoIdRef = useRef<string | null>(null)
 
   // Tracks the insertOrder at the viewport's top edge for position maintenance
   // when scrolled down. When at the top (isAtTopRef), we stay at index 0 instead.
@@ -102,16 +48,16 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const seenTopIdsRef = useRef<Set<string>>(new Set())
   // Whether the user has scrolled past the top
   const isAtTopRef = useRef(true)
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const relayUrls = useUserRelayUrls(session?.pubkey)
 
-  // Reactively subscribe to the user's kind:3 contact list so followingPubkeys
-  // updates as soon as the event arrives from relays (fixes the stale-useMemo bug).
-  const contactListEvent = use$(
+  // Reactively query the user's kind:3 contact list from Dexie cache
+  const contactListEvents = useLiveQuery(
     () => session?.pubkey
-      ? getEventsQuery$({ kinds: [3], authors: [session.pubkey] })
-      : getEventsQuery$({ kinds: [3], authors: [] }),
+      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
+      : Promise.resolve([] as any[]),
     [session?.pubkey ?? '']
-  )?.[0]
+  ) ?? []
+  const contactListEvent = contactListEvents[contactListEvents.length - 1]?.event
 
   const followingPubkeys = useMemo(() => {
     if (!contactListEvent) return []
@@ -184,55 +130,61 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // 3. Query VideoShapes from Dexie and rank/sort them on the client side
   const videos = useLiveQuery(async () => {
-    let list = (await db.videoShapes.toArray()).map((shape: VideoShape): VideoItemData => ({
-      id: shape.id,
-      kind: 22,
-      createdAt: shape.created_at,
-      firstSeen: shape.firstSeen,
-      insertOrder: shape.insertOrder,
-      title: shape.title ?? '',
-      description: shape.summary ?? '',
-      url: shape.videoUrl,
-      poster: shape.thumbnailUrl,
-      creator: {
-        pubkey: shape.pubkey,
-        name: shape.authorName || shape.pubkey.slice(0, 8),
-        picture: shape.authorPicture
-      },
-      hashtags: shape.hashtags || [],
-      likesCount: shape.reactionCount || 0,
-      commentsCount: shape.replyCount || 0,
-      boostsCount: shape.repostCount || 0,
-      zapsCount: shape.zapCount || 0,
-      hasLiked: shape.userState?.liked || false,
-      hasBoosted: shape.userState?.skipped || false,
-      hasZapped: shape.userState?.zapped || false,
-      music: 'Original Clip Audio',
+    try {
+      const rows = await db.videoShapes.toArray()
+      let list = rows.map((shape: VideoShape): VideoItemData => ({
+        id: shape.id,
+        kind: 22,
+        createdAt: shape.created_at,
+        firstSeen: shape.firstSeen,
+        insertOrder: shape.insertOrder,
+        title: shape.title ?? '',
+        description: shape.summary ?? '',
+        url: shape.videoUrl,
+        poster: shape.thumbnailUrl,
+        creator: {
+          pubkey: shape.pubkey,
+          name: shape.authorName || shape.pubkey.slice(0, 8),
+          picture: shape.authorPicture
+        },
+        hashtags: shape.hashtags || [],
+        likesCount: shape.reactionCount || 0,
+        commentsCount: shape.replyCount || 0,
+        boostsCount: shape.repostCount || 0,
+        zapsCount: shape.zapCount || 0,
+        hasLiked: shape.userState?.liked || false,
+        hasBoosted: shape.userState?.skipped || false,
+        hasZapped: shape.userState?.zapped || false,
+        music: 'Original Clip Audio',
 
-      mediaStatus: shape.mediaStatus,
-      contentWarning: shape.contentWarning,
-      width: shape.width,
-      height: shape.height,
-      duration: shape.duration,
-      size: shape.size,
-      mimeType: shape.mimeType
-    }))
+        mediaStatus: shape.mediaStatus,
+        contentWarning: shape.contentWarning,
+        width: shape.width,
+        height: shape.height,
+        duration: shape.duration,
+        size: shape.size,
+        mimeType: shape.mimeType
+      }))
 
-    list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed')
+      list = list.filter((v: VideoItemData) => v.mediaStatus !== 'failed')
 
-    if (filterTag) {
-      list = list.filter((v: VideoItemData) =>
-        v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
-      )
+      if (filterTag) {
+        list = list.filter((v: VideoItemData) =>
+          v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
+        )
+      }
+
+      if (feedType === 'following' && session) {
+        list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
+      }
+
+      list.sort(sortByInsertOrder)
+
+      return list
+    } catch (err) {
+      console.error('[VideoFeed] Error in video query:', err)
+      return []
     }
-
-    if (feedType === 'following' && session) {
-      list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
-    }
-
-    list.sort(sortByInsertOrder)
-
-    return list
   }, [filterTag, feedType, session, followingPubkeys]) || []
 
   // Guard ref: tracks the last known video ID order so downstream effects can
@@ -274,7 +226,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (idx !== -1) {
         if (idx !== activeIndex) {
           setActiveIndex(idx)
-          listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
+          scrollContainerRef.current?.scrollTo({ top: idx * scrollContainerRef.current.clientHeight, behavior: 'instant' })
         }
         return
       }
@@ -327,35 +279,40 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       videoIdsToFetch.push(nextVideo.id)
     }
 
-    const existingEvents = eventStore.getByFilters({ kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
-    if (existingEvents.length > 0) {
-      console.log(`Using cached reactions/comments for videos`, videoIdsToFetch)
-      return
-    }
-
-    console.log(`Prefetching reactions/comments progressively near viewport:`, videoIdsToFetch)
     const unsub = subscribeToRelays(relayUrls, { kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 
     return unsub
-  }, [activeIndex, videos, relayUrls, eventStore])
+  }, [activeIndex, videos, relayUrls])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
-    if (!initialVideoId || videos.length === 0 || deepLinkJumpedRef.current) return
+    if (!initialVideoId || videos.length === 0) return
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    // Reset jump flag when the target video changes (e.g. navigating from one
+    // `?v=X` to `?v=Y` without the feed component remounting).
+    if (initialVideoId !== lastDeepLinkVideoIdRef.current) {
+      deepLinkJumpedRef.current = false
+    }
+    if (deepLinkJumpedRef.current) return
+
     const idx = videos.findIndex(v => v.id === initialVideoId)
     if (idx === -1) return
     deepLinkJumpedRef.current = true
+    lastDeepLinkVideoIdRef.current = initialVideoId
     isAtTopRef.current = false
     anchorInsertOrderRef.current = videos[idx]?.insertOrder ?? 0
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
-    listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
+    container.scrollTo({ top: idx * container.clientHeight, behavior: 'instant' })
   }, [initialVideoId, videos])
 
   // Track scroll position, snap, and run diagnostics
-  const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const scrollOffset = e.currentTarget.scrollTop
-    const containerHeight = e.currentTarget.clientHeight
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget
+    const scrollOffset = container.scrollTop
+    const containerHeight = container.clientHeight
     const newIndex = Math.round(scrollOffset / containerHeight)
     if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
       setActiveIndex(newIndex)
@@ -383,21 +340,27 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [activeIndex, videos])
 
   // Keyboard navigation for desktop view — react-hotkeys-hook
+  const scrollToIndex = useCallback((index: number) => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: index * container.clientHeight, behavior: 'smooth' })
+  }, [])
+
   useHotkeys('j,down', (e) => {
     e.preventDefault()
     const nextIndex = activeIndex + 1
     if (nextIndex < videos.length) {
-      listRef.current?.scrollToRow({ index: nextIndex, align: 'auto', behavior: 'auto' })
+      scrollToIndex(nextIndex)
     }
-  }, { enableOnFormTags: false }, [activeIndex, videos.length])
+  }, { enableOnFormTags: false }, [activeIndex, videos.length, scrollToIndex])
 
   useHotkeys('k,up', (e) => {
     e.preventDefault()
     const prevIndex = activeIndex - 1
     if (prevIndex >= 0) {
-      listRef.current?.scrollToRow({ index: prevIndex, align: 'auto', behavior: 'auto' })
+      scrollToIndex(prevIndex)
     }
-  }, { enableOnFormTags: false }, [activeIndex, videos.length])
+  }, { enableOnFormTags: false }, [activeIndex, videos.length, scrollToIndex])
 
   // Propagate active video to parent — skip during feed reorder so the comment
   // panel doesn't flash the wrong video's comments while the index corrects.
@@ -434,7 +397,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [videos])
 
   const handleScrollToTop = useCallback(() => {
-    listRef.current?.scrollToRow({ index: 0, align: 'auto', behavior: 'auto' })
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: 0, behavior: 'smooth' })
     setActiveIndex(0)
     currentVideoIdRef.current = videos[0]?.id ?? ''
     isAtTopRef.current = true
@@ -445,7 +410,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const handleScrollToBottom = useCallback(() => {
     const lastIndex = videos.length - 1
     if (lastIndex < 0) return
-    listRef.current?.scrollToRow({ index: lastIndex, align: 'auto', behavior: 'auto' })
+    const container = scrollContainerRef.current
+    if (!container) return
+    container.scrollTo({ top: lastIndex * container.clientHeight, behavior: 'smooth' })
     setActiveIndex(lastIndex)
     currentVideoIdRef.current = videos[lastIndex]?.id ?? ''
     oldestLoadedCreatedAtRef.current = videos[lastIndex]?.createdAt ?? null
@@ -455,14 +422,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const video = videos.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
   }, [videos, onActionTrigger])
-
-  const rowProps = useMemo(() => ({
-    videos,
-    isFetchingOlder,
-    activeIndex,
-    isMuted,
-    handleActionClick,
-  }), [videos, isFetchingOlder, activeIndex, isMuted, handleActionClick])
 
   if (videos.length === 0) {
     return (
@@ -481,16 +440,35 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   return (
     <div className="w-full h-full relative overflow-hidden">
-      <List
-        listRef={listRef}
-        rowCount={videos.length + (isFetchingOlder ? 1 : 0)}
-        rowHeight="100%"
+      <div
+        ref={scrollContainerRef}
         className="feed-container"
-        onScroll={handleListScroll}
-        style={{ width: '100%', height: '100%' }}
-        rowProps={rowProps}
-        rowComponent={VideoFeedRow as any}
-      />
+        onScroll={handleScroll}
+      >
+        {videos.map((video, index) => (
+          <div
+            key={video.id}
+            className="relative h-full w-full"
+            style={{ scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
+          >
+            <VideoFeedItem
+              video={video}
+              isActive={index === activeIndex}
+              isNearActive={Math.abs(index - activeIndex) <= 2}
+              isMuted={isMuted}
+              onActionClick={handleActionClick}
+            />
+          </div>
+        ))}
+        {isFetchingOlder && (
+          <div
+            className="flex h-dvh w-full items-center justify-center bg-[#09090b] text-[#a1a1aa] md:h-full"
+            style={{ scrollSnapAlign: 'start', scrollSnapStop: 'always' }}
+          >
+            <p className="text-[14px]">Loading older videos...</p>
+          </div>
+        )}
+      </div>
 
       {/* New events pill — shown when user has scrolled past index 0 and new videos arrived */}
       {newEventsCount > 0 && activeIndex > 0 && (
@@ -516,11 +494,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           <ChevronsUp className="w-5 h-5" />
         </button>
         <button
-          onClick={() => {
-            if (activeIndex > 0 && activeIndex - 1 < videos.length) {
-              listRef.current?.scrollToRow({ index: activeIndex - 1, align: 'auto', behavior: 'auto' })
-            }
-          }}
+          onClick={() => scrollToIndex(activeIndex - 1)}
           disabled={activeIndex === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
           title="Previous Video"
@@ -528,11 +502,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           <ChevronUp className="w-5 h-5" />
         </button>
         <button
-          onClick={() => {
-            if (activeIndex < videos.length - 1 && activeIndex + 1 < videos.length) {
-              listRef.current?.scrollToRow({ index: activeIndex + 1, align: 'auto', behavior: 'auto' })
-            }
-          }}
+          onClick={() => scrollToIndex(activeIndex + 1)}
           disabled={activeIndex === videos.length - 1 || videos.length === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
           title="Next Video"

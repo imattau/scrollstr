@@ -1,11 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react'
-import { EventStore } from 'applesauce-core'
-import { pool, eventStore } from '../nostr/pool'
-import { loadCachedEvents } from '../nostr/cache'
-import { startCacheBackfill, maybeResumeBackfill } from '../nostr/cacheBackfill'
+import { pool } from '../nostr/pool'
+import { startCacheBackfill } from '../nostr/cacheBackfill'
 import {
   readStoredPasskeyIdentity,
-  hasStoredPasskeyIdentity,
   unlockPasskeyIdentity,
   registerPasskeyIdentity,
   importPasskeyIdentityFromNsec,
@@ -27,14 +24,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isConnected, setIsConnected] = useState(true) // pool is always active
   const [session, setSession] = useState<UserSession | null>(null)
 
-  // On mount, restore session from localStorage if present and load IndexedDB cached events
+  // On mount, start cache backfill and restore session from localStorage
   useEffect(() => {
-    // Load local cached events into Applesauce EventStore, then start backfill
-    loadCachedEvents(eventStore).then(() => {
-      // Begin filling the cache with historical relay data in the background.
-      // startCacheBackfill is idempotent – a second call while one is running is a no-op.
-      void startCacheBackfill()
-    })
+    void startCacheBackfill()
 
     const stored = localStorage.getItem('scrollstr_session')
     if (stored) {
@@ -200,7 +192,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <NostrContext.Provider
       value={{
         pool,
-        eventStore,
         isConnected,
         session,
         loginWithNip07,

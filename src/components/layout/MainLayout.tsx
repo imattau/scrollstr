@@ -76,7 +76,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
               </div>
             </div>
           </div>
-          <div onClick={() => setShowFeedToggles(prev => !prev)}>
+          <div className="h-full" onClick={() => setShowFeedToggles(prev => !prev)}>
             {children}
           </div>
           {/* Mobile Navigation (Bottom) */}

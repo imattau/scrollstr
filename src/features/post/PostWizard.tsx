@@ -5,8 +5,8 @@ import { z } from 'zod'
 import { useNostr } from '../../app/providers'
 import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events'
-import { use$ } from 'applesauce-react/hooks'
-import { getEventsQuery$ } from '../../nostr/pool'
+import { db } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 
 const postSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -74,16 +74,24 @@ export const PostWizard: React.FC = () => {
   const { pool, signEvent, session } = useNostr()
   const userPubkey = session?.pubkey
 
-  // Retrieve user's configured Blossom and NIP-96 lists
-  const blossomListEvent = use$(
-    () => getEventsQuery$({ kinds: [10063], authors: userPubkey ? [userPubkey] : [] }),
+  // Retrieve user's configured Blossom and NIP-96 lists from Dexie cache
+  const blossomListEvents: any[] = useLiveQuery(
+    async () => {
+      if (!userPubkey) return []
+      return db.cachedEvents.where({ kind: 10063, pubkey: userPubkey }).toArray()
+    },
     [userPubkey]
-  )?.[0]
+  ) ?? []
+  const blossomListEvent = blossomListEvents[blossomListEvents.length - 1]?.event
 
-  const nip96ListEvent = use$(
-    () => getEventsQuery$({ kinds: [10096], authors: userPubkey ? [userPubkey] : [] }),
+  const nip96ListEvents: any[] = useLiveQuery(
+    async () => {
+      if (!userPubkey) return []
+      return db.cachedEvents.where({ kind: 10096, pubkey: userPubkey }).toArray()
+    },
     [userPubkey]
-  )?.[0]
+  ) ?? []
+  const nip96ListEvent = nip96ListEvents[nip96ListEvents.length - 1]?.event
 
   // Combine custom configured servers with priority order
   const uploadServers = useMemo(() => {

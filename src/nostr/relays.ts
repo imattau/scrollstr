@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { loadSettings } from '../db/local-preferences'
-import { use$ } from 'applesauce-react/hooks'
-import { getEventsQuery$ } from './pool'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from './cache'
 
 const DEFAULT_RELAYS = [
   'wss://nos.lol',
@@ -31,44 +31,29 @@ export const getFallbackRelayUrls = (): string[] => {
   return normalizeRelayUrls(settings.relays.length > 0 ? settings.relays : DEFAULT_RELAYS)
 }
 
-export const getUserRelayUrls = (eventStore: any, pubkey?: string | null): string[] => {
-  if (!pubkey) {
-    return getFallbackRelayUrls()
-  }
-
-  const relayListEvent = eventStore.getReplaceable(10002, pubkey)
-  const relayUrls = relayListEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
-
-  const normalized = normalizeRelayUrls(relayUrls)
-  return normalized.length > 0 ? normalized : getFallbackRelayUrls()
-}
-
 /**
  * Reactive hook that returns the logged-in user's relay list (kind:10002).
  *
  * Falls back to user-configured or default relays when no kind:10002 is in store.
  */
-export const useUserRelayUrls = (eventStore: any, pubkey?: string | null): string[] => {
-  // Always call use$ unconditionally (Rules of Hooks).
-  const relayListEvent = use$(
-    () => pubkey
-      ? getEventsQuery$({ kinds: [10002], authors: [pubkey] })
-      : getEventsQuery$({ kinds: [10002], authors: [] }),
+export const useUserRelayUrls = (pubkey?: string | null): string[] => {
+  const relayListEvents = useLiveQuery(
+    () => (pubkey
+      ? db.cachedEvents.where({ kind: 10002, pubkey }).toArray()
+      : Promise.resolve([] as any[])),
     [pubkey ?? '']
-  )?.[0]
+  ) ?? []
 
-  // Compute the stable relay URL list. We JSON-stringify the raw tags as the
-  // useMemo key so React only produces a new array when the actual relay URLs
-  // change — not on every render (which would cause dependent useEffects to
-  // fire in an infinite loop).
-  const rawTagsKey = relayListEvent?.tags ? JSON.stringify(relayListEvent.tags) : ''
+  const relayListEvent = relayListEvents[relayListEvents.length - 1]
+
+  const rawTagsKey = relayListEvent?.event?.tags ? JSON.stringify(relayListEvent.event.tags) : ''
 
   return useMemo(() => {
     if (!pubkey) {
       return getFallbackRelayUrls()
     }
 
-    const relayUrls = relayListEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
+    const relayUrls = relayListEvent?.event?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
     const normalized = normalizeRelayUrls(relayUrls)
     return normalized.length > 0 ? normalized : getFallbackRelayUrls()
   // eslint-disable-next-line react-hooks/exhaustive-deps

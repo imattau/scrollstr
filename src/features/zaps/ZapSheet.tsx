@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Drawer } from 'vaul'
 import { useNostr } from '../../app/providers'
 import { fetchFromRelays } from '../../nostr/pool'
+import { db, saveEventToCache } from '../../nostr/cache'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 
@@ -15,8 +16,8 @@ interface ZapSheetProps {
 const PRESETS = [21, 100, 500, 1000]
 
 export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
-  const { pool, eventStore, session, signEvent } = useNostr()
-  const relayUrls = useUserRelayUrls(eventStore, session?.pubkey)
+  const { pool, session, signEvent } = useNostr()
+  const relayUrls = useUserRelayUrls(session?.pubkey)
   const profile = useProfile(creatorPubkey)
   const [amount, setAmount] = useState<number>(100)
   const [comment, setComment] = useState('Great video!')
@@ -34,7 +35,8 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
     setInvoice('')
     setError('')
     try {
-      const profileEvent = eventStore.getReplaceable(0, creatorPubkey)
+      const cachedProfileEvent = await db.cachedEvents.where({ kind: 0, pubkey: creatorPubkey }).first()
+      const profileEvent = cachedProfileEvent?.event
       let lud16 = ''
       if (profileEvent) {
         try {
@@ -51,7 +53,7 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
         const fetchedProfile = events.find((e: any) => e.kind === 0 && e.pubkey === creatorPubkey) ?? null
         if (fetchedProfile) {
           try {
-            eventStore.add(fetchedProfile)
+            await saveEventToCache(fetchedProfile)
             const profileData = JSON.parse(fetchedProfile.content)
             lud16 = profileData.lud16 || profileData.lud06 || ''
           } catch (e) {

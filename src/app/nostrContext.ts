@@ -1,5 +1,4 @@
 import { createContext } from 'react'
-import type { EventStore } from 'applesauce-core'
 import type { SimplePool } from 'nostr-tools'
 
 export interface UserSession {
@@ -10,12 +9,11 @@ export interface UserSession {
 
 export interface NostrContextProps {
   pool: SimplePool
-  eventStore: EventStore
   isConnected: boolean
   session: UserSession | null
   loginWithNip07: () => Promise<string>
   loginWithNip46: (bunkerUrl: string) => Promise<string>
-  loginReadOnly: (pubkey: string) => void
+  loginReadOnly: (npubOrPubkey: string) => void
   loginWithPasskey: () => Promise<string>
   registerPasskey: (nsec?: string) => Promise<string>
   logout: () => void

@@ -2,9 +2,10 @@ import React, { useEffect, useMemo } from 'react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { Heart, MessageCircle, Repeat2, Zap, UserPlus } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { use$ } from 'applesauce-react/hooks'
+import { db } from '../../nostr/cache'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 
@@ -103,12 +104,12 @@ const ActivityRow: React.FC<{ event: any }> = ({ event }) => {
 }
 
 export const ActivityPage: React.FC = () => {
-  const { session, pool, eventStore } = useNostr()
+  const { session, pool } = useNostr()
   const userPubkey = session?.pubkey
   const navigate = useNavigate()
-  const relayUrls = useUserRelayUrls(eventStore, userPubkey)
+  const relayUrls = useUserRelayUrls(userPubkey)
 
-  // Subscribe to the user's own video events so the EventStore has them
+  // Subscribe to the user's own video events so the cache has them
   useEffect(() => {
     if (!userPubkey) return
     const unsub = subscribeToRelays(relayUrls, {
@@ -119,12 +120,15 @@ export const ActivityPage: React.FC = () => {
     return () => unsub()
   }, [userPubkey, relayUrls])
 
-  // Reactive query for the user's video events from the store
-  const rawUserVideos = use$(
-    () => getEventsQuery$({
-      kinds: VIDEO_KINDS,
-      authors: userPubkey ? [userPubkey] : [],
-    }),
+  // Query the user's video events from Dexie cache
+  const rawUserVideos = useLiveQuery(
+    () => userPubkey
+      ? db.cachedEvents
+          .where('pubkey')
+          .equals(userPubkey)
+          .filter(e => e.kind === 21 || e.kind === 22 || e.kind === 34236)
+          .toArray()
+      : Promise.resolve([] as any[]),
     [userPubkey]
   ) ?? EMPTY_EVENTS
 
@@ -134,18 +138,25 @@ export const ActivityPage: React.FC = () => {
     [rawUserVideos]
   )
 
-  // Stable key to avoid unnecessary effect re-runs on every EventStore change
+  // Stable key to avoid unnecessary effect re-runs
   const videoIdsKey = useMemo(
     () => (dedupedVideoIds.length > 0 ? dedupedVideoIds.join(',') : null),
     [dedupedVideoIds]
   )
 
-  // Reactive query for reactions/comments referencing those videos (from EventStore)
-  const rawEvents = use$(
-    () => getEventsQuery$({
-      kinds: REACTION_KINDS,
-      '#e': videoIdsKey ? videoIdsKey.split(',') : [],
-    }),
+  // Query reactions/comments referencing those videos from Dexie cache
+  const rawEvents = useLiveQuery(
+    () => {
+      const ids = videoIdsKey ? videoIdsKey.split(',') : []
+      if (ids.length === 0) return Promise.resolve([] as any[])
+      return db.cachedEvents
+        .where('kind')
+        .anyOf(REACTION_KINDS)
+        .toArray()
+        .then(events => events.filter((e: any) =>
+          e.eTags?.some((tag: string) => ids.includes(tag))
+        ))
+    },
     [videoIdsKey]
   ) ?? EMPTY_EVENTS
 
@@ -165,11 +176,12 @@ export const ActivityPage: React.FC = () => {
   const sortedEvents = useMemo(() => {
     const videoIdSet = new Set(dedupedVideoIds)
     return [...rawEvents]
-      .filter((ev) => {
-        const eTag = ev.tags.find((t: any) => t[0] === 'e')
+      .filter((ev: any) => {
+        const eTag = ev.event?.tags?.find((t: any) => t[0] === 'e')
         return eTag && videoIdSet.has(eTag[1])
       })
-      .sort((a, b) => b.created_at - a.created_at)
+      .sort((a: any, b: any) => b.created_at - a.created_at)
+      .map((ev: any) => ev.event)
   }, [rawEvents, dedupedVideoIds])
 
   if (!session) {

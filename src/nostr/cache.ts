@@ -11,6 +11,8 @@ export interface CachedEvent {
   pubkey: string
   created_at: number
   event: any
+  eTags?: string[]
+  pTags?: string[]
 }
 
 export interface VideoShape {
@@ -96,64 +98,24 @@ class ScrollstrCacheDatabase extends Dexie {
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(7).stores({
-      cachedEvents: 'id, [kind+pubkey], kind, pubkey, created_at',
+    this.version(8).stores({
+      cachedEvents: 'id, [kind+pubkey], kind, pubkey, created_at, *eTags, *pTags',
       videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
+    }).upgrade(async tx => {
+      await tx.table('cachedEvents').toCollection().modify(event => {
+        event.eTags = (event.event?.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
+        event.pTags = (event.event?.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+      })
     })
   }
 }
 
 export const db = new ScrollstrCacheDatabase()
 
-const MAX_LOAD_EVENTS = 500
-export const MAX_VIDEOS = 500
-
-export async function loadCachedEvents(eventStore: any): Promise<void> {
-  try {
-    const priorityKinds: number[] = [21, 22, 34236, 0, 3]
-    const priorityRecords: CachedEvent[] = []
-    for (const kind of priorityKinds) {
-      const batch = await db.cachedEvents.where('kind').equals(kind).toArray()
-      priorityRecords.push(...batch)
-    }
-
-    let allRecords: CachedEvent[]
-    if (priorityRecords.length <= MAX_LOAD_EVENTS) {
-      const remaining = MAX_LOAD_EVENTS - priorityRecords.length
-      const reactions = await db.cachedEvents
-        .where('kind')
-        .anyOf([7, 16, 9735, 1111])
-        .reverse()
-        .limit(remaining)
-        .toArray()
-      allRecords = [...priorityRecords, ...reactions]
-    } else {
-      allRecords = priorityRecords.slice(0, MAX_LOAD_EVENTS)
-    }
-
-    if (allRecords.length === 0) return
-
-    let count = 0
-    for (const record of allRecords) {
-      try {
-        eventStore.add(record.event)
-        count++
-      } catch (_) {}
-    }
-
-    for (const record of allRecords) {
-      const isVideo = record.kind === 21 || record.kind === 22 || record.kind === 34236
-      if (isVideo) {
-        void buildOrUpdateVideoShape(record.event)
-      }
-    }
-  } catch (error) {
-    console.error('[Cache] Error loading cached events:', error)
-  }
-}
+export const MAX_VIDEOS = 5000
 
 function parseImetaTag(imetaTag: string[]): Record<string, string> {
   const data: Record<string, string> = {}
@@ -340,20 +302,19 @@ export async function saveEventToCache(event: any): Promise<void> {
 
   const isVideo = kind === 21 || kind === 22 || kind === 34236
   const isReactionOrComment = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
-  const isProfileOrContact = kind === 0 || kind === 3
-
-  if (!isVideo && !isReactionOrComment && !isProfileOrContact) return
 
   try {
     const alreadyCached = await db.cachedEvents.get(id)
     if (alreadyCached) return
 
-    await db.cachedEvents.put({ id, kind, pubkey, created_at, event })
+    const eTags = (event.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
+    const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+
+    await db.cachedEvents.put({ id, kind, pubkey, created_at, event, eTags, pTags })
 
     if (isVideo) {
       await buildOrUpdateVideoShape(event)
     } else if (isReactionOrComment) {
-      const eTags = event.tags.filter((t: any) => t[0] === 'e').map((t: any) => t[1])
       for (const eId of eTags) {
         await incrementVideoCounts(eId, event)
       }

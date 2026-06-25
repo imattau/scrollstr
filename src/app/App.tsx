@@ -6,9 +6,10 @@ import { CommentsSheet } from '../features/comments/CommentsSheet'
 import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
+import { db, saveEventToCache } from '../nostr/cache'
 
 function AppContent() {
-  const { pool, signEvent, session, eventStore } = useNostr()
+  const { pool, signEvent, session } = useNostr()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
   const [isZapOpen, setIsZapOpen] = useState(false)
@@ -58,7 +59,7 @@ function AppContent() {
     } else if (actionType === 'like') {
       try {
         const signed = await publishLike(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
-        eventStore.add(signed)
+        await saveEventToCache(signed)
       } catch (err) {
         console.error('Like failed:', err)
         alert('Failed to publish Like: ' + err)
@@ -66,15 +67,15 @@ function AppContent() {
     } else if (actionType === 'boost') {
       try {
         const signed = await publishBoost(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
-        eventStore.add(signed)
+        await saveEventToCache(signed)
       } catch (err) {
         console.error('Boost failed:', err)
         alert('Failed to publish Boost: ' + err)
       }
     } else if (actionType === 'share') {
       try {
-        const evs = eventStore.getByFilters({ ids: [videoId] })
-        const ev = evs[0]
+        const cached = await db.cachedEvents.get(videoId)
+        const ev = cached?.event
         let videoUrl = ''
         if (ev) {
           const parsed = parseVideoEvent(ev)
