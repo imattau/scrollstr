@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
 import { loadSettings } from '../../db/local-preferences'
@@ -49,7 +50,7 @@ interface VideoFeedItemProps {
   isActive: boolean
   isNearActive: boolean
   isMuted: boolean
-  onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'follow' | 'mute', videoId: string, videoKind?: number) => void
+  onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'mute', videoId: string, videoKind?: number) => void
 }
 
 function ActionPill({
@@ -86,6 +87,7 @@ function ActionPill({
 }
 
 const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick }) => {
+  const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
   const [showInfo, setShowInfo] = useState(false)
@@ -131,7 +133,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
       <div className="absolute right-4 top-[220px] z-20 flex flex-col items-center gap-[13px] md:right-[-1px] md:top-[260px]">
         <button
           type="button"
-          onClick={() => onActionClick('follow', video.id, video.kind)}
+          onClick={() => navigate(`/profile/${video.creator.pubkey}`)}
           className="flex size-[44px] overflow-hidden items-center justify-center rounded-full bg-[#60a5fa] text-[15px] font-bold text-white transition-transform duration-150 active:scale-95"
           aria-label="Creator"
         >

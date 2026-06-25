@@ -41,7 +41,7 @@ function AppContent() {
     }
 
     // List of actions requiring authentication
-    const requiresAuth = ['like', 'comment', 'boost', 'zap', 'follow'].includes(actionType)
+    const requiresAuth = ['like', 'comment', 'boost', 'zap'].includes(actionType)
 
     if (requiresAuth && !session) {
       console.log(`Action '${actionType}' requires login. Opening Login Sheet.`)
@@ -70,29 +70,6 @@ function AppContent() {
       } catch (err) {
         console.error('Boost failed:', err)
         alert('Failed to publish Boost: ' + err)
-      }
-    } else if (actionType === 'follow') {
-      if (!session) {
-        alert('Please log in to follow creators')
-        return
-      }
-      try {
-        const currentContactListEvent = eventStore.getByFilters({
-          kinds: [3],
-          authors: [session.pubkey],
-        })?.[0]
-
-        const { signed, action } = await publishFollow(
-          signEvent,
-          creatorPubkey || '',
-          currentContactListEvent || null
-        )
-
-        eventStore.add(signed)
-        alert(action === 'follow' ? 'Followed creator on Nostr!' : 'Unfollowed creator on Nostr!')
-      } catch (err: any) {
-        console.error('Follow action failed:', err)
-        alert('Failed to update follow list: ' + (err.message || err))
       }
     } else if (actionType === 'share') {
       try {

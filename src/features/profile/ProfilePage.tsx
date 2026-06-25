@@ -5,7 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
 import { getEventsQuery$, subscribeToRelays } from '../../nostr/pool'
 import { use$ } from 'applesauce-react/hooks'
-import { parseVideoEvent, publishFollow } from '../../nostr/events'
+import { parseVideoEvent, publishFollow, publishMuteList } from '../../nostr/events'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
@@ -193,6 +193,22 @@ export const ProfilePage: React.FC = () => {
     )
   }, [myContactListEvent])
 
+  // Retrieve logged-in user's mute list (kind:10000) to check if this creator is blocked
+  const myMuteListEvent = use$(
+    () => getEventsQuery$({ kinds: [10000], authors: session?.pubkey ? [session.pubkey] : [] }),
+    [session?.pubkey]
+  )?.[0]
+
+  const mutedPubkeys = useMemo<Set<string>>(() => {
+    if (!myMuteListEvent) return new Set<string>()
+    const pubkeys: string[] = myMuteListEvent.tags
+      .filter((t: any) => t[0] === 'p')
+      .map((t: any) => t[1])
+    return new Set(pubkeys)
+  }, [myMuteListEvent])
+
+  const isBlocked = targetPubkey ? mutedPubkeys.has(targetPubkey) : false
+
   // Subscribe to contact list updates on relays
   useEffect(() => {
     if (!targetPubkey) return
@@ -207,6 +223,31 @@ export const ProfilePage: React.FC = () => {
       sub()
     }
   }, [targetPubkey, relayUrls])
+
+  // Subscribe to video events for the target user
+  useEffect(() => {
+    if (!targetPubkey) return
+    console.log(`Subscribing to video events for pubkey: ${targetPubkey}`)
+
+    const sub = subscribeToRelays(relayUrls, {
+      kinds: VIDEO_KINDS,
+      authors: [targetPubkey],
+      limit: 50,
+    })
+
+    return () => sub()
+  }, [targetPubkey, relayUrls])
+
+  // Subscribe to the session user's mute list
+  useEffect(() => {
+    if (!session?.pubkey) return
+    const sub = subscribeToRelays(relayUrls, {
+      kinds: [10000],
+      authors: [session.pubkey],
+      limit: 1,
+    })
+    return () => sub()
+  }, [session?.pubkey, relayUrls])
 
   // Subscribe to kind:0 metadata for displayed follower/following pubkeys
   useEffect(() => {
@@ -249,6 +290,21 @@ export const ProfilePage: React.FC = () => {
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
       alert('Failed to update follow status: ' + (err.message || err))
+    }
+  }
+
+  const handleBlockToggle = async () => {
+    if (!session || !targetPubkey) return
+    try {
+      const newPubkeys = isBlocked
+        ? Array.from(mutedPubkeys).filter((pk) => pk !== targetPubkey)
+        : [...Array.from(mutedPubkeys), targetPubkey]
+      const { signed } = await publishMuteList(signEvent, newPubkeys, [])
+      eventStore.add(signed)
+      alert(isBlocked ? 'Unblocked creator!' : 'Blocked creator!')
+    } catch (err: any) {
+      console.error('Block toggle failed:', err)
+      alert('Failed to update block list: ' + (err.message || err))
     }
   }
 
@@ -361,14 +417,26 @@ export const ProfilePage: React.FC = () => {
             Edit profile settings
           </button>
         ) : (
-          <button
-            onClick={handleFollowToggle}
-            className={`h-[40px] w-full rounded-[12px] text-[13px] font-bold text-white transition-colors ${
-              isFollowing ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' : 'bg-[#8b5cf6] hover:bg-[#7c3aed]'
-            }`}
-          >
-            {isFollowing ? 'Unfollow Creator' : 'Follow Creator'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleFollowToggle}
+              className={`h-[40px] flex-1 rounded-[12px] text-[13px] font-bold text-white transition-colors ${
+                isFollowing ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' : 'bg-[#8b5cf6] hover:bg-[#7c3aed]'
+              }`}
+            >
+              {isFollowing ? 'Unfollow Creator' : 'Follow Creator'}
+            </button>
+            <button
+              onClick={handleBlockToggle}
+              className={`h-[40px] flex-1 rounded-[12px] text-[13px] font-bold transition-colors ${
+                isBlocked
+                  ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30'
+                  : 'bg-[#27272a] text-[#a1a1aa] hover:bg-red-600/20 hover:text-red-400'
+              }`}
+            >
+              {isBlocked ? 'Unblock' : 'Block'}
+            </button>
+          </div>
         )}
 
         {/* Tab Controls / List View */}

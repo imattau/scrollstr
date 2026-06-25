@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Home, Compass, PlusSquare, Bell, User, Settings, LogOut, Download } from 'lucide-react'
 import { useNostr } from '../../app/providers'
@@ -32,6 +32,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
     { path: '/profile/me', label: 'Profile', icon: User },
   ]
 
+  const [showFeedToggles, setShowFeedToggles] = useState(true)
+
   const isActive = (path: string) => {
     if (path === '/') {
       return pathname === '/'
@@ -43,7 +45,40 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
     return (
       <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
         <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327] relative pb-16">
-          {children}
+          {/* Top Feed Toggle Bar */}
+          <div
+            className={`absolute top-0 left-0 right-0 z-30 transition-all duration-300 ${
+              showFeedToggles ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
+            }`}
+          >
+            <div className="bg-gradient-to-b from-[#09090b]/90 via-[#09090b]/60 to-transparent pt-12 pb-4 px-4">
+              <div className="flex gap-1">
+                <Link
+                  to="/?feed=following"
+                  className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+                    feedType === 'following'
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                  }`}
+                >
+                  Following
+                </Link>
+                <Link
+                  to="/?feed=explore"
+                  className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
+                    feedType === 'explore'
+                      ? 'bg-purple-500 text-white'
+                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
+                  }`}
+                >
+                  Explore
+                </Link>
+              </div>
+            </div>
+          </div>
+          <div onClick={() => setShowFeedToggles(prev => !prev)}>
+            {children}
+          </div>
           {/* Mobile Navigation (Bottom) */}
           <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
             {mobileNavItems.map((item) => {
@@ -279,30 +314,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
 
       {/* Mobile Navigation (Bottom) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
-        {/* Feed Toggle Buttons */}
-        <div className="flex gap-1">
-          <Link
-            to="/?feed=following"
-            className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
-              feedType === 'following'
-                ? 'bg-purple-500 text-white'
-                : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
-            }`}
-          >
-            Following
-          </Link>
-          <Link
-            to="/?feed=explore"
-            className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
-              feedType === 'explore'
-                ? 'bg-purple-500 text-white'
-                : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
-            }`}
-          >
-            Explore
-          </Link>
-        </div>
-
         {/* Navigation Items */}
         {mobileNavItems.map((item) => {
           const Icon = item.icon

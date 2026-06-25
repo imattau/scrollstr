@@ -227,7 +227,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
                 </div>
               ) : null}
 
-              <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 md:px-8 md:pb-8">
+              <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 md:px-8 md:pb-8 min-h-0 h-0">
                 <OptionCard
                   title="Browser extension"
                   description="Use Alby, nos2x, or another NIP-07 signer in your browser."
