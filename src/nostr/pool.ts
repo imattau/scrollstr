@@ -147,7 +147,27 @@ MOCK_EVENTS.forEach((ev) => {
   saveEventToCache(ev as any).catch(() => {})
 })
 
-// ── Subscriptions (proxied to worker) ────────────────────────────────────
+// ── Subscription concurrency manager ────────────────────────────────────
+// Limits concurrent subscriptions to avoid "too many requests" from relays.
+
+const MAX_CONCURRENT_SUBS = 6
+let activeSubCount = 0
+const subQueue: Array<{
+  id: string
+  relays: string[]
+  filters: any[]
+  unsub: () => void
+}> = []
+
+function processQueue() {
+  while (subQueue.length > 0 && activeSubCount < MAX_CONCURRENT_SUBS) {
+    const item = subQueue.shift()!
+    activeSubCount++
+    worker.postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
+  }
+}
+
+// ── Subscriptions (proxied to worker with concurrency limit) ────────────
 
 let subIdCounter = 0
 
@@ -157,10 +177,26 @@ export function subscribeToRelays(
 ): () => void {
   const id = `sub_${++subIdCounter}`
   const filterList = Array.isArray(filters) ? filters : [filters]
-  worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
-  return () => {
+
+  function doUnsubscribe() {
+    const idx = subQueue.findIndex((item) => item.id === id)
+    if (idx !== -1) {
+      subQueue.splice(idx, 1)
+      return
+    }
     worker.postMessage({ type: 'unsubscribe', id })
+    activeSubCount--
+    processQueue()
   }
+
+  if (activeSubCount < MAX_CONCURRENT_SUBS) {
+    activeSubCount++
+    worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
+  } else {
+    subQueue.push({ id, relays, filters: filterList, unsub: doUnsubscribe })
+  }
+
+  return doUnsubscribe
 }
 
 // ── Publishing & queries (stay on main thread for nip46) ─────────────────

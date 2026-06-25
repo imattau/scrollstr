@@ -6,7 +6,7 @@ import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { maybeResumeBackfill } from '../../nostr/cacheBackfill'
+import { maybeResumeBackfill, maybeResumeProfileBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles } from 'lucide-react'
@@ -80,6 +80,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       void maybeResumeBackfill(relayUrls)
     }
   }, [relayUrls])
+
+  // Profile backfill: pre-fetch kind:0 metadata for followed users and
+  // known video creators so profile data is ready before components render.
+  useEffect(() => {
+    if (followingPubkeys.length > 0 && relayUrls.length > 0) {
+      void maybeResumeProfileBackfill(relayUrls, followingPubkeys)
+    }
+  }, [followingPubkeys, relayUrls])
 
   // 1. Fetch user's profile and relay list (kinds 0, 3, 10002) using bootstrap relays.
   // IMPORTANT: We intentionally do NOT include `relayUrls` in the deps here.
@@ -268,6 +276,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   }, [activeIndex, isFetchingOlder, videos.length, relayUrls])
 
   // Progressive comments & zaps subscription logic near viewport
+  const lastSubscribedVideoIdsRef = useRef<string[]>([])
   useEffect(() => {
     if (videos.length === 0) return
     const activeVideo = videos[activeIndex]
@@ -278,6 +287,17 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (nextVideo) {
       videoIdsToFetch.push(nextVideo.id)
     }
+
+    // Skip re-subscription if the video IDs haven't changed (avoids rapid
+    // subscribe/unsubscribe cycles on every scroll event).
+    const prev = lastSubscribedVideoIdsRef.current
+    if (
+      prev.length === videoIdsToFetch.length &&
+      prev.every((id, i) => id === videoIdsToFetch[i])
+    ) {
+      return
+    }
+    lastSubscribedVideoIdsRef.current = videoIdsToFetch
 
     const unsub = subscribeToRelays(relayUrls, { kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 

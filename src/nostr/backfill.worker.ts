@@ -6,11 +6,15 @@ type SubCloser = { close: (reason?: string) => void }
 const pool = new SimplePool()
 const subs = new Map<string, SubCloser>()
 let isBackfillRunning = false
+let isProfileBackfillRunning = false
 let activeRelays: string[] = []
 
 const BACKFILL_BATCH_SIZE = 100
 const BATCH_DELAY_MS = 800
 const MAX_BATCHES = 30
+
+const PROFILE_BATCH_SIZE = 50
+const PROFILE_BATCH_DELAY_MS = 300
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -25,6 +29,47 @@ async function fetchBatch(relayUrls: string[], until: number): Promise<any[]> {
   } catch (err) {
     console.warn('[Worker] Relay error during batch fetch:', err)
     return []
+  }
+}
+
+async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promise<any[]> {
+  try {
+    const events = await pool.querySync(relayUrls, {
+      kinds: [0],
+      authors: pubkeys,
+      limit: 1,
+    })
+    return events
+  } catch (err) {
+    console.warn('[Worker] Relay error during profile batch fetch:', err)
+    return []
+  }
+}
+
+async function handleStartProfileBackfill(relayUrls: string[], pubkeys: string[]) {
+  if (isProfileBackfillRunning) return
+  isProfileBackfillRunning = true
+
+  const effective: string[] =
+    relayUrls && relayUrls.length > 0 ? relayUrls : activeRelays
+
+  console.log(`[Worker] Starting profile backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
+
+  try {
+    for (let i = 0; i < pubkeys.length; i += PROFILE_BATCH_SIZE) {
+      const batch = pubkeys.slice(i, i + PROFILE_BATCH_SIZE)
+      const events = await fetchProfileBatch(effective, batch)
+      if (events.length > 0) {
+        self.postMessage({ type: 'backfillEvents', events })
+      }
+      await delay(PROFILE_BATCH_DELAY_MS)
+    }
+  } catch (err) {
+    console.error('[Worker] Unexpected error during profile backfill:', err)
+  } finally {
+    isProfileBackfillRunning = false
+    console.log(`[Worker] Profile backfill complete. Processed ${pubkeys.length} pubkeys.`)
+    self.postMessage({ type: 'profileBackfillComplete' })
   }
 }
 
@@ -122,6 +167,9 @@ self.onmessage = (e: MessageEvent) => {
   switch (msg.type) {
     case 'startBackfill':
       void handleStartBackfill(msg.relayUrls)
+      break
+    case 'startProfileBackfill':
+      void handleStartProfileBackfill(msg.relayUrls, msg.pubkeys)
       break
     case 'subscribe':
       handleSubscribe(msg.id, msg.relays, msg.filters)

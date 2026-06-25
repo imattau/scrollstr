@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { useUserRelayUrls } from './relays'
@@ -41,10 +41,41 @@ export const parseProfileContent = (profileEvent: any, pubkey: string): CreatorP
   }
 }
 
+// ── Batched profile subscription ───────────────────────────────────────
+// Instead of one subscription per useProfile instance, collect all
+// uncached pubkeys and subscribe once. Events flow through saveEventToCache
+// and useLiveQuery reactively updates each hook.
+
+const pendingPubkeys = new Set<string>()
+let batchTimer: ReturnType<typeof setTimeout> | null = null
+let batchUnsub: (() => void) | null = null
+
+function flushBatch(relayUrls: string[]) {
+  if (pendingPubkeys.size === 0) return
+
+  const pubkeys = Array.from(pendingPubkeys)
+  pendingPubkeys.clear()
+
+  if (batchUnsub) batchUnsub()
+  batchUnsub = subscribeToRelays(relayUrls, {
+    kinds: [0],
+    authors: pubkeys,
+    limit: 1,
+  })
+}
+
+function scheduleProfileFetch(pubkey: string, relayUrls: string[]) {
+  pendingPubkeys.add(pubkey)
+  if (batchTimer) clearTimeout(batchTimer)
+  batchTimer = setTimeout(() => flushBatch(relayUrls), 100)
+}
+
 // React hook to fetch creator profile reactively from Dexie cache
 export const useProfile = (pubkey: string): CreatorProfile => {
   const { session } = useNostr()
   const relayUrls = useUserRelayUrls(session?.pubkey)
+  const relayUrlsRef = useRef(relayUrls)
+  relayUrlsRef.current = relayUrls
 
   const cachedProfile = useLiveQuery(async () => {
     if (!pubkey) return null
@@ -53,11 +84,9 @@ export const useProfile = (pubkey: string): CreatorProfile => {
 
   useEffect(() => {
     if (!cachedProfile && pubkey) {
-      console.log(`Profile not cached in Dexie for ${pubkey}, fetching from relays...`)
-      const unsub = subscribeToRelays(relayUrls, { kinds: [0], authors: [pubkey], limit: 1 })
-      return unsub
+      scheduleProfileFetch(pubkey, relayUrlsRef.current)
     }
-  }, [pubkey, cachedProfile, relayUrls])
+  }, [pubkey, cachedProfile])
 
   if (cachedProfile) {
     return {
