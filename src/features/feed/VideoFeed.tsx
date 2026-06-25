@@ -345,6 +345,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const idx = videos.findIndex(v => v.id === initialVideoId)
     if (idx === -1) return
     deepLinkJumpedRef.current = true
+    isAtTopRef.current = false
+    anchorInsertOrderRef.current = videos[idx]?.insertOrder ?? 0
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
     listRef.current?.scrollToRow({ index: idx, align: 'auto', behavior: 'auto' })
