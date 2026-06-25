@@ -54,6 +54,7 @@ export interface VideoShape {
     watched?: boolean;
     skipped?: boolean;
     liked?: boolean;
+    boosted?: boolean;
     zapped?: boolean;
   };
 
@@ -73,6 +74,7 @@ export interface UserVideoStateRecord {
   watched?: boolean;
   skipped?: boolean;
   liked?: boolean;
+  boosted?: boolean;
   zapped?: boolean;
   updatedAt: number;
 }
@@ -176,6 +178,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       watched: cachedUserState.watched,
       skipped: cachedUserState.skipped,
       liked: cachedUserState.liked,
+      boosted: cachedUserState.boosted,
       zapped: cachedUserState.zapped
     } : existing?.userState
 
@@ -239,6 +242,7 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
     watched: state.watched ?? existing?.watched,
     skipped: state.skipped ?? existing?.skipped,
     liked: state.liked ?? existing?.liked,
+    boosted: state.boosted ?? existing?.boosted,
     zapped: state.zapped ?? existing?.zapped,
     updatedAt: Date.now()
   }
@@ -252,6 +256,7 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
         watched: updatedRec.watched,
         skipped: updatedRec.skipped,
         liked: updatedRec.liked,
+        boosted: updatedRec.boosted,
         zapped: updatedRec.zapped
       },
       updatedAt: Date.now()

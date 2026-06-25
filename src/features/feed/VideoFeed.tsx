@@ -164,7 +164,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         boostsCount: shape.repostCount || 0,
         zapsCount: shape.zapCount || 0,
         hasLiked: shape.userState?.liked || false,
-        hasBoosted: shape.userState?.skipped || false,
+        hasBoosted: shape.userState?.boosted || false,
         hasZapped: shape.userState?.zapped || false,
         music: 'Original Clip Audio',
 

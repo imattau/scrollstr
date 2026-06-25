@@ -205,6 +205,13 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
 
 export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, nextProps) => {
   return prevProps.video.id === nextProps.video.id &&
+    prevProps.video.likesCount === nextProps.video.likesCount &&
+    prevProps.video.commentsCount === nextProps.video.commentsCount &&
+    prevProps.video.boostsCount === nextProps.video.boostsCount &&
+    prevProps.video.zapsCount === nextProps.video.zapsCount &&
+    prevProps.video.hasLiked === nextProps.video.hasLiked &&
+    prevProps.video.hasBoosted === nextProps.video.hasBoosted &&
+    prevProps.video.hasZapped === nextProps.video.hasZapped &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.isNearActive === nextProps.isNearActive &&
     prevProps.isMuted === nextProps.isMuted

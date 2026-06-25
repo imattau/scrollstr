@@ -6,7 +6,7 @@ import { CommentsSheet } from '../features/comments/CommentsSheet'
 import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
-import { db, saveEventToCache } from '../nostr/cache'
+import { db, saveEventToCache, updateUserVideoState } from '../nostr/cache'
 
 function AppContent() {
   const { pool, signEvent, session } = useNostr()
@@ -60,6 +60,7 @@ function AppContent() {
       try {
         const signed = await publishLike(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         await saveEventToCache(signed)
+        await updateUserVideoState(videoId, { liked: true })
       } catch (err) {
         console.error('Like failed:', err)
         alert('Failed to publish Like: ' + err)
@@ -68,6 +69,7 @@ function AppContent() {
       try {
         const signed = await publishBoost(signEvent, videoId, creatorPubkey || '', videoKind ?? activeVideoKind ?? 22)
         await saveEventToCache(signed)
+        await updateUserVideoState(videoId, { boosted: true })
       } catch (err) {
         console.error('Boost failed:', err)
         alert('Failed to publish Boost: ' + err)
