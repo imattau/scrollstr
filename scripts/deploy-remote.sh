@@ -477,6 +477,11 @@ sudo_run rsync -a --delete "$STAGING_DIR"/ "$INSTALL_DIR"/
 sudo_run chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$INSTALL_DIR"
 remote_step_done
 
+remote_step_begin "install production dependencies"
+cd "$INSTALL_DIR"
+sudo -u "${SERVICE_USER}" npm ci --legacy-peer-deps --production
+remote_step_done
+
 write_managed_file() {
 	local target="$1"
 	local content="$2"
