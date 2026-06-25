@@ -141,7 +141,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
     <Drawer.Root open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 bg-black/85 backdrop-blur-sm" />
-        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 mx-auto flex h-full max-h-[85dvh] w-full max-w-[390px] flex-col overflow-hidden rounded-t-[28px] border border-[#2a2a31] bg-[#09090b] outline-none md:max-h-[calc(100vh-48px)] md:max-w-[1120px] md:rounded-[34px]">
+        <Drawer.Content className="fixed bottom-0 left-0 right-0 z-50 mx-auto flex h-full max-h-[92dvh] w-full max-w-[390px] flex-col overflow-hidden rounded-t-[28px] border border-[#2a2a31] bg-[#09090b] outline-none md:max-h-[calc(100vh-48px)] md:max-w-[1120px] md:rounded-[34px]">
           <div className="hidden md:block absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(168,85,247,0.18),transparent_32%),radial-gradient(circle_at_80%_0%,rgba(96,165,250,0.16),transparent_28%),linear-gradient(180deg,rgba(9,9,11,0.72),rgba(9,9,11,0.92))]" />
 
           <div className="relative flex h-full w-full flex-col overflow-hidden md:flex-row md:rounded-[34px]">
@@ -228,99 +228,105 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
               ) : null}
 
               <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 md:px-8 md:pb-8 min-h-0 h-0">
-                <OptionCard
-                  title="Browser extension"
-                  description="Use Alby, nos2x, or another NIP-07 signer in your browser."
-                  icon={<ShieldCheck className="h-5 w-5 text-[#f7f7f8]" />}
-                  onClick={handleNip07Login}
-                />
-
-                {hasPasskey ? (
+                <div className="order-3 md:order-1">
                   <OptionCard
-                    title="Unlock Passkey"
-                    description="Use your device passkey (TouchID/FaceID) to sign in."
-                    icon={<Key className="h-5 w-5 text-[#f5b942]" />}
-                    onClick={handlePasskeyLogin}
-                    subtle
+                    title="Browser extension"
+                    description="Use Alby, nos2x, or another NIP-07 signer in your browser."
+                    icon={<ShieldCheck className="h-5 w-5 text-[#f7f7f8]" />}
+                    onClick={handleNip07Login}
                   />
-                ) : (
+                </div>
+
+                <div className="order-1 md:order-2">
+                  {hasPasskey ? (
+                    <OptionCard
+                      title="Unlock Passkey"
+                      description="Use your device passkey (TouchID/FaceID) to sign in."
+                      icon={<Key className="h-5 w-5 text-[#f5b942]" />}
+                      onClick={handlePasskeyLogin}
+                      subtle
+                    />
+                  ) : (
+                    <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
+                      <div className="flex items-start gap-4 px-4 py-4">
+                        <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
+                          <Key className="h-5 w-5 text-[#f5b942]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-[15px] font-semibold text-[#f7f7f8]">Create Passkey</p>
+                            <span className="rounded-full border border-[#3b3b47] bg-[#222228] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#d4d4d8]">
+                              Recommended
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
+                            Create a new secure Nostr identity using a device passkey.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
+                            Use existing private key (Optional)
+                          </label>
+                          <input
+                            type="password"
+                            value={nsec}
+                            onChange={(e) => setNsec(e.target.value)}
+                            placeholder="nsec1..."
+                            className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#f5b942]/40"
+                          />
+                          <p className="text-[11px] leading-normal text-[#71717a]">
+                            Enter your existing nsec to secure it with a passkey. Leave empty to generate a brand new
+                            identity.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handlePasskeyLogin}
+                          className="w-full rounded-[14px] bg-[#f5b942] px-4 py-2.5 text-[13px] font-semibold text-[#09090b] transition-opacity hover:opacity-90"
+                        >
+                          Create Passkey
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="order-2 md:order-3">
                   <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
                     <div className="flex items-start gap-4 px-4 py-4">
                       <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
-                        <Key className="h-5 w-5 text-[#f5b942]" />
+                        <Eye className="h-5 w-5 text-[#f7f7f8]" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-[15px] font-semibold text-[#f7f7f8]">Create Passkey</p>
-                          <span className="rounded-full border border-[#3b3b47] bg-[#222228] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#d4d4d8]">
-                            Recommended
-                          </span>
-                        </div>
+                        <p className="text-[15px] font-semibold text-[#f7f7f8]">Remote signer</p>
                         <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
-                          Create a new secure Nostr identity using a device passkey.
+                          Connect a bunker or remote NIP-46 signer.
                         </p>
                       </div>
                     </div>
                     <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
                       <div className="space-y-2">
                         <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
-                          Use existing private key (Optional)
+                          Bunker address
                         </label>
                         <input
-                          type="password"
-                          value={nsec}
-                          onChange={(e) => setNsec(e.target.value)}
-                          placeholder="nsec1..."
-                          className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#f5b942]/40"
+                          type="text"
+                          value={nip46Address}
+                          onChange={(e) => setNip46Address(e.target.value)}
+                          placeholder="bunker://..."
+                          className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#a78bfa]/40"
                         />
-                        <p className="text-[11px] leading-normal text-[#71717a]">
-                          Enter your existing nsec to secure it with a passkey. Leave empty to generate a brand new
-                          identity.
-                        </p>
                       </div>
                       <button
                         type="button"
-                        onClick={handlePasskeyLogin}
-                        className="w-full rounded-[14px] bg-[#f5b942] px-4 py-2.5 text-[13px] font-semibold text-[#09090b] transition-opacity hover:opacity-90"
+                        onClick={handleNip46Login}
+                        className="w-full rounded-[14px] bg-[#a78bfa] px-4 py-2.5 text-[13px] font-semibold text-white transition-opacity hover:opacity-90"
                       >
-                        Create Passkey
+                        Connect
                       </button>
                     </div>
-                  </div>
-                )}
-
-                <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
-                  <div className="flex items-start gap-4 px-4 py-4">
-                    <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
-                      <Eye className="h-5 w-5 text-[#f7f7f8]" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-semibold text-[#f7f7f8]">Remote signer</p>
-                      <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
-                        Connect a bunker or remote NIP-46 signer.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
-                        Bunker address
-                      </label>
-                      <input
-                        type="text"
-                        value={nip46Address}
-                        onChange={(e) => setNip46Address(e.target.value)}
-                        placeholder="bunker://..."
-                        className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#a78bfa]/40"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleNip46Login}
-                      className="w-full rounded-[14px] bg-[#a78bfa] px-4 py-2.5 text-[13px] font-semibold text-white transition-opacity hover:opacity-90"
-                    >
-                      Connect
-                    </button>
                   </div>
                 </div>
 

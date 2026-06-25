@@ -85,4 +85,35 @@ body {
       transform: translateX(-50%) translateY(0) scale(1);
     }
   }
+
+  /* Indeterminate feed loading bar */
+  .feed-loading-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    height: 2px;
+    background: #27272a;
+    overflow: hidden;
+  }
+
+  .feed-loading-bar::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: #8b5cf6;
+    animation: feed-loading-slide 1.2s ease-in-out infinite;
+  }
+
+  @keyframes feed-loading-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(350%);
+    }
+  }
 }

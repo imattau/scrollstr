@@ -40,21 +40,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const deepLinkJumpedRef = useRef(false)
   const lastDeepLinkVideoIdRef = useRef<string | null>(null)
 
-  // Tracks the insertOrder at the viewport's top edge for position maintenance
-  // when scrolled down. When at the top (isAtTopRef), we stay at index 0 instead.
-  const anchorInsertOrderRef = useRef<number>(0)
-
-  // New-events counter: tracks how many new items appeared before the current position
-  const [newEventsCount, setNewEventsCount] = useState(0)
-  // Snapshot of video IDs as the user last saw them from index 0
-  const seenTopIdsRef = useRef<Set<string>>(new Set())
-  // Whether the user has scrolled past the top
-  const isAtTopRef = useRef(true)
   // Throttle scroll handler to once per frame
   const scrollRAFRef = useRef<number | null>(null)
   // Cache container height to avoid forced reflow from reading clientHeight during scroll
   const containerHeightRef = useRef(0)
-  const wasAtTopRef = useRef(false)
+
+  // New-events counter: tracks how many new items appeared before the current position
+  const [newEventsCount, setNewEventsCount] = useState(0)
+  // Snapshot of video IDs as the user last saw them from index 0
+  const topVideoIdsRef = useRef<Set<string>>(new Set())
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
   // Reactively query the user's kind:3 contact list from Dexie cache
@@ -73,6 +67,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
+
+  // Loading indicator for the feed subscription
+  const [isFeedLoading, setIsFeedLoading] = useState(true)
 
   // Sync pool default relays whenever the user's relay list resolves.
   // This ensures ALL subscriptions (not just those with explicit { relays }) use
@@ -151,15 +148,21 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Feed subscription: fetch recent videos from all relays into the cache.
   // Both explore and following views render from the same cache (filtered locally).
+  // Starts immediately with fallback relays; metadata loading happens independently.
   useEffect(() => {
-    if (!isMetadataLoaded) return
+    if (relayUrls.length === 0) return
     console.log('[VideoFeed] Fetching videos...')
+    setIsFeedLoading(true)
     const unsub = subscribeToRelays(relayUrls, {
       kinds: [21, 22, 34236],
       since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
     })
-    return unsub
-  }, [relayUrls, isMetadataLoaded])
+    const timer = setTimeout(() => setIsFeedLoading(false), 2000)
+    return () => {
+      unsub()
+      clearTimeout(timer)
+    }
+  }, [relayUrls])
 
   // Cache container height via ResizeObserver so scroll handlers don't force layout
   useEffect(() => {
@@ -278,23 +281,22 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
     // Maintain feed position across list changes. When at the top, stay at the
     // top so new content appears without jarring scroll adjustments. When scrolled
-    // down, use insertOrder (invariant when items are prepended) to keep the same
-    // video in view.
+    // down, use the current video ID to find the same video at its new position.
     if (videos.length > 0) {
-      if (isAtTopRef.current) {
+      if (activeIndexRef.current === 0) {
         if (activeIndex !== 0) {
           setActiveIndex(0)
         }
         currentVideoIdRef.current = videos[0]?.id ?? ''
         return
       }
-      const idx = videos.findIndex(v => (v.insertOrder ?? 0) <= anchorInsertOrderRef.current)
-      if (idx !== -1) {
-        if (idx !== activeIndex) {
+      if (currentVideoIdRef.current) {
+        const idx = videos.findIndex(v => v.id === currentVideoIdRef.current)
+        if (idx !== -1 && idx !== activeIndex) {
           setActiveIndex(idx)
           scrollContainerRef.current?.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
+          return
         }
-        return
       }
       currentVideoIdRef.current = videos[Math.min(activeIndex, videos.length - 1)]?.id ?? ''
     }
@@ -381,8 +383,6 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (idx === -1) return
     deepLinkJumpedRef.current = true
     lastDeepLinkVideoIdRef.current = initialVideoId
-    isAtTopRef.current = false
-    anchorInsertOrderRef.current = videos[idx]?.insertOrder ?? 0
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
     container.scrollTo({ top: idx * containerHeightRef.current, behavior: 'instant' })
@@ -405,19 +405,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (newIndex !== currentActiveIndex && newIndex >= 0 && newIndex < currentVideos.length) {
         setActiveIndex(newIndex)
         currentVideoIdRef.current = currentVideos[newIndex]?.id ?? ''
-        anchorInsertOrderRef.current = currentVideos[newIndex]?.insertOrder ?? 0
       }
 
-      // Track whether user is at top
-      isAtTopRef.current = newIndex === 0
       if (newIndex === 0) {
         setNewEventsCount(0)
-        if (!wasAtTopRef.current) {
-          seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
-          wasAtTopRef.current = true
-        }
-      } else {
-        wasAtTopRef.current = false
+        topVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
       }
     })
   }, [])
@@ -462,19 +454,19 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (videos.length === 0) return
 
     // Initialise seen IDs on first render
-    if (seenTopIdsRef.current.size === 0) {
-      seenTopIdsRef.current = new Set(videos.map(v => v.id))
+    if (topVideoIdsRef.current.size === 0) {
+      topVideoIdsRef.current = new Set(videos.map(v => v.id))
       return
     }
 
-    if (isAtTopRef.current) {
+    if (activeIndexRef.current === 0) {
       // Always keep seen set fresh when at top
-      seenTopIdsRef.current = new Set(videos.map(v => v.id))
+      topVideoIdsRef.current = new Set(videos.map(v => v.id))
       return
     }
 
     // Count videos that weren't in the set when user was last at the top
-    const unseen = videos.filter(v => !seenTopIdsRef.current.has(v.id)).length
+    const unseen = videos.filter(v => !topVideoIdsRef.current.has(v.id)).length
     if (unseen > 0) {
       setNewEventsCount(unseen)
     }
@@ -488,9 +480,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     container.scrollTo({ top: 0, behavior: 'smooth' })
     setActiveIndex(0)
     currentVideoIdRef.current = currentVideos[0]?.id ?? ''
-    isAtTopRef.current = true
     setNewEventsCount(0)
-    seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
+    topVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
   }, [])
 
   const handleScrollToBottom = useCallback(() => {
@@ -527,6 +518,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   return (
     <div className="w-full h-full relative overflow-hidden">
+      {isFeedLoading && <div className="feed-loading-bar" />}
       <div
         ref={scrollContainerRef}
         className="feed-container"
