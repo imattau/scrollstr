@@ -307,7 +307,6 @@ sync_app() {
 	run_local rsync -az --delete --no-owner --no-group -e "ssh -p ${SSH_PORT} -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=${SSH_CONTROL_PATH}" \
 		--exclude='.git' \
 		--exclude='.claude' \
-		--exclude='node_modules' \
 		--exclude='dist' \
 		--exclude='coverage' \
 		"${REPO_ROOT}/" "${SSH_TARGET}:${REMOTE_STAGE_DIR}/"
@@ -475,12 +474,6 @@ fi
 sudo_run install -d -m 0755 "$INSTALL_DIR"
 sudo_run rsync -a --delete "$STAGING_DIR"/ "$INSTALL_DIR"/
 sudo_run chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "$INSTALL_DIR"
-remote_step_done
-
-remote_step_begin "install production dependencies"
-cd "$INSTALL_DIR"
-sudo_run npm cache clean --force
-sudo -u "${SERVICE_USER}" npm ci --legacy-peer-deps --production
 remote_step_done
 
 write_managed_file() {
