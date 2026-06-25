@@ -124,7 +124,7 @@ export const PostWizard: React.FC = () => {
     return Array.from(new Set(servers))
   }, [blossomListEvent, nip96ListEvent])
 
-  const { register, handleSubmit, watch, getValues, formState: { errors } } = useForm<PostFormValues>({
+  const { register, handleSubmit, getValues, formState: { errors } } = useForm<PostFormValues>({
     resolver: zodResolver(postSchema),
     defaultValues: {
       title: 'Night walk in Melbourne',
@@ -133,11 +133,6 @@ export const PostWizard: React.FC = () => {
       altText: 'Wet city street reflecting lights at night',
     },
   })
-
-  const watchedTitle = watch('title')
-  const watchedDescription = watch('description')
-  const watchedHashtags = watch('hashtags')
-  const watchedAltText = watch('altText')
 
   const [step] = useState(2)
   const [videoFile, setVideoFile] = useState<File | null>(null)

@@ -26,16 +26,21 @@ const DEFAULT_SETTINGS: AppSettings = {
   nsfwBlur: true,
 }
 
+let cachedSettings: AppSettings | null = null
+let cacheTime = 0
+
 export const loadSettings = (): AppSettings => {
+  const now = Date.now()
+  if (cachedSettings && now - cacheTime < 100) return cachedSettings
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_SETTINGS
-    const parsed = JSON.parse(raw)
-    return { ...DEFAULT_SETTINGS, ...parsed }
+    cachedSettings = raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS
+    cacheTime = now
   } catch (err) {
     console.error('Failed to load settings:', err)
-    return DEFAULT_SETTINGS
+    cachedSettings = DEFAULT_SETTINGS
   }
+  return cachedSettings!
 }
 
 export const saveSettings = (settings: AppSettings): void => {

@@ -213,25 +213,23 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
 }
 
 export async function updateMediaStatus(url: string, status: MediaStatusRecord['status'], extra?: { size?: number; duration?: number }): Promise<void> {
-  const updateRec: MediaStatusRecord = {
+  await db.mediaStatus.put({
     url,
     status,
     size: extra?.size,
     duration: extra?.duration,
     updatedAt: Date.now()
-  }
-  await db.mediaStatus.put(updateRec)
+  })
 
-  const shapes = await db.videoShapes.where('videoUrl').equals(url).toArray()
-  for (const s of shapes) {
-    await db.videoShapes.put({
-      ...s,
-      mediaStatus: status,
-      size: extra?.size ?? s.size,
-      duration: extra?.duration ?? s.duration,
-      updatedAt: Date.now()
+  await db.videoShapes
+    .where('videoUrl')
+    .equals(url)
+    .modify((shape) => {
+      shape.mediaStatus = status
+      if (extra?.size !== undefined) shape.size = extra.size
+      if (extra?.duration !== undefined) shape.duration = extra.duration
+      shape.updatedAt = Date.now()
     })
-  }
 }
 
 export async function updateUserVideoState(id: string, state: Partial<Omit<UserVideoStateRecord, 'id' | 'updatedAt'>>): Promise<void> {
@@ -279,15 +277,11 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
     }
     await db.authorProfiles.put(profile)
 
-    const shapes = await db.videoShapes.where('pubkey').equals(event.pubkey).toArray()
-    for (const s of shapes) {
-      await db.videoShapes.put({
-        ...s,
-        authorName: profile.name,
-        authorPicture: profile.picture,
-        updatedAt: Date.now()
-      })
-    }
+    // Update video shapes in-place — avoids loading each shape into memory
+    await db.videoShapes
+      .where('pubkey')
+      .equals(event.pubkey)
+      .modify({ authorName: profile.name, authorPicture: profile.picture, updatedAt: Date.now() })
     return profile
   } catch (err) {
     console.error('[Cache] Failed to project profile event:', err)

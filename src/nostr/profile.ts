@@ -70,12 +70,22 @@ function scheduleProfileFetch(pubkey: string, relayUrls: string[]) {
   batchTimer = setTimeout(() => flushBatch(relayUrls), 100)
 }
 
+function cancelProfileFetch(pubkey: string) {
+  pendingPubkeys.delete(pubkey)
+  if (pendingPubkeys.size === 0 && batchTimer) {
+    clearTimeout(batchTimer)
+    batchTimer = null
+  }
+}
+
 // React hook to fetch creator profile reactively from Dexie cache
 export const useProfile = (pubkey: string): CreatorProfile => {
   const { session } = useNostr()
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const relayUrlsRef = useRef(relayUrls)
   relayUrlsRef.current = relayUrls
+  const pubkeyRef = useRef(pubkey)
+  pubkeyRef.current = pubkey
 
   const cachedProfile = useLiveQuery(async () => {
     if (!pubkey) return null
@@ -85,6 +95,9 @@ export const useProfile = (pubkey: string): CreatorProfile => {
   useEffect(() => {
     if (!cachedProfile && pubkey) {
       scheduleProfileFetch(pubkey, relayUrlsRef.current)
+    }
+    return () => {
+      cancelProfileFetch(pubkeyRef.current)
     }
   }, [pubkey, cachedProfile])
 

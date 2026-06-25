@@ -29,6 +29,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const feedType = searchParams.get('feed') || 'explore'
 
   const [activeIndex, setActiveIndex] = useState(0)
+  const activeIndexRef = useRef(activeIndex)
+  activeIndexRef.current = activeIndex
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const lastOlderFetchAtRef = useRef(0)
@@ -186,7 +188,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         list = list.filter((v: VideoItemData) => followingPubkeys.includes(v.creator.pubkey))
       }
 
-      list.sort(sortByInsertOrder)
+      list = [...list].sort(sortByInsertOrder)
 
       return list
     } catch (err) {
@@ -194,6 +196,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       return []
     }
   }, [filterTag, feedType, session, followingPubkeys]) || []
+
+  const videosRef = useRef(videos)
+  videosRef.current = videos
+
+  const feedKey = useMemo(
+    () => videos.map((v) => v.id).join(','),
+    [videos]
+  )
 
   // Guard ref: tracks the last known video ID order so downstream effects can
   // short-circuit when only metadata changed (preventing cascading re-renders
@@ -245,7 +255,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (activeIndex >= videos.length) {
       setActiveIndex(Math.max(0, videos.length - 1))
     }
-  }, [videos, activeIndex])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedKey, activeIndex])
 
   useEffect(() => {
     if (videos.length === 0) return
@@ -302,7 +313,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     const unsub = subscribeToRelays(relayUrls, { kinds: [7, 16, 9735, 1111], '#e': videoIdsToFetch })
 
     return unsub
-  }, [activeIndex, videos, relayUrls])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, feedKey, relayUrls])
 
   // Scroll to deep-linked video if present on load
   useEffect(() => {
@@ -326,28 +338,21 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     setActiveIndex(idx)
     currentVideoIdRef.current = initialVideoId ?? ''
     container.scrollTo({ top: idx * container.clientHeight, behavior: 'instant' })
-  }, [initialVideoId, videos])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialVideoId, feedKey])
 
-  // Track scroll position, snap, and run diagnostics
+  // Track scroll position, snap
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget
     const scrollOffset = container.scrollTop
     const containerHeight = container.clientHeight
     const newIndex = Math.round(scrollOffset / containerHeight)
-    if (newIndex !== activeIndex && newIndex >= 0 && newIndex < videos.length) {
+    const currentVideos = videosRef.current
+    const currentActiveIndex = activeIndexRef.current
+    if (newIndex !== currentActiveIndex && newIndex >= 0 && newIndex < currentVideos.length) {
       setActiveIndex(newIndex)
-      currentVideoIdRef.current = videos[newIndex]?.id ?? ''
-      anchorInsertOrderRef.current = videos[newIndex]?.insertOrder ?? 0
-
-      // Diagnostics log
-      void (async () => {
-        console.debug({
-          cachedShapes: await db.videoShapes.count(),
-          renderedFeedItems: videos.length,
-          activeVideoSources: document.querySelectorAll("video[src]").length,
-          mediaStatusCount: await db.mediaStatus.count()
-        })
-      })()
+      currentVideoIdRef.current = currentVideos[newIndex]?.id ?? ''
+      anchorInsertOrderRef.current = currentVideos[newIndex]?.insertOrder ?? 0
     }
 
     // Track whether user is at top
@@ -355,9 +360,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (newIndex === 0) {
       // User scrolled back to the top — reset counter and update seen IDs
       setNewEventsCount(0)
-      seenTopIdsRef.current = new Set(videos.map(v => v.id))
+      seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
     }
-  }, [activeIndex, videos])
+  }, [])
 
   // Keyboard navigation for desktop view — react-hotkeys-hook
   const scrollToIndex = useCallback((index: number) => {
@@ -391,7 +396,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       if (trackedId && video.id !== trackedId) return
       onVideoChange(video)
     }
-  }, [activeIndex, videos, onVideoChange])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, feedKey, onVideoChange])
 
   // Detect newly arrived videos when user is not at index 0
   useLayoutEffect(() => {
@@ -414,34 +420,37 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (unseen > 0) {
       setNewEventsCount(unseen)
     }
-  }, [videos])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedKey])
 
   const handleScrollToTop = useCallback(() => {
     const container = scrollContainerRef.current
+    const currentVideos = videosRef.current
     if (!container) return
     container.scrollTo({ top: 0, behavior: 'smooth' })
     setActiveIndex(0)
-    currentVideoIdRef.current = videos[0]?.id ?? ''
+    currentVideoIdRef.current = currentVideos[0]?.id ?? ''
     isAtTopRef.current = true
     setNewEventsCount(0)
-    seenTopIdsRef.current = new Set(videos.map(v => v.id))
-  }, [videos])
+    seenTopIdsRef.current = new Set(currentVideos.map(v => v.id))
+  }, [])
 
   const handleScrollToBottom = useCallback(() => {
-    const lastIndex = videos.length - 1
+    const currentVideos = videosRef.current
+    const lastIndex = currentVideos.length - 1
     if (lastIndex < 0) return
     const container = scrollContainerRef.current
     if (!container) return
     container.scrollTo({ top: lastIndex * container.clientHeight, behavior: 'smooth' })
     setActiveIndex(lastIndex)
-    currentVideoIdRef.current = videos[lastIndex]?.id ?? ''
-    oldestLoadedCreatedAtRef.current = videos[lastIndex]?.createdAt ?? null
-  }, [videos])
+    currentVideoIdRef.current = currentVideos[lastIndex]?.id ?? ''
+    oldestLoadedCreatedAtRef.current = currentVideos[lastIndex]?.createdAt ?? null
+  }, [])
 
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
-    const video = videos.find((v: VideoItemData) => v.id === videoId)
+    const video = videosRef.current.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
-  }, [videos, onActionTrigger])
+  }, [onActionTrigger])
 
   if (videos.length === 0) {
     return (

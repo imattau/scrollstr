@@ -56,9 +56,7 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
     if (!isOpen || !videoId) return
 
     setLoading(true)
-    console.log(`Subscribing to comments for event ${videoId}...`)
     const sub = subscribeToRelays(relayUrls, { kinds: [1111], '#e': [videoId] })
-    setLoading(false)
 
     const timer = setTimeout(() => setLoading(false), 2000)
 

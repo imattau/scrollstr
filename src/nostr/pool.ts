@@ -42,15 +42,24 @@ const worker = new Worker(
 
 export { worker as backfillWorker }
 
+const YIELD_MS = 5
+
+async function processBackfillEvents(events: any[]) {
+  for (const event of events) {
+    try {
+      await saveEventToCache(event)
+    } catch (err) {
+      console.warn(`[pool] Failed to cache event ${event.id}:`, err)
+    }
+    await new Promise((r) => setTimeout(r, YIELD_MS))
+  }
+}
+
 worker.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
     case 'backfillEvents': {
-      for (const event of (msg as any).events) {
-        saveEventToCache(event).catch((err) =>
-          console.warn(`[pool] Failed to cache event ${event.id}:`, err)
-        )
-      }
+      void processBackfillEvents((msg as any).events)
       break
     }
     case 'subscriptionEvent': {

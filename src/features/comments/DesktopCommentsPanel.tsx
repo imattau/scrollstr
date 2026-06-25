@@ -1,7 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events'
-import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -49,23 +48,8 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
     [video?.id]
   ) ?? EMPTY_COMMENTS
 
-  // Subscribe to real-time comments on relays
-  useEffect(() => {
-    if (!video?.id) return
-
-    setLoading(true)
-    console.log(`Subscribing to desktop comments for video ${video.id}...`)
-    const sub = subscribeToRelays(relayUrls, { kinds: [1111], '#e': [video.id] })
-    setLoading(false)
-
-    // Hide loader after a brief timeout if no events are returned
-    const timer = setTimeout(() => setLoading(false), 2000)
-
-    return () => {
-      sub()
-      clearTimeout(timer)
-    }
-  }, [video?.id, relayUrls])
+  // Comments arrive via VideoFeed's subscription (kind:1111 for the active
+  // video), so no separate subscription needed here.
 
   // Sort comments chronologically
   const sortedComments = useMemo(() => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
 import { LoginSheet } from '../features/auth/LoginSheet'
@@ -34,7 +34,7 @@ function AppContent() {
     }
   }, [session])
 
-  const handleActionTrigger = async (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => {
+  const handleActionTrigger = useCallback(async (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => {
     setActiveVideoId(videoId)
     setActiveVideoKind(videoKind ?? null)
     if (creatorPubkey) {
@@ -93,7 +93,7 @@ function AppContent() {
     } else {
       console.log(`Triggered guest action: ${actionType}`)
     }
-  }
+  }, [session, signEvent, activeVideoKind, isMuted])
 
   // Sync ref after commit so pending post-login actions use the latest closure.
   useEffect(() => {
