@@ -25,6 +25,16 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
   const [invoice, setInvoice] = useState('')
   const [error, setError] = useState('')
 
+  function extractLud16(eventData: any): string {
+    try {
+      const profileData = JSON.parse(eventData.content)
+      return profileData.lud16 || profileData.lud06 || ''
+    } catch (e) {
+      console.error(e)
+      return ''
+    }
+  }
+
   const handleSendZap = async () => {
     if (!session) {
       alert('Please connect your Nostr account to zap')
@@ -35,15 +45,18 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
     setInvoice('')
     setError('')
     try {
-      const cachedProfileEvent = await db.cachedEvents.where({ kind: 0, pubkey: creatorPubkey }).first()
-      const profileEvent = cachedProfileEvent?.event
       let lud16 = ''
-      if (profileEvent) {
-        try {
-          const profileData = JSON.parse(profileEvent.content)
-          lud16 = profileData.lud16 || profileData.lud06 || ''
-        } catch (e) {
-          console.error(e)
+
+      const cachedProfile = await db.authorProfiles.get(creatorPubkey)
+      if (cachedProfile?.nip05 && cachedProfile.nip05.includes('@')) {
+        const [_name, domain] = cachedProfile.nip05.split('@')
+        lud16 = `${_name}@${domain}`
+      }
+
+      if (!lud16) {
+        const cachedProfileEvent = await db.cachedEvents.where({ kind: 0, pubkey: creatorPubkey }).first()
+        if (cachedProfileEvent?.event) {
+          lud16 = extractLud16(cachedProfileEvent.event)
         }
       }
 
@@ -52,13 +65,8 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
         const events = await fetchFromRelays(relayUrls, { kinds: [0], authors: [creatorPubkey], limit: 1 })
         const fetchedProfile = events.find((e: any) => e.kind === 0 && e.pubkey === creatorPubkey) ?? null
         if (fetchedProfile) {
-          try {
-            await saveEventToCache(fetchedProfile)
-            const profileData = JSON.parse(fetchedProfile.content)
-            lud16 = profileData.lud16 || profileData.lud06 || ''
-          } catch (e) {
-            console.error(e)
-          }
+          await saveEventToCache(fetchedProfile)
+          lud16 = extractLud16(fetchedProfile)
         }
       }
 

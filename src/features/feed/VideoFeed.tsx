@@ -103,11 +103,28 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // in the store, but kind:10002 can't be in the store until we fetch it. We always
   // bootstrap from well-known relays (including purplepag.es which indexes relay lists)
   // using a backward req so we actually retrieve historical/stored events.
+  //
+  // Cache-first: check Dexie for existing metadata so returning users see content
+  // immediately without waiting for relay responses or the 1.5s timeout.
   useEffect(() => {
     if (!session?.pubkey) {
       setIsMetadataLoaded(true)
       return
     }
+
+    let cancelled = false
+
+    Promise.all([
+      db.cachedEvents.where({ kind: 0, pubkey: session.pubkey }).first(),
+      db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).first(),
+      db.cachedEvents.where({ kind: 10002, pubkey: session.pubkey }).first(),
+    ]).then(([kind0, kind3, kind10002]) => {
+      if (cancelled) return
+      if (kind0 && kind3 && kind10002) {
+        console.log(`[VideoFeed] User metadata found in cache, setting loaded immediately`)
+        setIsMetadataLoaded(true)
+      }
+    })
 
     const bootstrapRelays = [
       'wss://purplepag.es',
@@ -126,6 +143,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     }, 1500)
 
     return () => {
+      cancelled = true
       unsub()
       clearTimeout(timer)
     }

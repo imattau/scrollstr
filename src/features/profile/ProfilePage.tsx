@@ -267,18 +267,32 @@ export const ProfilePage: React.FC = () => {
     }
   }, [targetPubkey, relayUrls])
 
-  // Subscribe to video events for the target user
+  // Subscribe to video events for the target user — only if cache seems stale
   useEffect(() => {
     if (!targetPubkey) return
-    console.log(`Subscribing to video events for pubkey: ${targetPubkey}`)
+    let cancelled = false
 
-    const sub = subscribeToRelays(relayUrls, {
-      kinds: VIDEO_KINDS,
-      authors: [targetPubkey],
-      limit: 50,
+    db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => VIDEO_KINDS.includes(e.kind)).count().then((count) => {
+      if (cancelled) return
+      if (count >= 10) {
+        console.log(`[Profile] Skipping video sub for ${targetPubkey} — cache has ${count} events`)
+        return
+      }
+      console.log(`[Profile] Subscribing to video events for ${targetPubkey} (cache has ${count})`)
+
+      const sub = subscribeToRelays(relayUrls, {
+        kinds: VIDEO_KINDS,
+        authors: [targetPubkey],
+        limit: 50,
+      })
+      cleanup = sub
     })
 
-    return () => sub()
+    let cleanup: (() => void) | undefined
+    return () => {
+      cancelled = true
+      cleanup?.()
+    }
   }, [targetPubkey, relayUrls])
 
   // Subscribe to the session user's mute list
