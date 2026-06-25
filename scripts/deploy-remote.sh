@@ -437,7 +437,7 @@ trim() {
 managed_marker="# managed by scrollstr"
 proxy_mode_resolved="$PROXY_MODE"
 
-command -v python3 >/dev/null 2>&1 || die "python3 is required on the remote server"
+command -v node >/dev/null 2>&1 || die "node is required on the remote server"
 command -v systemctl >/dev/null 2>&1 || die "systemctl is required on the remote server"
 command -v ss >/dev/null 2>&1 || die "ss is required on the remote server"
 command -v curl >/dev/null 2>&1 || die "curl is required on the remote server"
@@ -503,7 +503,7 @@ Type=simple
 WorkingDirectory=${INSTALL_DIR}
 User=${SERVICE_USER}
 Group=${SERVICE_GROUP}
-ExecStart=/usr/bin/python3 ${INSTALL_DIR}/scripts/spa-http-server.py ${INSTALL_DIR}/dist --bind 127.0.0.1 --port ${PORT}
+ExecStart=${INSTALL_DIR}/node_modules/.bin/serve -l 127.0.0.1:${PORT} ${INSTALL_DIR}/dist
 Restart=always
 RestartSec=5
 
