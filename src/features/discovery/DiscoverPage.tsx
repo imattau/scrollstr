@@ -68,15 +68,35 @@ export const DiscoverPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
-  // Subscribe to video events from relays so the discover page stays fresh
+  // Check cache freshness once on mount; only subscribe to relays if the
+  // cache has fewer than 20 videos from the last hour — avoids redundant
+  // network requests on repeat visits (the auto-backfill already keeps the
+  // cache populated).
+  const [cacheSeemsStale, setCacheSeemsStale] = useState(false)
+
   useEffect(() => {
     if (!relayUrls.length) return
+    let current = true
+    db.videoShapes
+      .where('created_at')
+      .above(Math.floor(Date.now() / 1000) - 3600)
+      .count()
+      .then((count) => {
+        if (current && count < 20) setCacheSeemsStale(true)
+      })
+    return () => {
+      current = false
+    }
+  }, [relayUrls])
+
+  useEffect(() => {
+    if (!relayUrls.length || !cacheSeemsStale) return
     const unsub = subscribeToRelays(relayUrls, {
       kinds: VIDEO_KINDS,
       limit: 100,
     })
     return () => unsub()
-  }, [relayUrls])
+  }, [relayUrls, cacheSeemsStale])
 
   // Query video shapes from the Dexie cache (last 48 hours)
   const rawVideoShapes = useLiveQuery(
@@ -187,18 +207,35 @@ export const DiscoverPage: React.FC = () => {
     return compiled.length > 0 ? compiled : defaultCreators
   }, [recentVideos])
 
-  // Subscribe to kind:0 for displayed creators to refresh metadata
+  // Subscribe to kind:0 only for creators whose profiles aren't already cached
   useEffect(() => {
     const realCreators = creators
       .filter(c => !c.pubkey.startsWith('mock-'))
       .map(c => c.pubkey)
     if (!realCreators.length || !relayUrls.length) return
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [0],
-      authors: realCreators,
-      limit: 1,
-    })
-    return () => unsub()
+
+    const unsubRef: { current: (() => void) | undefined } = { current: undefined }
+    let current = true
+
+    db.authorProfiles
+      .where('pubkey')
+      .anyOf(realCreators)
+      .primaryKeys()
+      .then((cachedPubkeys) => {
+        if (!current) return
+        const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
+        if (uncached.length === 0) return
+        unsubRef.current = subscribeToRelays(relayUrls, {
+          kinds: [0],
+          authors: uncached,
+          limit: 1,
+        })
+      })
+
+    return () => {
+      current = false
+      unsubRef.current?.()
+    }
   }, [creators, relayUrls])
 
   // Get logged-in user's contact list to determine follow state
