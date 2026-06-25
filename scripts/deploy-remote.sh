@@ -479,6 +479,7 @@ remote_step_done
 
 remote_step_begin "install production dependencies"
 cd "$INSTALL_DIR"
+sudo_run npm cache clean --force
 sudo -u "${SERVICE_USER}" npm ci --legacy-peer-deps --production
 remote_step_done
 
