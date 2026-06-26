@@ -102,8 +102,16 @@ export const DiscoverPage: React.FC = () => {
     return () => unsub()
   }, [relayUrls, cacheSeemsStale, refreshKey])
 
-  // Query video shapes from the Dexie cache (last 48 hours)
+  // Query all video shapes from the full Dexie cache (no time limit)
   const rawVideoShapes = useLiveQuery(
+    () => db.videoShapes
+      .filter(shape => shape.mediaStatus !== 'failed')
+      .toArray(),
+    []
+  ) ?? EMPTY_VIDEOS
+
+  // Query recent video shapes (last 48 hours) — for trending creators
+  const rawRecentVideoShapes = useLiveQuery(
     () => db.videoShapes
       .where('created_at')
       .above(Math.floor(Date.now() / 1000) - 48 * 3600)
@@ -112,28 +120,30 @@ export const DiscoverPage: React.FC = () => {
     []
   ) ?? EMPTY_VIDEOS
 
-  // Map shapes to local format
+  const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
+    id: shape.id,
+    kind: 22,
+    createdAt: shape.created_at,
+    title: shape.title ?? '',
+    description: shape.summary ?? '',
+    url: shape.videoUrl,
+    poster: shape.thumbnailUrl,
+    creator: {
+      pubkey: shape.pubkey,
+      name: shape.authorName || shape.pubkey.slice(0, 8),
+      picture: shape.authorPicture
+    },
+    hashtags: shape.hashtags || [],
+    likesCount: shape.reactionCount || 0,
+    commentsCount: shape.replyCount || 0,
+    boostsCount: shape.repostCount || 0,
+    zapsCount: shape.zapCount || 0,
+    music: 'Original Clip Audio',
+  })
+
+  // Map shapes to local format (full cache — for search and topics)
   const videos = useMemo(() => {
-    return (rawVideoShapes as VideoShape[]).map((shape): VideoItemData => ({
-      id: shape.id,
-      kind: 22,
-      createdAt: shape.created_at,
-      title: shape.title ?? '',
-      description: shape.summary ?? '',
-      url: shape.videoUrl,
-      poster: shape.thumbnailUrl,
-      creator: {
-        pubkey: shape.pubkey,
-        name: shape.authorName || shape.pubkey.slice(0, 8),
-        picture: shape.authorPicture
-      },
-      hashtags: shape.hashtags || [],
-      likesCount: shape.reactionCount || 0,
-      commentsCount: shape.replyCount || 0,
-      boostsCount: shape.repostCount || 0,
-      zapsCount: shape.zapCount || 0,
-      music: 'Original Clip Audio',
-    }))
+    return (rawVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
   }, [rawVideoShapes])
 
   // Load author profiles into a lookup map for richer search
@@ -151,14 +161,15 @@ export const DiscoverPage: React.FC = () => {
 
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {
-    const sorted = [...videos].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    const mapped = (rawRecentVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
+    const sorted = mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return sorted.slice(0, 300)
-  }, [videos])
+  }, [rawRecentVideoShapes])
 
-  // Extract unique hashtags/topics dynamically from recent videos
+  // Extract unique hashtags/topics dynamically from all videos
   const topics = useMemo(() => {
     const counts: Record<string, number> = {}
-    recentVideos.forEach((v) => {
+    videos.forEach((v) => {
       v.hashtags?.forEach((tag) => {
         const normalized = tag.toLowerCase()
         counts[normalized] = (counts[normalized] || 0) + 1
@@ -185,7 +196,7 @@ export const DiscoverPage: React.FC = () => {
       })
 
     return compiled.length > 0 ? compiled : defaultTopics
-  }, [recentVideos])
+  }, [videos])
 
   // Extract active creators dynamically from recent videos
   const creators = useMemo(() => {
