@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="body" x1="200" y1="150" x2="320" y2="410" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E2CBA8"/>
+      <stop offset="1" stop-color="#C49E6C"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="240" y1="372" x2="256" y2="412" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0C892"/>
+      <stop offset="1" stop-color="#E2A55F"/>
+    </linearGradient>
+    <linearGradient id="l3" x1="274" y1="140" x2="442" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#863bff"/>
+      <stop offset="1" stop-color="#47bfff"/>
+    </linearGradient>
+    <linearGradient id="l4" x1="260" y1="116" x2="432" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7e14ff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#7e14ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Motion lines: trailing up/back from the dive (Line 1 closest -> Line 4 farthest) -->
+  <g fill="none" stroke-linecap="round" stroke-width="7">
+    <path d="M296 200 Q372 150 452 188" stroke="#863bff"/>
+    <path d="M286 168 Q366 120 448 156" stroke="#863bff" stroke-opacity="0.8"/>
+    <path d="M274 140 Q358 95 442 128" stroke="url(#l3)" stroke-opacity="0.6"/>
+    <path d="M260 116 Q348 72 432 104" stroke="url(#l4)"/>
+  </g>
+
+  <!-- Nostrich drawn nose-down, rotated 13deg => ~77deg headfirst dive -->
+  <g transform="rotate(13 256 256)" stroke="#09090b" stroke-width="3" stroke-linejoin="round">
+    <!-- legs trailing up/back -->
+    <g stroke="#B98E5C" stroke-width="6" stroke-linecap="round" fill="none">
+      <path d="M250 180 L242 110 M242 110 l-12 10 M242 110 l-2 16 M242 110 l12 8"/>
+      <path d="M266 182 L276 116 M276 116 l-12 8 M276 116 l4 16 M276 116 l13 6"/>
+    </g>
+    <!-- tail feathers -->
+    <path d="M256 168 L232 128 L256 120 L280 130 L272 168 Z" fill="#BE9866"/>
+    <!-- body -->
+    <path d="M256 158 C302 162 326 214 314 266 C306 304 282 320 256 320 C230 320 206 304 198 266 C186 214 210 162 256 158 Z" fill="url(#body)"/>
+    <!-- wing -->
+    <path d="M250 196 C214 200 196 232 206 270 C214 252 230 236 252 232 C244 220 244 206 250 196 Z" fill="#C8A06E"/>
+    <!-- neck -->
+    <path d="M242 308 C236 330 236 344 244 356 L270 356 C276 344 276 330 270 310 Z" fill="url(#body)"/>
+    <!-- head -->
+    <circle cx="256" cy="356" r="34" fill="url(#body)"/>
+    <!-- beak -->
+    <path d="M240 374 L256 412 L272 374 Z" fill="url(#beak)"/>
+    <!-- eye -->
+    <circle cx="242" cy="352" r="10" fill="#fff"/>
+    <circle cx="240" cy="354" r="5" fill="#09090b"/>
+    <circle cx="238" cy="351" r="1.8" fill="#fff" stroke="none"/>
+  </g>
+</svg>
