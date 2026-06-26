@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUserRelayUrls } from '../../nostr/relays'
 
 const EMPTY_VIDEOS: any[] = []
-const VIDEO_KINDS = [21, 22, 34236]
+const VIDEO_KINDS = [1, 21, 22, 34236]
 
 const TrendingCreatorRow: React.FC<{
   creator: { pubkey: string; name: string; subtitle: string; color: string }

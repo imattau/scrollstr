@@ -13,7 +13,7 @@ import { useUserRelayUrls } from '../../nostr/relays'
 
 const EMPTY_VIDEOS: any[] = []
 const EMPTY_EVENTS: any[] = []
-const VIDEO_KINDS = [21, 22, 34236]
+const VIDEO_KINDS = [1, 21, 22, 34236]
 
 const CreatorListItem: React.FC<{
   pubkey: string
@@ -110,7 +110,7 @@ export const ProfilePage: React.FC = () => {
   // Retrieve raw short-video events authored by target pubkey from Dexie cache
   const _rawVideoEvents = useLiveQuery(
     () => targetPubkey
-      ? db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => e.kind === 21 || e.kind === 22 || e.kind === 34236).toArray()
+      ? db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => VIDEO_KINDS.includes(e.kind)).toArray()
       : Promise.resolve([] as any[]),
     [targetPubkey]
   )

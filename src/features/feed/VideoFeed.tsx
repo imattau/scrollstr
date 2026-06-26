@@ -134,7 +134,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     console.log('[VideoFeed] Fetching videos...')
     setIsFeedLoading(true)
     const unsub = subscribeToRelays(relayUrls, {
-      kinds: [21, 22, 34236],
+      kinds: [1, 21, 22, 34236],
       since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
     })
     const timer = setTimeout(() => setIsFeedLoading(false), 2000)
@@ -267,7 +267,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
     console.log(`Loading older videos before ${oldestCreatedAt}...`)
     const unsub = subscribeToRelays(relayUrls, {
-      kinds: [21, 22, 34236],
+      kinds: [1, 21, 22, 34236],
       limit: PAGE_SIZE,
       until: oldestCreatedAt - 1,
     })

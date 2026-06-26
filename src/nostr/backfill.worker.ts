@@ -22,7 +22,7 @@ const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 async function fetchBatch(relayUrls: string[], until: number): Promise<any[]> {
   try {
     const events = await pool.querySync(relayUrls, {
-      kinds: [21, 22, 34236],
+      kinds: [1, 21, 22, 34236],
       limit: BACKFILL_BATCH_SIZE,
       until,
     })
@@ -50,7 +50,7 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
 async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], until: number): Promise<any[]> {
   try {
     const events = await pool.querySync(relayUrls, {
-      kinds: [21, 22, 34236],
+      kinds: [1, 21, 22, 34236],
       authors: pubkeys,
       limit: BACKFILL_BATCH_SIZE,
       until,

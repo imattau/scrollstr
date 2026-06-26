@@ -91,21 +91,29 @@ export interface CreatorProfileRecord {
   updatedAt: number
 }
 
+export interface KindOneRejectionRecord {
+  id: string
+  reason: string
+  checkedAt: number
+}
+
 class ScrollstrCacheDatabase extends Dexie {
   cachedEvents!: Table<CachedEvent, string>
   videoShapes!: Table<VideoShape, string>
   mediaStatus!: Table<MediaStatusRecord, string>
   userVideoState!: Table<UserVideoStateRecord, string>
   authorProfiles!: Table<CreatorProfileRecord, string>
+  kindOneRejections!: Table<KindOneRejectionRecord, string>
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(10).stores({
+    this.version(11).stores({
       cachedEvents: 'id, [kind+pubkey], kind, pubkey, created_at, *eTags, *pTags',
       videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder, *hashtags, mediaStatus',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
+      kindOneRejections: 'id, checkedAt',
     }).upgrade(async tx => {
       await tx.table('cachedEvents').toCollection().modify(event => {
         event.eTags = (event.event?.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
@@ -144,9 +152,26 @@ export async function pruneCache(): Promise<void> {
   await db.videoShapes.bulkDelete(oldestIds)
   await db.userVideoState.bulkDelete(oldestIds)
 
+  // Clean up kindOneRejections for pruned videos and old entries
+  await db.kindOneRejections.bulkDelete(oldestIds)
+  const oldRejectionThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
+  await db.kindOneRejections.where('checkedAt').below(oldRejectionThreshold).delete()
+
   if (videoUrls.length > 0) {
     await db.mediaStatus.where('url').anyOf(videoUrls).delete()
   }
+}
+
+const VIDEO_EXT_RE = /\.(mp4|webm|ogg|mov|avi|mkv|m3u8|ts|m4v)($|\?)/i
+
+export function extractVideoUrlFromContent(content: string): string | null {
+  const urlRe = /https?:\/\/[^\s<>"']+/g
+  const urls = content.match(urlRe)
+  if (!urls) return null
+  for (const url of urls) {
+    if (VIDEO_EXT_RE.test(url)) return url
+  }
+  return null
 }
 
 function parseImetaTag(imetaTag: string[]): Record<string, string> {
@@ -165,8 +190,46 @@ function parseImetaTag(imetaTag: string[]): Record<string, string> {
 
 export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | null> {
   try {
-    const isVideo = event.kind === 21 || event.kind === 22 || event.kind === 34236
+    const isVideo = event.kind === 1 || event.kind === 21 || event.kind === 22 || event.kind === 34236
     if (!isVideo) return null
+
+    // Kind-1: extract video URL from content text
+    if (event.kind === 1) {
+      const videoUrl = extractVideoUrlFromContent(event.content || '')
+      if (!videoUrl) return null
+
+      const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
+
+      const existing = await db.videoShapes.get(event.id)
+
+      const shape: VideoShape = {
+        id: event.id,
+        pubkey: event.pubkey,
+        created_at: event.created_at,
+        firstSeen: existing?.firstSeen ?? Date.now(),
+        insertOrder: existing?.insertOrder ?? nextInsertOrder(),
+        videoUrl,
+        thumbnailUrl: existing?.thumbnailUrl,
+        title: existing?.title ?? '',
+        summary: event.content || (existing?.summary ?? ''),
+        hashtags: hashtags.length > 0 ? hashtags : (existing?.hashtags ?? []),
+        mimeType: existing?.mimeType,
+        size: existing?.size,
+        duration: existing?.duration,
+        mediaStatus: existing?.mediaStatus ?? 'unknown',
+        contentWarning: existing?.contentWarning,
+        userState: existing?.userState,
+        reactionCount: existing?.reactionCount ?? 0,
+        repostCount: existing?.repostCount ?? 0,
+        replyCount: existing?.replyCount ?? 0,
+        zapCount: existing?.zapCount ?? 0,
+        zapTotalSats: existing?.zapTotalSats ?? 0,
+        updatedAt: Date.now()
+      }
+
+      await db.videoShapes.put(shape)
+      return shape
+    }
 
     const existing = await db.videoShapes.get(event.id)
 
@@ -340,10 +403,16 @@ export async function saveEventToCache(event: any): Promise<void> {
 
   const { id, kind, pubkey, created_at } = event
 
-  const isVideo = kind === 21 || kind === 22 || kind === 34236
+  const isVideo = kind === 1 || kind === 21 || kind === 22 || kind === 34236
   const isReactionOrComment = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
 
   try {
+    // Fast-path: skip kind-1 notes already examined and rejected
+    if (kind === 1) {
+      const rejected = await db.kindOneRejections.get(id)
+      if (rejected) return
+    }
+
     const alreadyCached = await db.cachedEvents.get(id)
     if (alreadyCached) return
 
@@ -353,7 +422,15 @@ export async function saveEventToCache(event: any): Promise<void> {
     await db.cachedEvents.put({ id, kind, pubkey, created_at, event, eTags, pTags })
 
     if (isVideo) {
-      await buildOrUpdateVideoShape(event)
+      const shape = await buildOrUpdateVideoShape(event)
+      // For kind-1, if no video detected, add to rejection table
+      if (kind === 1 && !shape) {
+        await db.kindOneRejections.put({
+          id,
+          reason: 'no_video_url',
+          checkedAt: Date.now()
+        })
+      }
     }
 
     if (++_saveCounter % PRUNE_INTERVAL === 0) {
@@ -402,13 +479,13 @@ async function incrementVideoCounts(videoId: string, reactionEvent: any): Promis
 }
 
 export async function getCacheVideoCount(): Promise<number> {
-  return db.cachedEvents.where('kind').anyOf([21, 22, 34236]).count()
+  return db.cachedEvents.where('kind').anyOf([1, 21, 22, 34236]).count()
 }
 
 export async function getCacheOldestVideoTimestamp(): Promise<number | null> {
   const oldest = await db.cachedEvents
     .where('kind')
-    .anyOf([21, 22, 34236])
+    .anyOf([1, 21, 22, 34236])
     .sortBy('created_at')
   if (oldest.length === 0) return null
   return oldest[0].created_at

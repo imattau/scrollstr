@@ -1,5 +1,6 @@
 import { VideoItemData, CreatorProfile } from '../../features/feed/VideoFeedItem'
 import { publishToRelays, activeRelays } from '../pool'
+import { extractVideoUrlFromContent } from '../cache'
 
 // ── Video ────────────────────────────────────────────────────────────────────
 
@@ -27,11 +28,22 @@ export const parseVideoEvent = (event: any): VideoItemData | null => {
 
     const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
 
-    const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
-    if (!imetaTag) return null
+    let url = ''
+    let poster: string | undefined
 
-    const imetaData = parseImetaTag(imetaTag)
-    const url = imetaData['url']
+    const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
+    if (imetaTag) {
+      const imetaData = parseImetaTag(imetaTag)
+      url = imetaData['url'] || ''
+      poster = imetaData['image']
+    }
+
+    // For kind-1 notes, extract video URL from content text
+    if (!url && event.kind === 1) {
+      const extracted = extractVideoUrlFromContent(event.content || '')
+      if (extracted) url = extracted
+    }
+
     if (!url) return null
 
     const creator: CreatorProfile = {
@@ -46,7 +58,7 @@ export const parseVideoEvent = (event: any): VideoItemData | null => {
       title,
       description: event.content || alt,
       url,
-      poster: imetaData['image'],
+      poster,
       creator,
       hashtags,
       likesCount: 0,
