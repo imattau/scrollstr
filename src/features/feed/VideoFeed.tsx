@@ -45,6 +45,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   const swiperRef = useRef<SwiperType | null>(null)
   const [newEventsCount, setNewEventsCount] = useState(0)
+  const [uiHidden, setUiHidden] = useState(false)
   const endVideoIdsRef = useRef<Set<string>>(new Set())
 
   // Reactively query the user's kind:3 contact list from Dexie cache
@@ -459,6 +460,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
               isNearActive={Math.abs(index - activeIndex) <= 2}
               isMuted={isMuted}
               onActionClick={handleActionClick}
+              uiHidden={uiHidden}
+              onUiHiddenChange={setUiHidden}
             />
           </SwiperSlide>
         ))}
@@ -510,6 +513,26 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
           title="Jump to newest"
         >
           <ChevronsDown className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Mobile jump buttons */}
+      <div className={`md:hidden flex flex-col gap-2 absolute left-3 top-1/2 -translate-y-1/2 z-40 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
+        <button
+          onClick={() => swiperRef.current?.slideTo(0, 300)}
+          disabled={activeIndex === 0}
+          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Jump to oldest"
+        >
+          <ChevronsUp className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => swiperRef.current?.slideTo(videos.length - 1, 300)}
+          disabled={activeIndex === videos.length - 1 || videos.length === 0}
+          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Jump to newest"
+        >
+          <ChevronsDown className="w-4 h-4" />
         </button>
       </div>
     </div>

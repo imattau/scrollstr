@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
@@ -51,6 +51,8 @@ interface VideoFeedItemProps {
   isNearActive: boolean
   isMuted: boolean
   onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'mute', videoId: string, videoKind?: number) => void
+  uiHidden: boolean
+  onUiHiddenChange: (hidden: boolean) => void
 }
 
 function ActionPill({
@@ -86,7 +88,7 @@ function ActionPill({
   )
 }
 
-const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange }) => {
   const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = `@${profile.displayName || profile.name}`
@@ -95,12 +97,43 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
   const settings = loadSettings()
   const isNsfwBlurred = settings.nsfwBlur && !!video.contentWarning && !nsfwRevealed
 
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isLongPress = useRef(false)
+
+  const handleTouchStart = useCallback(() => {
+    isLongPress.current = false
+    longPressTimer.current = setTimeout(() => {
+      isLongPress.current = true
+      onUiHiddenChange(true)
+    }, 400)
+  }, [onUiHiddenChange])
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+    if (!isLongPress.current && uiHidden) {
+      onUiHiddenChange(false)
+      setShowInfo(true)
+    }
+  }, [uiHidden, onUiHiddenChange])
+
+  const handleTouchMove = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current)
+      longPressTimer.current = null
+    }
+  }, [])
+
   return (
     <article
       className="feed-item relative h-full w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]"
       onMouseEnter={() => setShowInfo(true)}
       onMouseLeave={() => setShowInfo(false)}
-      onTouchStart={() => setShowInfo(!showInfo)}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchMove={handleTouchMove}
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%),linear-gradient(180deg,#1b1327_0%,#1b1327_66%,#09090b_100%)]" />
 
@@ -128,9 +161,9 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
         </button>
       )}
 
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#09090b]/18" />
+      <div className={`absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#09090b]/18 transition-opacity duration-300 ${uiHidden ? 'opacity-0' : ''}`} />
 
-      <div className="absolute right-4 top-[220px] z-20 flex flex-col items-center gap-[13px] md:right-[-1px] md:top-[260px]">
+      <div className={`absolute right-4 top-[220px] z-20 flex flex-col items-center gap-[13px] md:right-[-1px] md:top-[260px] transition-all duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
         <button
           type="button"
           onClick={() => navigate(`/profile/${video.creator.pubkey}`)}
@@ -179,7 +212,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
         />
       </div>
 
-      <div className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-[#09090b]/90 via-[#09090b]/60 to-transparent transition-all duration-300 ${showInfo ? 'h-[230px] md:h-[120px]' : 'h-0 overflow-hidden'}`}>
+      <div className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-[#09090b]/90 via-[#09090b]/60 to-transparent transition-all duration-300 ${showInfo && !uiHidden ? 'h-[230px] md:h-[120px]' : 'h-0 overflow-hidden'}`}>
         <div className={`absolute left-4 w-[278px] max-w-[calc(100%-96px)] space-y-[6px] leading-none md:left-[18px] md:w-[320px] transition-all duration-300 ${showInfo ? 'bottom-[16px] opacity-100' : 'bottom-[-10px] opacity-0'}`}>
           <p className="text-[15px] font-semibold text-[#f7f7f8]">
             {creatorLabel} {video.creator.isVerified ? '✓' : ''}
