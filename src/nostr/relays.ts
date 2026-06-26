@@ -44,7 +44,7 @@ export const useUserRelayUrls = (pubkey?: string | null): string[] => {
     [pubkey ?? '']
   ) ?? []
 
-  const relayListEvent = relayListEvents[relayListEvents.length - 1]
+  const relayListEvent = relayListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]
 
   const rawTagsKey = relayListEvent?.event?.tags ? JSON.stringify(relayListEvent.event.tags) : ''
 

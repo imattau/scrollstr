@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import * as Switch from '@radix-ui/react-switch'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
 import { loadSettings, saveSettings } from '../../db/local-preferences'
+import { forceRestartBackfill } from '../../nostr/cacheBackfill'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
 
@@ -55,10 +56,10 @@ export const SettingsPage: React.FC = () => {
     [userPubkey]
   ) ?? []
 
-  const relayListEvent = relayListEvents[relayListEvents.length - 1]?.event
-  const blossomListEvent = blossomListEvents[blossomListEvents.length - 1]?.event
-  const nip96ListEvent = nip96ListEvents[nip96ListEvents.length - 1]?.event
-  const muteListEvent = muteListEvents[muteListEvents.length - 1]?.event
+  const relayListEvent = relayListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const blossomListEvent = blossomListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const nip96ListEvent = nip96ListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const muteListEvent = muteListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   // Subscribe to real-time events on mount if logged in
   useEffect(() => {
@@ -156,6 +157,9 @@ export const SettingsPage: React.FC = () => {
     try {
       const ev = await publishRelayList(signEvent, localRelays)
       await saveEventToCache(ev)
+      const newRelayUrls = localRelays.map((r) => r.url)
+      setActiveRelays(newRelayUrls)
+      forceRestartBackfill(newRelayUrls)
       alert('Relay list published to relays!')
     } catch (e) {
       console.error(e)

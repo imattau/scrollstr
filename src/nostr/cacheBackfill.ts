@@ -43,6 +43,15 @@ export function maybeResumeBackfill(relayUrls: string[]): void {
 }
 
 /**
+ * Force-restarts backfill even if one is already running.
+ * Resets the running guard and starts a fresh pass with the given relays.
+ */
+export function forceRestartBackfill(relayUrls: string[]): void {
+  isBackfillRunning = false
+  startCacheBackfill(relayUrls)
+}
+
+/**
  * Collects uncached profile pubkeys and starts a profile backfill in the worker.
  * Fetches kind:0 events for pubkeys from video creators and followed users.
  */
