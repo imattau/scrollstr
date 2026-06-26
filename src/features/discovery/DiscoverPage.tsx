@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react'
-import { Search } from 'lucide-react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { subscribeToRelays } from '../../nostr/pool'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
@@ -18,9 +18,10 @@ const TrendingCreatorRow: React.FC<{
   isFollowing: boolean
   session: any
   onFollow: (pubkey: string) => void
-}> = ({ creator, isFollowing, session, onFollow }) => {
+  refreshKey?: number
+}> = ({ creator, isFollowing, session, onFollow, refreshKey }) => {
   const navigate = useNavigate()
-  const profile = useProfile(creator.pubkey)
+  const profile = useProfile(creator.pubkey, refreshKey)
   const displayName = profile.displayName || profile.name || creator.name
   const avatarInitial = displayName.slice(0, 1).toUpperCase() || 'N'
 
@@ -66,6 +67,9 @@ export const DiscoverPage: React.FC = () => {
   const { session, pool, signEvent } = useNostr()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
   // Check cache freshness once on mount; only subscribe to relays if the
@@ -87,7 +91,7 @@ export const DiscoverPage: React.FC = () => {
     return () => {
       current = false
     }
-  }, [relayUrls])
+  }, [relayUrls, refreshKey])
 
   useEffect(() => {
     if (!relayUrls.length || !cacheSeemsStale) return
@@ -96,7 +100,7 @@ export const DiscoverPage: React.FC = () => {
       limit: 100,
     })
     return () => unsub()
-  }, [relayUrls, cacheSeemsStale])
+  }, [relayUrls, cacheSeemsStale, refreshKey])
 
   // Query video shapes from the Dexie cache (last 48 hours)
   const rawVideoShapes = useLiveQuery(
@@ -258,7 +262,7 @@ export const DiscoverPage: React.FC = () => {
       : [],
     [session?.pubkey]
   ) ?? []
-  const myContactListEvent = myContactListEvents[myContactListEvents.length - 1] as any
+  const myContactListEvent = (myContactListEvents as any[]).toSorted((a: any, b: any) => b.created_at - a.created_at)[0]
 
   const isFollowingPubkeys = useMemo(() => {
     if (!myContactListEvent?.event) return new Set<string>()
@@ -308,6 +312,19 @@ export const DiscoverPage: React.FC = () => {
     <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
       <div className="flex h-[56px] items-center justify-between">
         <h2 className="text-[18px] font-bold">Discover</h2>
+        <button
+          onClick={() => {
+            setRefreshKey(k => k + 1)
+            setCacheSeemsStale(true)
+            setIsRefreshing(true)
+            clearTimeout(refreshTimerRef.current)
+            refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
+          }}
+          className="text-neutral-400 hover:text-white p-1 transition-colors"
+          title="Refresh discover feed"
+        >
+          <RotateCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
       <div className="flex flex-1 flex-col gap-[18px]">
@@ -398,6 +415,7 @@ export const DiscoverPage: React.FC = () => {
                     isFollowing={isFollowingPubkeys.has(creator.pubkey)}
                     session={session}
                     onFollow={handleFollow}
+                    refreshKey={refreshKey}
                   />
                 ))}
               </div>
