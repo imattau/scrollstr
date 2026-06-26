@@ -23,6 +23,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
   const [isLandscape, setIsLandscape] = useState(false)
   const [isHovering, setIsHovering] = useState(false)
   const [isPaused, setIsPaused] = useState(true)
+  const [isSourceLoading, setIsSourceLoading] = useState(true)
 
   // Detect if source is HLS (.m3u8)
   useEffect(() => {
@@ -110,6 +111,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
         }
       })
 
+    setIsSourceLoading(true)
+
     // Load source immediately, in parallel with the HEAD request
     if (isHls) {
       if (Hls.isSupported()) {
@@ -128,11 +131,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
 
     // Listen to metadata load
     const handleLoadedMetadata = async () => {
+      setIsSourceLoading(false)
       setIsLandscape(video.videoWidth > video.videoHeight)
       await updateMediaStatus(url, 'available', { duration: video.duration })
     }
 
     const handleLoadError = async () => {
+      setIsSourceLoading(false)
       console.warn(`Failed to load video source: ${url}`)
       await updateMediaStatus(url, 'failed')
     }
@@ -263,6 +268,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
           onPointerUp={handlePressEnd}
           onPointerLeave={handlePressEnd}
         />
+        {isSourceLoading && isNearActive && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/30">
+            <div className="size-9 animate-spin rounded-full border-2 border-[#27272a] border-t-[#8b5cf6]" />
+          </div>
+        )}
         {isPaused && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2">
             <div

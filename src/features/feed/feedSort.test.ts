@@ -17,14 +17,14 @@ function makeVideo(overrides: Partial<VideoItemData> & { id: string }): VideoIte
 const LOCAL_PREVIEW_ID = 'deadbeef00000000000000000000000000000000000000000000000000000000001'
 
 describe('sortByInsertOrder', () => {
-  it('sorts by insertOrder descending', () => {
+  it('sorts by insertOrder ascending', () => {
     const videos = [
       makeVideo({ id: 'a', insertOrder: 100 }),
       makeVideo({ id: 'b', insertOrder: 300 }),
       makeVideo({ id: 'c', insertOrder: 200 }),
     ]
     videos.sort(sortByInsertOrder)
-    expect(videos.map(v => v.id)).toEqual(['b', 'c', 'a'])
+    expect(videos.map(v => v.id)).toEqual(['a', 'c', 'b'])
   })
 
   it('puts LOCAL_PREVIEW_ID first regardless of insertOrder', () => {
@@ -43,7 +43,7 @@ describe('sortByInsertOrder', () => {
       makeVideo({ id: 'b', insertOrder: 100 }),
     ]
     videos.sort(sortByInsertOrder)
-    expect(videos.map(v => v.id)).toEqual(['b', 'a'])
+    expect(videos.map(v => v.id)).toEqual(['a', 'b'])
   })
 
   it('preserves relative order when insertOrder is equal (stable sort)', () => {

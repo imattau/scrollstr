@@ -219,6 +219,30 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
 
+  const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
+
+  // Restore saved feed position from sessionStorage
+  const savedFeedState = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem('scrollstr-feed-state')
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const swiperInitialSlide = useMemo(() => {
+    if (initialVideoId) {
+      const idx = videos.findIndex(v => v.id === initialVideoId)
+      return idx >= 0 ? idx : 0
+    }
+    if (savedFeedState?.videoId) {
+      const idx = videos.findIndex(v => v.id === savedFeedState.videoId)
+      if (idx >= 0) return idx
+    }
+    return 0
+  }, [initialVideoId, videos, savedFeedState])
+
   // Feed identity string for effect dependencies (only changes when IDs/order changes)
   const feedKey = useMemo(
     () => videos.map((v) => v.id).join(','),
@@ -283,6 +307,17 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, feedKey, relayUrls])
 
+  // Save feed position to sessionStorage on slide change (skip when deep link is active)
+  const currentVideoId = videos[activeIndex]?.id
+  useEffect(() => {
+    if (!currentVideoId || initialVideoId) return
+    sessionStorage.setItem('scrollstr-feed-state', JSON.stringify({
+      videoId: currentVideoId,
+      feedType,
+      filterTag,
+    }))
+  }, [currentVideoId, feedType, filterTag, initialVideoId])
+
   // Scroll to deep-linked video on load
   useEffect(() => {
     if (!initialVideoId || videos.length === 0 || !swiperRef.current) return
@@ -291,6 +326,19 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     swiperRef.current.slideTo(idx, 0)
     setActiveIndex(idx)
   }, [initialVideoId, videos.length])
+
+  // Restore saved feed position on load (when no deep link)
+  useEffect(() => {
+    if (initialVideoId || videos.length === 0 || !swiperRef.current) return
+    const saved = savedFeedState
+    if (!saved?.videoId) return
+    if (saved.feedType !== feedType) return
+    if (saved.filterTag !== filterTag) return
+    const idx = videosRef.current.findIndex(v => v.id === saved.videoId)
+    if (idx < 0) return
+    swiperRef.current.slideTo(idx, 0)
+    setActiveIndex(idx)
+  }, [videos.length, savedFeedState, initialVideoId, feedType, filterTag])
 
   // Propagate active video to parent
   const handleSlideChange = useCallback((swiper: SwiperType) => {
@@ -357,6 +405,17 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     )
   }
 
+  if (deeplinkPending) {
+    return (
+      <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] md:h-full">
+        <div className="flex flex-col items-center gap-3">
+          <div className="size-8 animate-spin rounded-full border-2 border-[#27272a] border-t-[#8b5cf6]" />
+          <p className="text-[14px] text-[#a1a1aa]">Finding video...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full h-full relative overflow-hidden">
       {isFeedLoading && <div className="feed-loading-bar" />}
@@ -368,6 +427,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
         keyboard={{ enabled: true, onlyInViewport: false }}
         mousewheel
         speed={400}
+        initialSlide={swiperInitialSlide}
         onSwiper={(s) => { swiperRef.current = s }}
         onSlideChange={handleSlideChange}
         observer
