@@ -6,7 +6,7 @@ import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
-import { loadSettings, saveSettings } from '../../db/local-preferences'
+import { loadSettings, saveSettings, loadWalletString, saveWalletString } from '../../db/local-preferences'
 import { forceRestartBackfill } from '../../nostr/cacheBackfill'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
@@ -74,8 +74,8 @@ export const SettingsPage: React.FC = () => {
   // Load wallet string and synchronize local states when store events update
   useEffect(() => {
     const s = loadSettings()
-    setLocalWalletString(s.walletString || '')
     setLocalNsfwBlur(s.nsfwBlur)
+    loadWalletString().then(setLocalWalletString)
   }, [activeSubView])
 
   useEffect(() => {
@@ -272,10 +272,8 @@ export const SettingsPage: React.FC = () => {
   }
 
   // Handlers for Wallet NWC Connection
-  const handleSaveWallet = () => {
-    const s = loadSettings()
-    s.walletString = localWalletString.trim()
-    saveSettings(s)
+  const handleSaveWallet = async () => {
+    await saveWalletString(localWalletString.trim())
     alert('Wallet NWC connection settings updated!')
     setActiveSubView('main')
   }

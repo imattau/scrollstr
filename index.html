@@ -5,11 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nostr Clips</title>
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline';
+      connect-src 'self' wss:* https:;
+      media-src 'self' https:;
+      img-src 'self' https: data:;
+      style-src 'self' 'unsafe-inline';
+      font-src 'self' data:;
+      frame-src 'none';
+      object-src 'none';
+      base-uri 'self';
+      form-action 'none';
+    ">
     <script>
       window.addEventListener('beforeinstallprompt', (e) => {
         e.preventDefault();
         window.deferredInstallPrompt = e;
-        // Dispatch custom event to notify React if it's already mounted
         window.dispatchEvent(new CustomEvent('pwa-installable', { detail: e }));
       });
     </script>

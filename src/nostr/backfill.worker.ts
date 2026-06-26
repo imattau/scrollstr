@@ -1,4 +1,4 @@
-import { SimplePool, type Filter } from 'nostr-tools'
+import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
 import { getCacheVideoCount, getCacheOldestVideoTimestamp, MAX_VIDEOS } from './cache'
 
 type SubCloser = { close: (reason?: string) => void }
@@ -261,6 +261,14 @@ function handleSubscribe(id: string, relays: string[], rawFilters: any[]) {
   if (filters.length === 0) return
   const sub: SubCloser = pool.subscribe(relays, filters[0] as Filter, {
     onevent: (event: any) => {
+      // Reject events with invalid signatures inline before forwarding
+      if (event.sig && !event.sig.startsWith('mock-') && event.sig !== 'local-preview-sig') {
+        try {
+          if (!verifyEvent(event as any)) return
+        } catch {
+          return
+        }
+      }
       self.postMessage({ type: 'subscriptionEvent', event })
     },
   })

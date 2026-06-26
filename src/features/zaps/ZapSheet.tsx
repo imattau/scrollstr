@@ -6,6 +6,20 @@ import { db, saveEventToCache } from '../../nostr/cache'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 
+// Block requests to private/reserved IP ranges and internal hostnames
+const PRIVATE_IP_RE = /^(?:127\.|10\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.0\.0\.0|::1|fe80::)/
+
+function isPrivateHost(host: string): boolean {
+  // Strip port if present
+  const hostname = host.split(':')[0].toLowerCase()
+  // Check for internal TLDs
+  if (hostname.endsWith('.local') || hostname.endsWith('.internal') || hostname === 'localhost') return true
+  // If it's an IP literal, check for private ranges
+  const ipMatch = hostname.match(/^(\d+\.\d+\.\d+\.\d+)$/)
+  if (ipMatch && PRIVATE_IP_RE.test(ipMatch[1])) return true
+  return false
+}
+
 interface ZapSheetProps {
   isOpen: boolean
   videoId: string
@@ -77,6 +91,11 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
       const [username, domain] = lud16.split('@')
       if (!username || !domain) {
         throw new Error('Invalid Lightning Address format: ' + lud16)
+      }
+
+      // SSRF protection: reject private/internal hostnames
+      if (isPrivateHost(domain)) {
+        throw new Error('Lightning address points to a private or internal host — rejected')
       }
 
       const lnurlpUrl = `https://${domain}/.well-known/lnurlp/${username}`

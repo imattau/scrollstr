@@ -82,6 +82,32 @@ export const publishVideoEvent = async (
   description: string,
   hashtags: string[]
 ): Promise<any> => {
+  // Validate required fields
+  if (!videoUrl) throw new Error('Video URL is required')
+  try {
+    const urlParsed = new URL(videoUrl)
+    if (urlParsed.protocol !== 'http:' && urlParsed.protocol !== 'https:') {
+      throw new Error('Video URL must use http or https protocol')
+    }
+  } catch (err: any) {
+    throw new Error('Invalid video URL', { cause: err })
+  }
+
+  if (!videoHash || !/^[0-9a-f]{64}$/i.test(videoHash)) {
+    throw new Error('videoHash must be a 64-character hex string (SHA-256)')
+  }
+
+  if (posterUrl) {
+    try {
+      const posterParsed = new URL(posterUrl)
+      if (posterParsed.protocol !== 'http:' && posterParsed.protocol !== 'https:') {
+        throw new Error('Poster URL must use http or https protocol')
+      }
+    } catch (err: any) {
+      throw new Error('Invalid poster URL', { cause: err })
+    }
+  }
+
   const eventTemplate = {
     kind: 22,
     content: description,

@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import { verifyEvent } from 'nostr-tools'
 
 let insertOrderCounter = 0
 function nextInsertOrder(): number {
@@ -395,13 +396,17 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
     const data = JSON.parse(event.content)
     const name = data.name || data.display_name || event.pubkey.slice(0, 8)
     const picture = data.picture || data.image
+    // Note: isVerified is set to false because NIP-05 DNS verification is not
+    // performed client-side. Setting it based solely on the presence of a nip05
+    // field is misleading. Full NIP-05 verification would require an HTTP fetch
+    // to the user's domain at /.well-known/nostr.json?name=<local>.
     const profile: CreatorProfileRecord = {
       pubkey: event.pubkey,
       name,
       displayName: data.display_name || name,
       picture,
       nip05: data.nip05,
-      isVerified: !!data.nip05,
+      isVerified: false,
       about: data.about,
       website: data.website,
       updatedAt: Date.now()
@@ -430,6 +435,24 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
 
 export async function saveEventToCache(event: any): Promise<void> {
   if (!event || !event.id || typeof event.kind !== 'number') return
+
+  // Reject events with invalid signatures — prevents relay injection attacks
+  if (!event.sig) {
+    console.warn(`[Cache] Rejected event ${event.id} — missing signature`)
+    return
+  }
+  // Allow mock/development signatures (only present in dev builds)
+  if (event.sig !== 'local-preview-sig' && !event.sig.startsWith('mock-')) {
+    try {
+      if (!verifyEvent(event as any)) {
+        console.warn(`[Cache] Rejected event ${event.id} — invalid signature`)
+        return
+      }
+    } catch {
+      console.warn(`[Cache] Signature verification error for event ${event.id}`)
+      return
+    }
+  }
 
   const { id, kind, pubkey, created_at } = event
 

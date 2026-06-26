@@ -1,3 +1,5 @@
+import { encryptValue, decryptValue } from '../lib/crypto'
+
 export interface AppSettings {
   relays: string[]
   blossomServers: string[]
@@ -8,6 +10,7 @@ export interface AppSettings {
 }
 
 const STORAGE_KEY = 'nostr-clips-settings'
+const WALLET_ENCRYPTION_PREFIX = 'enc:'
 
 const DEFAULT_SETTINGS: AppSettings = {
   relays: [
@@ -49,4 +52,28 @@ export const saveSettings = (settings: AppSettings): void => {
   } catch (err) {
     console.error('Failed to save settings:', err)
   }
+}
+
+export async function loadWalletString(): Promise<string> {
+  const s = loadSettings()
+  if (!s.walletString) return ''
+  if (s.walletString.startsWith(WALLET_ENCRYPTION_PREFIX)) {
+    try {
+      return await decryptValue(s.walletString.slice(WALLET_ENCRYPTION_PREFIX.length))
+    } catch {
+      return ''
+    }
+  }
+  return s.walletString
+}
+
+export async function saveWalletString(walletString: string): Promise<void> {
+  const s = loadSettings()
+  if (walletString) {
+    const encrypted = await encryptValue(walletString)
+    s.walletString = WALLET_ENCRYPTION_PREFIX + encrypted
+  } else {
+    s.walletString = ''
+  }
+  saveSettings(s)
 }

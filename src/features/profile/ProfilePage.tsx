@@ -429,7 +429,16 @@ export const ProfilePage: React.FC = () => {
           )}
           {profile.website && (
             <a
-              href={profile.website.includes('://') ? profile.website : `https://${profile.website}`}
+              href={(() => {
+                const url = profile.website.includes('://') ? profile.website : `https://${profile.website}`
+                try {
+                  const parsed = new URL(url)
+                  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '#'
+                  return url
+                } catch {
+                  return '#'
+                }
+              })()}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-[12px] font-semibold text-[#a78bfa] hover:underline truncate"

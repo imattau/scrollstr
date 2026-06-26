@@ -78,8 +78,14 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
       return
     }
 
+    // Limit comment length to prevent relay spam and protocol abuse
+    const trimmed = inputText.trim().slice(0, 5000)
+    // Remove control characters except newlines
+    // eslint-disable-next-line no-control-regex
+    const sanitized = trimmed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+
     try {
-      const newComment = await publishComment(signEvent, videoId, creatorPubkey, inputText)
+      const newComment = await publishComment(signEvent, videoId, creatorPubkey, sanitized)
       await saveEventToCache(newComment)
       setInputText('')
     } catch (err) {

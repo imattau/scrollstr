@@ -1,4 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react'
+import { nip19 } from 'nostr-tools'
 import { pool } from '../nostr/pool'
 import { startCacheBackfill } from '../nostr/cacheBackfill'
 import {
@@ -10,7 +11,8 @@ import {
 } from 'nostr-passkey'
 import { PasskeySigner } from 'nostr-passkey/applesauce'
 import { NostrContext, type UserSession } from './nostrContext'
-import { NostrConnectSigner } from '../nostr/nip46'
+import { NostrConnectSigner, parseBunkerUrl } from '../nostr/nip46'
+import { encryptValue, decryptValue } from '../lib/crypto'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -39,9 +41,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         } else if (method === 'passkey') {
           setSession({ pubkey, method, signer: null })
         } else if (method === 'nip46') {
-          const { bunkerUrl } = JSON.parse(stored)
-          if (bunkerUrl) {
-            NostrConnectSigner.fromBunkerURI(bunkerUrl)
+          const parsed = JSON.parse(stored)
+          const relayUrl = parsed.relayUrl || parsed.bunkerUrl
+          const signerPubkey = parsed.signerPubkey || pubkey
+          if (relayUrl && signerPubkey) {
+            // Reconstruct bunker URI without the secret (intentionally omitted on save)
+            const reconnectUri = `bunker://${signerPubkey}?relay=${encodeURIComponent(relayUrl)}`
+            NostrConnectSigner.fromBunkerURI(reconnectUri)
               .then(async (signer) => {
                 const connectedPubkey = await signer.connect()
                 setSession({ pubkey: connectedPubkey, method: 'nip46', signer })
@@ -84,17 +90,28 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signer,
     }
     setSession(newSession)
+    // Store only the relay URL and signer pubkey — omit the secret to limit exposure
+    const parsed = parseBunkerUrl(bunkerUrl)
     localStorage.setItem(
       'scrollstr_session',
-      JSON.stringify({ pubkey, method: 'nip46', bunkerUrl })
+      JSON.stringify({ pubkey, method: 'nip46', relayUrl: parsed.relayUrl, signerPubkey: parsed.signerPubkey })
     )
     return pubkey
   }
 
   const loginReadOnly = (npubOrPubkey: string) => {
-    const pubkey = npubOrPubkey
-    // If it's npub, we could decode it, but assuming it's resolved or raw hex here.
-    // For simplicity, if npub, let's keep it as is or handle it
+    let pubkey = npubOrPubkey
+    // Try decoding npub (bech32) to hex; fall back to raw hex string
+    if (pubkey.startsWith('npub1')) {
+      try {
+        const decoded = nip19.decode(pubkey)
+        pubkey = decoded.data as string
+      } catch {
+        console.warn('Invalid npub format, using as-is:', pubkey)
+      }
+    } else if (!/^[0-9a-f]{64}$/i.test(pubkey)) {
+      console.warn('Invalid pubkey format (expected 64-char hex or npub1...):', pubkey)
+    }
     const newSession: UserSession = {
       pubkey,
       method: 'readonly',

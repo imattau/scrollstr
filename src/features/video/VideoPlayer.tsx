@@ -4,6 +4,7 @@ import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, Med
 import Hls from 'hls.js'
 import { RotateCw } from 'lucide-react'
 import { updateMediaStatus } from '../../nostr/cache'
+import { isInternalUrl, isSafeVideoUrl } from '../../lib/crypto'
 
 interface VideoPlayerProps {
   url: string
@@ -93,23 +94,33 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       return
     }
 
+    // Validate URL before probing to prevent SSRF
+    if (!isSafeVideoUrl(url)) {
+      console.warn(`[VideoPlayer] Skipping unsafe video URL: ${url}`)
+      setIsSourceLoading(false)
+      return
+    }
+
     // Fire-and-forget HEAD probe to update media status; don't block source loading
     let isAborted = false
     const abortController = new AbortController()
     
-    fetch(url, { method: 'HEAD', signal: abortController.signal })
-      .then(async (res) => {
-        if (isAborted) return
-        const contentLength = res.headers.get('content-length')
-        if (contentLength) {
-          await updateMediaStatus(url, 'available', { size: parseInt(contentLength, 10) })
-        }
-      })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          console.warn('Failed to probe media metadata:', err)
-        }
-      })
+    // Skip HEAD probe for internal URLs (SSRF protection); still allow playback
+    if (!isInternalUrl(url)) {
+      fetch(url, { method: 'HEAD', signal: abortController.signal })
+        .then(async (res) => {
+          if (isAborted) return
+          const contentLength = res.headers.get('content-length')
+          if (contentLength) {
+            await updateMediaStatus(url, 'available', { size: parseInt(contentLength, 10) })
+          }
+        })
+        .catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.warn('Failed to probe media metadata:', err)
+          }
+        })
+    }
 
     setIsSourceLoading(true)
 
