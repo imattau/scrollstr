@@ -12,6 +12,7 @@ import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useMuteList } from '../../nostr/useMuteList'
 import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
@@ -59,6 +60,8 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
     if (!contactListEvent) return []
     return contactListEvent.tags.filter((t: any) => t[0] === 'p').map((t: any) => t[1])
   }, [contactListEvent])
+
+  const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
   // Track whether we have loaded the user's initial metadata/relay lists from relays
   const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
@@ -153,7 +156,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       return []
     }
   }, [])
-  const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
+  const allShapes = useMemo(() => {
+    const shapes = _allShapes ?? []
+    if (mutedPubkeys.size === 0) return shapes
+    return shapes.filter((s: VideoShape) => !mutedPubkeys.has(s.pubkey))
+  }, [_allShapes, mutedPubkeys])
 
   // Query videos from followed pubkeys using the pubkey index (reactive to Dexie changes)
   const _followedShapes = useLiveQuery(async () => {
@@ -168,7 +175,11 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       return []
     }
   }, [session, followingPubkeys])
-  const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
+  const followedShapes = useMemo(() => {
+    const shapes = _followedShapes ?? []
+    if (mutedPubkeys.size === 0) return shapes
+    return shapes.filter((s: VideoShape) => !mutedPubkeys.has(s.pubkey))
+  }, [_followedShapes, mutedPubkeys])
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
     id: shape.id,
@@ -213,8 +224,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       )
     }
 
+    if (mutedHashtags.size > 0) {
+      list = list.filter((v: VideoItemData) =>
+        !v.hashtags?.some((t: string) => mutedHashtags.has(t.toLowerCase()))
+      )
+    }
+
     return [...list].sort(sortByInsertOrder)
-  }, [allShapes, followedShapes, feedType, session, filterTag])
+  }, [allShapes, followedShapes, feedType, session, filterTag, mutedHashtags])
 
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])

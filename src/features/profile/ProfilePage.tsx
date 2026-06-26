@@ -10,6 +10,7 @@ import { parseVideoEvent, publishFollow, publishMuteList } from '../../nostr/eve
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
+import { useMuteList } from '../../nostr/useMuteList'
 
 const EMPTY_VIDEOS: any[] = []
 const EMPTY_EVENTS: any[] = []
@@ -197,24 +198,7 @@ export const ProfilePage: React.FC = () => {
     )
   }, [myContactListEvent])
 
-  // Retrieve logged-in user's mute list (kind:10000) to check if this creator is blocked
-  const myMuteListEvents: any[] = useLiveQuery(
-    async () => {
-      if (!session?.pubkey) return []
-      return db.cachedEvents.where({ kind: 10000, pubkey: session.pubkey }).toArray()
-    },
-    [session?.pubkey]
-  ) ?? []
-  const myMuteListEvent = myMuteListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
-
-  const mutedPubkeys = useMemo<Set<string>>(() => {
-    if (!myMuteListEvent) return new Set<string>()
-    const pubkeys: string[] = myMuteListEvent.tags
-      .filter((t: any) => t[0] === 'p')
-      .map((t: any) => t[1])
-    return new Set(pubkeys)
-  }, [myMuteListEvent])
-
+  const { mutedPubkeys } = useMuteList(session?.pubkey)
   const isBlocked = targetPubkey ? mutedPubkeys.has(targetPubkey) : false
 
   // Subscribe to contact list updates on relays — only if cache is stale
@@ -274,17 +258,6 @@ export const ProfilePage: React.FC = () => {
       cleanup?.()
     }
   }, [targetPubkey, relayUrls, refreshKey])
-
-  // Subscribe to the session user's mute list
-  useEffect(() => {
-    if (!session?.pubkey) return
-    const sub = subscribeToRelays(relayUrls, {
-      kinds: [10000],
-      authors: [session.pubkey],
-      limit: 1,
-    })
-    return () => sub()
-  }, [session?.pubkey, relayUrls])
 
   // Subscribe to kind:0 metadata for displayed follower/following pubkeys
   useEffect(() => {

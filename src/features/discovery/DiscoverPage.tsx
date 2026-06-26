@@ -9,6 +9,7 @@ import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
 import { useNavigate } from 'react-router-dom'
 import { useUserRelayUrls } from '../../nostr/relays'
+import { useMuteList } from '../../nostr/useMuteList'
 
 const EMPTY_VIDEOS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
@@ -71,6 +72,7 @@ export const DiscoverPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const relayUrls = useUserRelayUrls(session?.pubkey)
+  const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
   // Check cache freshness once on mount; only subscribe to relays if the
   // cache has fewer than 20 videos from the last hour — avoids redundant
@@ -143,8 +145,10 @@ export const DiscoverPage: React.FC = () => {
 
   // Map shapes to local format (full cache — for search and topics)
   const videos = useMemo(() => {
-    return (rawVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
-  }, [rawVideoShapes])
+    const list = (rawVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
+    if (mutedPubkeys.size === 0) return list
+    return list.filter(v => !mutedPubkeys.has(v.creator.pubkey))
+  }, [rawVideoShapes, mutedPubkeys])
 
   // Load author profiles into a lookup map for richer search
   const _authorProfileMap = useLiveQuery(
@@ -161,10 +165,13 @@ export const DiscoverPage: React.FC = () => {
 
   // Only consider recent videos for trending computation
   const recentVideos = useMemo(() => {
-    const mapped = (rawRecentVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
+    let mapped = (rawRecentVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
+    if (mutedPubkeys.size > 0) {
+      mapped = mapped.filter(v => !mutedPubkeys.has(v.creator.pubkey))
+    }
     const sorted = mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return sorted.slice(0, 300)
-  }, [rawRecentVideoShapes])
+  }, [rawRecentVideoShapes, mutedPubkeys])
 
   // Extract unique hashtags/topics dynamically from all videos
   const topics = useMemo(() => {
@@ -172,6 +179,7 @@ export const DiscoverPage: React.FC = () => {
     videos.forEach((v) => {
       v.hashtags?.forEach((tag) => {
         const normalized = tag.toLowerCase()
+        if (mutedHashtags.has(normalized)) return
         counts[normalized] = (counts[normalized] || 0) + 1
       })
     })
@@ -196,7 +204,7 @@ export const DiscoverPage: React.FC = () => {
       })
 
     return compiled.length > 0 ? compiled : defaultTopics
-  }, [videos])
+  }, [videos, mutedHashtags])
 
   // Extract active creators dynamically from recent videos
   const creators = useMemo(() => {

@@ -162,6 +162,35 @@ export async function pruneCache(): Promise<void> {
   }
 }
 
+export async function pruneBlockedContent(pubkeys: string[]): Promise<void> {
+  if (pubkeys.length === 0) return
+
+  const shapes = await db.videoShapes
+    .where('pubkey')
+    .anyOf(pubkeys)
+    .toArray()
+
+  if (shapes.length === 0) return
+
+  const shapeIds = shapes.map(s => s.id)
+  const videoUrls = shapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
+
+  const reactionEvents = await db.cachedEvents
+    .where('eTags')
+    .anyOf(shapeIds)
+    .filter(e => [7, 16, 9735, 1111].includes(e.kind))
+    .toArray()
+
+  await db.cachedEvents.bulkDelete([...reactionEvents.map(e => e.id), ...shapeIds])
+  await db.videoShapes.bulkDelete(shapeIds)
+  await db.userVideoState.bulkDelete(shapeIds)
+  await db.kindOneRejections.bulkDelete(shapeIds)
+
+  if (videoUrls.length > 0) {
+    await db.mediaStatus.where('url').anyOf(videoUrls).delete()
+  }
+}
+
 const VIDEO_EXT_RE = /\.(mp4|webm|ogg|mov|avi|mkv|m3u8|ts|m4v)($|\?)/i
 
 export function extractVideoUrlFromContent(content: string): string | null {
