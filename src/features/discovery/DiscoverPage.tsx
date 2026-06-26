@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
+import Fuse from 'fuse.js'
 import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { subscribeToRelays } from '../../nostr/pool'
@@ -292,21 +293,30 @@ export const DiscoverPage: React.FC = () => {
     )
   }, [myContactListEvent])
 
-  // Filter videos based on the search query
+  // Filter videos based on the search query using fuzzy search
   const filteredVideos = useMemo(() => {
     if (!searchQuery.trim()) return []
-    const q = searchQuery.toLowerCase()
-    return videos.filter((v) => {
-      const matchTitle = v.title?.toLowerCase().includes(q)
-      const matchDesc = v.description?.toLowerCase().includes(q)
-      const matchTag = v.hashtags?.some((t) => t.toLowerCase().includes(q))
-      const matchCreator = v.creator.name.toLowerCase().includes(q)
-      const matchPubkey = v.creator.pubkey.toLowerCase().includes(q)
-      const profile = authorProfileMap[v.creator.pubkey]
-      const matchDisplayName = profile?.displayName?.toLowerCase().includes(q)
-      const matchNip05 = profile?.nip05?.toLowerCase().includes(q)
-      return matchTitle || matchDesc || matchTag || matchCreator || matchPubkey || matchDisplayName || matchNip05
+
+    const enriched = videos.map(v => ({
+      ...v,
+      displayName: authorProfileMap[v.creator.pubkey]?.displayName ?? '',
+      nip05: authorProfileMap[v.creator.pubkey]?.nip05 ?? '',
+    }))
+
+    const fuse = new Fuse(enriched, {
+      keys: [
+        { name: 'title', weight: 0.3 },
+        { name: 'description', weight: 0.2 },
+        { name: 'hashtags', weight: 0.4 },
+        { name: 'creator.name', weight: 0.5 },
+        { name: 'creator.pubkey', weight: 0.1 },
+        { name: 'displayName', weight: 0.5 },
+        { name: 'nip05', weight: 0.1 },
+      ],
+      threshold: 0.4,
     })
+
+    return fuse.search(searchQuery).map(r => r.item)
   }, [videos, searchQuery, authorProfileMap])
 
   const handleFollow = async (targetPubkey: string) => {
