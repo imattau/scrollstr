@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" fill="none">
+  <defs>
+    <linearGradient id="body" x1="75" y1="56" x2="120" y2="154" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#E2CBA8"/>
+      <stop offset="1" stop-color="#C49E6C"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="90" y1="139" x2="96" y2="154" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F0C892"/>
+      <stop offset="1" stop-color="#E2A55F"/>
+    </linearGradient>
+    <linearGradient id="l3" x1="103" y1="52" x2="166" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#863bff"/>
+      <stop offset="1" stop-color="#47bfff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Motion lines: 3 lines (removed 4th farthest line) -->
+  <g fill="none" stroke-linecap="round" stroke-width="2.6">
+    <path d="M111 75 Q139.5 56.25 169.5 70.5" stroke="#863bff"/>
+    <path d="M107 63 Q137.25 45 168 58.5" stroke="#863bff" stroke-opacity="0.8"/>
+    <path d="M103 52 Q134.25 35.6 166 48" stroke="url(#l3)" stroke-opacity="0.6"/>
+  </g>
+
+  <!-- Nostrich drawn nose-down, rotated 13deg -->
+  <g transform="rotate(13 96 96)" stroke="#09090b" stroke-width="1.1" stroke-linejoin="round">
+    <!-- legs trailing up/back -->
+    <g stroke="#B98E5C" stroke-width="2.25" stroke-linecap="round" fill="none">
+      <path d="M93.75 67.5 L90.75 41.25 M90.75 41.25 l-4.5 3.75 M90.75 41.25 l-0.75 6 M90.75 41.25 l4.5 3"/>
+      <path d="M99.75 68.25 L103.5 43.5 M103.5 43.5 l-4.5 3 M103.5 43.5 l1.5 6 M103.5 43.5 l4.875 2.25"/>
+    </g>
+    <!-- tail feathers -->
+    <path d="M96 63 L87 48 L96 45 L105 49 L102 63 Z" fill="#BE9866"/>
+    <!-- body -->
+    <path d="M96 59.25 C113.25 60.75 122.25 80.25 117.75 99.75 C114.75 114 105.75 120 96 120 C86.25 120 77.25 114 74.25 99.75 C69.75 80.25 78.75 60.75 96 59.25 Z" fill="url(#body)"/>
+    <!-- wing -->
+    <path d="M93.75 73.5 C80.25 75 73.5 87 77.25 101.25 C80.25 94.5 86.25 88.5 94.5 87 C91.5 82.5 91.5 77.25 93.75 73.5 Z" fill="#C8A06E"/>
+    <!-- neck -->
+    <path d="M90.75 115.5 C88.5 123.75 88.5 129 91.5 133.5 L101.25 133.5 C103.5 129 103.5 123.75 101.25 116.25 Z" fill="url(#body)"/>
+    <!-- head -->
+    <circle cx="96" cy="133.5" r="12.75" fill="url(#body)"/>
+    <!-- beak -->
+    <path d="M90 140.25 L96 154.5 L102 140.25 Z" fill="url(#beak)"/>
+    <!-- eye -->
+    <circle cx="90.75" cy="132" r="3.75" fill="#fff"/>
+    <circle cx="90" cy="133" r="1.875" fill="#09090b"/>
+    <circle cx="89.25" cy="131.625" r="0.675" fill="#fff" stroke="none"/>
+  </g>
+</svg>
