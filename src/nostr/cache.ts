@@ -126,13 +126,27 @@ export async function pruneCache(): Promise<void> {
   const excess = totalShapes - MAX_VIDEOS
   if (excess <= 0) return
 
-  const oldestIds = await db.videoShapes
+  const oldestShapes = await db.videoShapes
     .orderBy('insertOrder')
     .limit(excess)
-    .primaryKeys()
+    .toArray()
 
-  await db.cachedEvents.bulkDelete(oldestIds)
+  const oldestIds = oldestShapes.map(s => s.id)
+  const videoUrls = oldestShapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
+
+  const reactionEvents = await db.cachedEvents
+    .where('eTags')
+    .anyOf(oldestIds)
+    .filter(e => [7, 16, 9735, 1111].includes(e.kind))
+    .toArray()
+
+  await db.cachedEvents.bulkDelete([...reactionEvents.map(e => e.id), ...oldestIds])
   await db.videoShapes.bulkDelete(oldestIds)
+  await db.userVideoState.bulkDelete(oldestIds)
+
+  if (videoUrls.length > 0) {
+    await db.mediaStatus.where('url').anyOf(videoUrls).delete()
+  }
 }
 
 function parseImetaTag(imetaTag: string[]): Record<string, string> {
