@@ -190,6 +190,54 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
   }
 }
 
+async function handleStartFollowBackfill(relayUrls: string[], pubkeys: string[]) {
+  const effective: string[] =
+    relayUrls && relayUrls.length > 0 ? relayUrls : activeRelays
+
+  console.log(`[Worker] Starting follow backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
+
+  try {
+    const events = await pool.querySync(effective, {
+      kinds: [3],
+      authors: pubkeys,
+      limit: 50,
+    })
+    if (events.length > 0) {
+      console.log(`[Worker] Follow backfill received ${events.length} kind:3 events from relays.`)
+      self.postMessage({ type: 'backfillEvents', events })
+    }
+  } catch (err) {
+    console.warn('[Worker] Follow backfill error:', err)
+  } finally {
+    console.log(`[Worker] Follow backfill complete.`)
+    self.postMessage({ type: 'followBackfillComplete' })
+  }
+}
+
+async function handleStartUserVideoBackfill(relayUrls: string[], pubkeys: string[]) {
+  const effective: string[] =
+    relayUrls && relayUrls.length > 0 ? relayUrls : activeRelays
+
+  console.log(`[Worker] Starting user-video backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
+
+  try {
+    const events = await pool.querySync(effective, {
+      kinds: [1, 21, 22, 34236],
+      authors: pubkeys,
+      limit: 100,
+    })
+    if (events.length > 0) {
+      console.log(`[Worker] User-video backfill received ${events.length} events from relays.`)
+      self.postMessage({ type: 'backfillEvents', events })
+    }
+  } catch (err) {
+    console.warn('[Worker] User-video backfill error:', err)
+  } finally {
+    console.log(`[Worker] User-video backfill complete.`)
+    self.postMessage({ type: 'userVideoBackfillComplete' })
+  }
+}
+
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
 function isHex(s: string): boolean {
@@ -238,6 +286,12 @@ self.onmessage = (e: MessageEvent) => {
       break
     case 'startFollowedVideoBackfill':
       void handleStartFollowedVideoBackfill(msg.relayUrls, msg.pubkeys)
+      break
+    case 'startFollowBackfill':
+      void handleStartFollowBackfill(msg.relayUrls, msg.pubkeys)
+      break
+    case 'startUserVideoBackfill':
+      void handleStartUserVideoBackfill(msg.relayUrls, msg.pubkeys)
       break
     case 'subscribe':
       handleSubscribe(msg.id, msg.relays, msg.filters)

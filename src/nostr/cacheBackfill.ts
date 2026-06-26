@@ -4,6 +4,8 @@ import { db } from './cache'
 let isBackfillRunning = false
 let isProfileBackfillRunning = false
 let isFollowedVideoBackfillRunning = false
+let isFollowBackfillRunning = false
+let isUserVideoBackfillRunning = false
 
 /**
  * Starts a background backfill in the web worker.
@@ -129,4 +131,71 @@ export function startFollowedVideoBackfill(relayUrls: string[], followedPubkeys:
 export function maybeResumeFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[]): void {
   if (isFollowedVideoBackfillRunning) return
   startFollowedVideoBackfill(relayUrls, followedPubkeys)
+}
+
+/**
+ * Backfills kind:3 (contact list / follow) events for specific pubkeys.
+ * This ensures the user's up-to-date following list is cached so the
+ * Following feed can correctly determine which pubkeys to query.
+ */
+export function startFollowBackfill(relayUrls: string[], pubkeys: string[]): void {
+  if (isFollowBackfillRunning) {
+    console.log('[CacheBackfill] Follow backfill already running, skipping.')
+    return
+  }
+  if (pubkeys.length === 0) return
+
+  isFollowBackfillRunning = true
+
+  const handleComplete = (e: MessageEvent) => {
+    if (e.data.type === 'followBackfillComplete') {
+      isFollowBackfillRunning = false
+      backfillWorker.removeEventListener('message', handleComplete)
+    }
+  }
+  backfillWorker.addEventListener('message', handleComplete)
+
+  backfillWorker.postMessage({
+    type: 'startFollowBackfill',
+    relayUrls,
+    pubkeys,
+  })
+}
+
+export function maybeResumeFollowBackfill(relayUrls: string[], pubkeys: string[]): void {
+  if (isFollowBackfillRunning) return
+  startFollowBackfill(relayUrls, pubkeys)
+}
+
+/**
+ * Backfills video events (kinds 1, 21, 22, 34236) for the current user's
+ * own pubkey(s). Ensures the user sees their own content in the feed.
+ */
+export function startUserVideoBackfill(relayUrls: string[], pubkeys: string[]): void {
+  if (isUserVideoBackfillRunning) {
+    console.log('[CacheBackfill] User-video backfill already running, skipping.')
+    return
+  }
+  if (pubkeys.length === 0) return
+
+  isUserVideoBackfillRunning = true
+
+  const handleComplete = (e: MessageEvent) => {
+    if (e.data.type === 'userVideoBackfillComplete') {
+      isUserVideoBackfillRunning = false
+      backfillWorker.removeEventListener('message', handleComplete)
+    }
+  }
+  backfillWorker.addEventListener('message', handleComplete)
+
+  backfillWorker.postMessage({
+    type: 'startUserVideoBackfill',
+    relayUrls,
+    pubkeys,
+  })
+}
+
+export function maybeResumeUserVideoBackfill(relayUrls: string[], pubkeys: string[]): void {
+  if (isUserVideoBackfillRunning) return
+  startUserVideoBackfill(relayUrls, pubkeys)
 }

@@ -13,7 +13,7 @@ import { useUserRelayUrls } from '../../nostr/relays'
 import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useMuteList } from '../../nostr/useMuteList'
-import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill } from '../../nostr/cacheBackfill'
+import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill, maybeResumeFollowBackfill, maybeResumeUserVideoBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowDown, Sparkles, RotateCw } from 'lucide-react'
@@ -41,6 +41,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const lastOlderFetchAtRef = useRef(0)
   const userMetadataSubscribedRef = useRef<string | null>(null)
+  const initialBackfillsFiredRef = useRef(false)
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
   const swiperRef = useRef<SwiperType | null>(null)
@@ -133,7 +134,20 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       unsub()
       clearTimeout(timer)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.pubkey])
+
+  // Background backfills at startup: fetch the user's kind:3 contact list
+  // and their own video events so the Following feed is populated correctly.
+  useEffect(() => {
+    if (!session?.pubkey || relayUrls.length === 0) return
+    if (initialBackfillsFiredRef.current) return
+    initialBackfillsFiredRef.current = true
+
+    console.log('[VideoFeed] Firing initial follow & user-video backfills')
+    maybeResumeFollowBackfill(relayUrls, [session.pubkey])
+    maybeResumeUserVideoBackfill(relayUrls, [session.pubkey])
+  }, [session?.pubkey, relayUrls])
 
   // Feed subscription: fetch recent videos from all relays into the cache.
   useEffect(() => {
