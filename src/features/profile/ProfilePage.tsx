@@ -120,16 +120,6 @@ export const ProfilePage: React.FC = () => {
       .filter((v: any): v is VideoItemData => v !== null)
   }, [rawVideoEvents])
 
-  // Retrieve all video creators from the videoShapes pubkey index
-  const _creatorsWithVideos = useLiveQuery(
-    async () => {
-      const keys = await db.videoShapes.orderBy('pubkey').uniqueKeys()
-      return new Set(keys as string[])
-    },
-    []
-  )
-  const creatorsWithVideos = useMemo(() => _creatorsWithVideos ?? new Set(), [_creatorsWithVideos])
-
   // Retrieve raw kind:6 or kind:16 repost events
   const rawBoosts: any[] = useLiveQuery(
     () => targetPubkey
@@ -145,7 +135,7 @@ export const ProfilePage: React.FC = () => {
       : Promise.resolve([] as any[]),
     [targetPubkey]
   ) ?? []
-  const targetContactListEvent = targetContactListEvents[targetContactListEvents.length - 1]?.event
+  const targetContactListEvent = targetContactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const followingCount = useMemo(() => {
     if (!targetContactListEvent) return 0
@@ -178,13 +168,7 @@ export const ProfilePage: React.FC = () => {
       .map((t: any) => t[1])
   }, [targetContactListEvent])
 
-  const followersWithVideos = useMemo(() => {
-    return followerPubkeys.filter((pk: string) => creatorsWithVideos.has(pk))
-  }, [followerPubkeys, creatorsWithVideos])
 
-  const followingWithVideos = useMemo(() => {
-    return followingPubkeys.filter((pk: string) => creatorsWithVideos.has(pk))
-  }, [followingPubkeys, creatorsWithVideos])
 
   // Retrieve logged-in user's own contact list to check if following this creator
   const myContactListEvents: any[] = useLiveQuery(
@@ -194,7 +178,7 @@ export const ProfilePage: React.FC = () => {
     },
     [session?.pubkey]
   ) ?? []
-  const myContactListEvent = myContactListEvents[myContactListEvents.length - 1]?.event
+  const myContactListEvent = myContactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const isFollowing = useMemo(() => {
     if (!myContactListEvent || !targetPubkey) return false
@@ -218,7 +202,7 @@ export const ProfilePage: React.FC = () => {
     },
     [session?.pubkey]
   ) ?? []
-  const myMuteListEvent = myMuteListEvents[myMuteListEvents.length - 1]?.event
+  const myMuteListEvent = myMuteListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const mutedPubkeys = useMemo<Set<string>>(() => {
     if (!myMuteListEvent) return new Set<string>()
@@ -234,6 +218,7 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     if (!targetPubkey) return
     let cancelled = false
+    let cleanup: (() => void) | undefined
 
     db.cachedEvents.where({ kind: 3, pubkey: targetPubkey }).count().then((count) => {
       if (cancelled) return
@@ -242,13 +227,7 @@ export const ProfilePage: React.FC = () => {
       db.cachedEvents.where('pTags').equals(targetPubkey).filter(e => e.kind === 3).count().then((followerCount) => {
         if (cancelled) return
 
-        // Skip subscription when we already have recent cached data for this profile
-        if (hasOwnContactList && followerCount >= 3) {
-          console.log(`[Profile] Skipping kind:3 sub for ${targetPubkey} — cache has ${count} own + ${followerCount} followers`)
-          return
-        }
-
-        console.log(`[Profile] Subscribing to contact lists for stats of pubkey: ${targetPubkey} (own=${hasOwnContactList}, followers=${followerCount})`)
+        console.log(`[Profile] Fetching contact lists for ${targetPubkey} (own=${hasOwnContactList}, followers=${followerCount})`)
 
         const sub = subscribeToRelays(relayUrls, [
           { kinds: [3], authors: [targetPubkey], limit: 1 },
@@ -258,8 +237,6 @@ export const ProfilePage: React.FC = () => {
         cleanup = sub
       })
     })
-
-    let cleanup: (() => void) | undefined
 
     return () => {
       cancelled = true
@@ -271,6 +248,7 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     if (!targetPubkey) return
     let cancelled = false
+    let cleanup: (() => void) | undefined
 
     db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => VIDEO_KINDS.includes(e.kind)).count().then((count) => {
       if (cancelled) return
@@ -288,7 +266,6 @@ export const ProfilePage: React.FC = () => {
       cleanup = sub
     })
 
-    let cleanup: (() => void) | undefined
     return () => {
       cancelled = true
       cleanup?.()
@@ -309,11 +286,11 @@ export const ProfilePage: React.FC = () => {
   // Subscribe to kind:0 metadata for displayed follower/following pubkeys
   useEffect(() => {
     if (!listView || !relayUrls.length) return
-    const pubkeys = listView === 'followers' ? followersWithVideos : followingWithVideos
+    const pubkeys = listView === 'followers' ? followerPubkeys : followingPubkeys
     const realPubkeys = pubkeys.filter((pk: string) => !pk.startsWith('mock-'))
     if (!realPubkeys.length) return
+    let unsub: (() => void) | undefined
 
-    // Save the pubkeys to check against in an async context
     const checkCache = async () => {
       const uncached: string[] = []
       for (const pk of realPubkeys) {
@@ -323,21 +300,16 @@ export const ProfilePage: React.FC = () => {
       return uncached
     }
     checkCache().then(uncachedPubkeys => {
-      if (!uncachedPubkeys.length) {
-        console.log(`All profiles already cached for ${listView} view`)
-        return
-      }
-      const sub = subscribeToRelays(relayUrls, {
+      if (!uncachedPubkeys.length) return
+      unsub = subscribeToRelays(relayUrls, {
         kinds: [0],
         authors: uncachedPubkeys,
         limit: 1,
       })
-      // Cleanup is trickier here; the subscription will be cleaned on effect teardown
-      // via the returned unsub below, but for the inner sub we just let it close naturally
     })
 
-    return () => {}
-  }, [listView, followersWithVideos, followingWithVideos, relayUrls])
+    return () => { unsub?.() }
+  }, [listView, followerPubkeys, followingPubkeys, relayUrls])
 
   const handleEditProfile = () => {
     navigate('/settings')
@@ -519,14 +491,14 @@ export const ProfilePage: React.FC = () => {
             </button>
 
             <h3 className="text-[16px] font-semibold text-[#f7f7f8] mb-3">
-              {listView === 'followers' ? 'Followers' : 'Following'} ({listView === 'followers' ? followersWithVideos.length : followingWithVideos.length})
+              {listView === 'followers' ? 'Followers' : 'Following'} ({listView === 'followers' ? followerPubkeys.length : followingPubkeys.length})
             </h3>
 
             <div className="flex-1 space-y-1 overflow-y-auto max-h-[400px] pr-1">
-              {(listView === 'followers' ? followersWithVideos : followingWithVideos).length === 0 ? (
-                <p className="text-[13px] text-[#71717a] text-center py-8">No {listView} with videos found.</p>
+              {(listView === 'followers' ? followerPubkeys : followingPubkeys).length === 0 ? (
+                <p className="text-[13px] text-[#71717a] text-center py-8">No {listView} found.</p>
               ) : (
-                (listView === 'followers' ? followersWithVideos : followingWithVideos).map((pk: string) => (
+                (listView === 'followers' ? followerPubkeys : followingPubkeys).map((pk: string) => (
                   <CreatorListItem
                     key={pk}
                     pubkey={pk}
