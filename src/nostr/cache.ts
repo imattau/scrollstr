@@ -273,7 +273,8 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
 
     const cwTag = event.tags.find((t: any) => t[0] === 'content-warning')
     const nsfwLabel = event.tags.find((t: any) => t[0] === 'l' && t[1] === 'nsfw')
-    const contentWarning = cwTag?.[1] || nsfwLabel?.[1] || existing?.contentWarning
+    const hasNsfwContent = /\b(NSFW|porn|PORN)\b/i.test(event.content || '')
+    const contentWarning = cwTag?.[1] || nsfwLabel?.[1] || (hasNsfwContent ? 'NSFW' : undefined) || existing?.contentWarning
 
     const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
     let videoUrl = existing?.videoUrl ?? ''

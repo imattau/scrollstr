@@ -150,6 +150,8 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
   console.log(`[Worker] Starting followed-video backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
 
   try {
+    let until = Math.floor(Date.now() / 1000)
+
     for (let batch = 0; batch < MAX_BATCHES; batch++) {
       const currentCount = await getCacheVideoCount()
       const remaining = MAX_VIDEOS - currentCount
@@ -157,9 +159,6 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
         console.log(`[Worker] Cache is full (${currentCount}/${MAX_VIDEOS}). Stopping followed-video backfill.`)
         break
       }
-
-      const oldestTs = await getCacheOldestVideoTimestamp()
-      const until = oldestTs != null ? oldestTs - 1 : Math.floor(Date.now() / 1000)
 
       console.log(
         `[Worker] Followed-video batch ${batch + 1}/${MAX_BATCHES} — ` +
@@ -176,6 +175,9 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
       console.log(`[Worker] Followed-video batch ${batch + 1} received ${events.length} events from relays.`)
 
       self.postMessage({ type: 'backfillEvents', events })
+
+      const oldestInBatch = Math.min(...events.map((e: any) => e.created_at))
+      until = oldestInBatch - 1
 
       await delay(BATCH_DELAY_MS)
     }

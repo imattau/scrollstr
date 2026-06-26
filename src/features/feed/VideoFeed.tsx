@@ -16,7 +16,7 @@ import { useMuteList } from '../../nostr/useMuteList'
 import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill } from '../../nostr/cacheBackfill'
 
 import { useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowDown, Sparkles } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowDown, Sparkles, RotateCw } from 'lucide-react'
 import { sortByInsertOrder } from './feedSort'
 
 const PAGE_SIZE = 50
@@ -47,6 +47,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
   const [newEventsCount, setNewEventsCount] = useState(0)
   const [uiHidden, setUiHidden] = useState(false)
   const endVideoIdsRef = useRef<Set<string>>(new Set())
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Reactively query the user's kind:3 contact list from Dexie cache
   const contactListEvents = useLiveQuery(
@@ -146,7 +149,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       unsub()
       clearTimeout(timer)
     }
-  }, [relayUrls])
+  }, [relayUrls, refreshKey])
 
   // Query all non-failed videos for Explore feed (reactive to Dexie changes)
   const _allShapes = useLiveQuery(async () => {
@@ -468,7 +471,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       </Swiper>
 
       {/* New events pill — shown at bottom when user has scrolled away from end and new videos arrived */}
-      {newEventsCount > 0 && activeIndex < videos.length - 1 && (
+      {newEventsCount > 0 && activeIndex < videos.length - 1 && !uiHidden && (
         <button
           onClick={scrollToNewest}
           className="new-events-pill"
@@ -481,7 +484,19 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       )}
 
       {/* Floating navigation buttons for desktop */}
-      <div className="hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30">
+      <div className={`hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
+        <button
+          onClick={() => {
+            setRefreshKey(k => k + 1)
+            setIsRefreshing(true)
+            clearTimeout(refreshTimerRef.current)
+            refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
+          }}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Check for new content"
+        >
+          <RotateCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
         <button
           onClick={() => swiperRef.current?.slideTo(0, 300)}
           disabled={activeIndex === 0}
@@ -518,6 +533,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
       {/* Mobile jump buttons */}
       <div className={`md:hidden flex flex-col gap-2 absolute left-3 top-1/2 -translate-y-1/2 z-40 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
+        <button
+          onClick={() => {
+            setRefreshKey(k => k + 1)
+            setIsRefreshing(true)
+            clearTimeout(refreshTimerRef.current)
+            refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
+          }}
+          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
+          title="Check for new content"
+        >
+          <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
         <button
           onClick={() => swiperRef.current?.slideTo(0, 300)}
           disabled={activeIndex === 0}
