@@ -90,7 +90,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   useEffect(() => {
     if (followingPubkeys.length > 0 && relayUrls.length > 0) {
       void maybeResumeProfileBackfill(relayUrls, followingPubkeys)
-      maybeResumeFollowedVideoBackfill(relayUrls, followingPubkeys)
+      void maybeResumeFollowedVideoBackfill(relayUrls, followingPubkeys)
     }
   }, [followingPubkeys, relayUrls])
 
