@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { useUserRelayUrls } from './relays'
@@ -101,18 +101,22 @@ export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile 
     }
   }, [pubkey, refreshKey])
 
-  if (cachedProfile) {
-    return {
-      pubkey,
-      name: cachedProfile.name,
-      displayName: cachedProfile.displayName || cachedProfile.name,
-      picture: cachedProfile.picture,
-      nip05: cachedProfile.nip05,
-      isVerified: cachedProfile.isVerified,
-      about: cachedProfile.about,
-      website: cachedProfile.website
+  const profile = useMemo(() => {
+    if (cachedProfile) {
+      return {
+        pubkey,
+        name: cachedProfile.name,
+        displayName: cachedProfile.displayName || cachedProfile.name,
+        picture: cachedProfile.picture,
+        nip05: cachedProfile.nip05,
+        isVerified: cachedProfile.isVerified,
+        about: cachedProfile.about,
+        website: cachedProfile.website
+      }
     }
-  }
 
-  return parseProfileContent(null, pubkey)
+    return parseProfileContent(null, pubkey)
+  }, [pubkey, cachedProfile])
+
+  return profile
 }

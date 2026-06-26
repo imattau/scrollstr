@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from 'react'
+import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
 import { pool } from '../nostr/pool'
 import { startCacheBackfill } from '../nostr/cacheBackfill'
@@ -12,7 +12,6 @@ import {
 import { PasskeySigner } from 'nostr-passkey/applesauce'
 import { NostrContext, type UserSession } from './nostrContext'
 import { NostrConnectSigner, parseBunkerUrl } from '../nostr/nip46'
-import { encryptValue, decryptValue } from '../lib/crypto'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -66,7 +65,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [])
 
-  const loginWithNip07 = async (): Promise<string> => {
+  const loginWithNip07 = useCallback(async (): Promise<string> => {
     if (!window.nostr) {
       throw new Error('NIP-07 Extension not found')
     }
@@ -78,9 +77,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSession(newSession)
     localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'nip07' }))
     return pubkey
-  }
+  }, [])
 
-  const loginWithNip46 = async (bunkerUrl: string): Promise<string> => {
+  const loginWithNip46 = useCallback(async (bunkerUrl: string): Promise<string> => {
     const signer = await NostrConnectSigner.fromBunkerURI(bunkerUrl)
     const pubkey = await signer.connect()
 
@@ -97,9 +96,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       JSON.stringify({ pubkey, method: 'nip46', relayUrl: parsed.relayUrl, signerPubkey: parsed.signerPubkey })
     )
     return pubkey
-  }
+  }, [])
 
-  const loginReadOnly = (npubOrPubkey: string) => {
+  const loginReadOnly = useCallback((npubOrPubkey: string) => {
     let pubkey = npubOrPubkey
     // Try decoding npub (bech32) to hex; fall back to raw hex string
     if (pubkey.startsWith('npub1')) {
@@ -118,9 +117,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     setSession(newSession)
     localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'readonly' }))
-  }
+  }, [])
 
-  const loginWithPasskey = async (): Promise<string> => {
+  const loginWithPasskey = useCallback(async (): Promise<string> => {
     const record = readStoredPasskeyIdentity()
     if (!record) {
       throw new Error('No passkey identity found on this device. Please register first.')
@@ -136,9 +135,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     })
     localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'passkey' }))
     return pubkey
-  }
+  }, [])
 
-  const registerPasskey = async (nsec?: string): Promise<string> => {
+  const registerPasskey = useCallback(async (nsec?: string): Promise<string> => {
     console.log(nsec ? 'Registering passkey from existing nsec...' : 'Registering new passkey identity...')
     const options = {
       rpName: 'Nostr Clips',
@@ -157,15 +156,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     })
     localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'passkey' }))
     return pubkey
-  }
+  }, [])
 
-  const logout = () => {
+  const logout = useCallback(() => {
     clearPasskeyIdentity()
     setSession(null)
     localStorage.removeItem('scrollstr_session')
-  }
+  }, [])
 
-  const signEvent = async (eventTemplate: any): Promise<any> => {
+  const signEvent = useCallback(async (eventTemplate: any): Promise<any> => {
     if (!session) throw new Error('No active Nostr session')
     
     const event = {
@@ -203,23 +202,23 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       throw new Error('Signing is not supported in read-only mode')
     }
-  }
+  }, [session])
+
+  const contextValue = useMemo(() => ({
+    pool,
+    isConnected,
+    session,
+    loginWithNip07,
+    loginWithNip46,
+    loginReadOnly,
+    loginWithPasskey,
+    registerPasskey,
+    logout,
+    signEvent,
+  }), [pool, isConnected, session, loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, logout, signEvent])
 
   return (
-    <NostrContext.Provider
-      value={{
-        pool,
-        isConnected,
-        session,
-        loginWithNip07,
-        loginWithNip46,
-        loginReadOnly,
-        loginWithPasskey,
-        registerPasskey,
-        logout,
-        signEvent,
-      }}
-    >
+    <NostrContext.Provider value={contextValue}>
       {children}
     </NostrContext.Provider>
   )

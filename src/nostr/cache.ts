@@ -3,7 +3,7 @@ import { verifyEvent } from 'nostr-tools'
 
 let insertOrderCounter = 0
 function nextInsertOrder(): number {
-  return Date.now() * 1000 + (++insertOrderCounter % 1000)
+  return Date.now() * 1000 + (++insertOrderCounter)
 }
 
 export interface CachedEvent {
@@ -49,6 +49,7 @@ export interface VideoShape {
   relaysSeenOn?: string[];
 
   mediaStatus?: "unknown" | "available" | "failed" | "too_large" | "unsupported";
+  isFailed?: boolean;
   contentWarning?: string;
 
   userState?: {
@@ -109,8 +110,8 @@ class ScrollstrCacheDatabase extends Dexie {
   constructor() {
     super('scrollstr-event-cache')
     this.version(11).stores({
-      cachedEvents: 'id, [kind+pubkey], kind, pubkey, created_at, *eTags, *pTags',
-      videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder, *hashtags, mediaStatus',
+      cachedEvents: 'id, [kind+pubkey], [pubkey+kind], kind, pubkey, created_at, *eTags, *pTags',
+      videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder, *hashtags, mediaStatus, isFailed',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
@@ -143,13 +144,13 @@ export async function pruneCache(): Promise<void> {
   const oldestIds = oldestShapes.map(s => s.id)
   const videoUrls = oldestShapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
 
-  const reactionEvents = await db.cachedEvents
+  const reactionIds = await db.cachedEvents
     .where('eTags')
     .anyOf(oldestIds)
     .filter(e => [7, 16, 9735, 1111].includes(e.kind))
-    .toArray()
+    .primaryKeys()
 
-  await db.cachedEvents.bulkDelete([...reactionEvents.map(e => e.id), ...oldestIds])
+  await db.cachedEvents.bulkDelete([...reactionIds, ...oldestIds])
   await db.videoShapes.bulkDelete(oldestIds)
   await db.userVideoState.bulkDelete(oldestIds)
 
@@ -161,6 +162,14 @@ export async function pruneCache(): Promise<void> {
   if (videoUrls.length > 0) {
     await db.mediaStatus.where('url').anyOf(videoUrls).delete()
   }
+
+  // Prune author profiles not referenced by any remaining video shape
+  const remainingPubkeys = await db.videoShapes
+    .orderBy('pubkey')
+    .uniqueKeys()
+  await db.authorProfiles
+    .filter(p => !remainingPubkeys.includes(p.pubkey))
+    .delete()
 }
 
 export async function pruneBlockedContent(pubkeys: string[]): Promise<void> {
@@ -176,13 +185,13 @@ export async function pruneBlockedContent(pubkeys: string[]): Promise<void> {
   const shapeIds = shapes.map(s => s.id)
   const videoUrls = shapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
 
-  const reactionEvents = await db.cachedEvents
+  const reactionIds = await db.cachedEvents
     .where('eTags')
     .anyOf(shapeIds)
     .filter(e => [7, 16, 9735, 1111].includes(e.kind))
-    .toArray()
+    .primaryKeys()
 
-  await db.cachedEvents.bulkDelete([...reactionEvents.map(e => e.id), ...shapeIds])
+  await db.cachedEvents.bulkDelete([...reactionIds, ...shapeIds])
   await db.videoShapes.bulkDelete(shapeIds)
   await db.userVideoState.bulkDelete(shapeIds)
   await db.kindOneRejections.bulkDelete(shapeIds)
@@ -247,6 +256,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
         size: existing?.size,
         duration: existing?.duration,
         mediaStatus: existing?.mediaStatus ?? 'unknown',
+        isFailed: existing?.mediaStatus === 'failed',
         contentWarning: existing?.contentWarning,
         userState: existing?.userState,
         reactionCount: existing?.reactionCount ?? 0,
@@ -297,6 +307,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       ? null
       : await db.mediaStatus.get(videoUrl)
     const mediaStatus = cachedMedia?.status ?? existing?.mediaStatus ?? 'unknown'
+    const isFailed = mediaStatus === 'failed'
     const duration = cachedMedia?.duration ?? existing?.duration
 
     const cachedUserState = existing ? await db.userVideoState.get(event.id) : undefined
@@ -323,6 +334,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       size,
       duration,
       mediaStatus,
+      isFailed,
       contentWarning,
       userState,
       reactionCount: existing?.reactionCount ?? 0,
@@ -355,6 +367,7 @@ export async function updateMediaStatus(url: string, status: MediaStatusRecord['
     .equals(url)
     .modify((shape) => {
       shape.mediaStatus = status
+      shape.isFailed = status === 'failed'
       if (extra?.size !== undefined) shape.size = extra.size
       if (extra?.duration !== undefined) shape.duration = extra.duration
       shape.updatedAt = Date.now()
@@ -536,10 +549,8 @@ export async function getCacheVideoCount(): Promise<number> {
 }
 
 export async function getCacheOldestVideoTimestamp(): Promise<number | null> {
-  const oldest = await db.cachedEvents
-    .where('kind')
-    .anyOf([1, 21, 22, 34236])
-    .sortBy('created_at')
-  if (oldest.length === 0) return null
-  return oldest[0].created_at
+  const oldest = await db.videoShapes
+    .orderBy('created_at')
+    .first()
+  return oldest?.created_at ?? null
 }

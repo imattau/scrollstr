@@ -28,7 +28,7 @@ interface VideoFeedProps {
   isMuted: boolean
 }
 
-export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoChange, isMuted }) => {
+export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoChange, isMuted }) => {
   const { session } = useNostr()
   const [searchParams] = useSearchParams()
   const filterTag = searchParams.get('tag')
@@ -280,7 +280,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Feed identity string for effect dependencies (only changes when IDs/order changes)
   const feedKey = useMemo(
-    () => videos.map((v) => v.id).join(','),
+    () => videos.length === 0 ? '' : `${videos.length}:${videos[0]?.id}:${videos[videos.length - 1]?.id}`,
     [videos]
   )
 
@@ -344,13 +344,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
 
   // Save feed position to sessionStorage on slide change (skip when deep link is active)
   const currentVideoId = videos[activeIndex]?.id
+  const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     if (!currentVideoId || initialVideoId) return
-    sessionStorage.setItem('scrollstr-feed-state', JSON.stringify({
-      videoId: currentVideoId,
-      feedType,
-      filterTag,
-    }))
+    clearTimeout(feedStateTimer.current)
+    feedStateTimer.current = setTimeout(() => {
+      sessionStorage.setItem('scrollstr-feed-state', JSON.stringify({
+        videoId: currentVideoId,
+        feedType,
+        filterTag,
+      }))
+    }, 1000)
+    return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
 
   // Scroll to deep-linked video on load
@@ -578,4 +583,4 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       </div>
     </div>
   )
-}
+})

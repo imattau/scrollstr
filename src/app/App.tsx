@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react'
+import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AppRouter } from './router'
-import { LoginSheet } from '../features/auth/LoginSheet'
-import { CommentsSheet } from '../features/comments/CommentsSheet'
-import { ZapSheet } from '../features/zaps/ZapSheet'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
 import { db, saveEventToCache, updateUserVideoState } from '../nostr/cache'
-import { SplashScreen } from '../features/splash/SplashScreen'
+
+const LoginSheet = React.lazy(() => import('../features/auth/LoginSheet').then(m => ({ default: m.LoginSheet })))
+const CommentsSheet = React.lazy(() => import('../features/comments/CommentsSheet').then(m => ({ default: m.CommentsSheet })))
+const ZapSheet = React.lazy(() => import('../features/zaps/ZapSheet').then(m => ({ default: m.ZapSheet })))
+const SplashScreen = React.lazy(() => import('../features/splash/SplashScreen').then(m => ({ default: m.SplashScreen })))
 
 function AppContent() {
   const { pool, signEvent, session } = useNostr()
@@ -125,7 +126,7 @@ function AppContent() {
     localStorage.setItem('scrollstr_has_opened', 'true')
   }
 
-  const handleLoginSuccess = () => {
+  const handleLoginSuccess = useCallback(() => {
     setIsLoginOpen(false)
     if (isFirstRun.current) {
       setShowSplash(true)
@@ -140,11 +141,12 @@ function AppContent() {
         handleActionTriggerRef.current(type, videoId, creatorPubkey, videoKind)
       }, 300)
     }
-  }
+  }, [pendingAction])
 
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-neutral-950 font-sans text-neutral-100">
+        <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="size-9 animate-spin rounded-full border-2 border-[#27272a] border-t-[#8b5cf6]" /></div>}>
         <AppRouter 
           onActionTrigger={handleActionTrigger} 
           activeVideo={activeVideo}
@@ -176,6 +178,7 @@ function AppContent() {
         />
 
         {showSplash && <SplashScreen onFinish={handleSplashFinish} />}
+        </Suspense>
       </div>
     </BrowserRouter>
   )

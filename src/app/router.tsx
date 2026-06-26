@@ -1,13 +1,14 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import { Routes, Route, useLocation, useSearchParams } from 'react-router-dom'
 import { MainLayout } from '../components/layout/MainLayout'
-import { VideoFeed } from '../features/feed/VideoFeed'
-import { DiscoverPage } from '../features/discovery/DiscoverPage'
-import { PostWizard } from '../features/post/PostWizard'
-import { ActivityPage } from '../features/notifications/ActivityPage'
-import { ProfilePage } from '../features/profile/ProfilePage'
-import { SettingsPage } from '../features/settings/SettingsPage'
 import { DesktopCommentsPanel } from '../features/comments/DesktopCommentsPanel'
+
+const VideoFeed = React.lazy(() => import('../features/feed/VideoFeed').then(m => ({ default: m.VideoFeed })))
+const DiscoverPage = React.lazy(() => import('../features/discovery/DiscoverPage').then(m => ({ default: m.DiscoverPage })))
+const PostWizard = React.lazy(() => import('../features/post/PostWizard').then(m => ({ default: m.PostWizard })))
+const ActivityPage = React.lazy(() => import('../features/notifications/ActivityPage').then(m => ({ default: m.ActivityPage })))
+const ProfilePage = React.lazy(() => import('../features/profile/ProfilePage').then(m => ({ default: m.ProfilePage })))
+const SettingsPage = React.lazy(() => import('../features/settings/SettingsPage').then(m => ({ default: m.SettingsPage })))
 
 interface RouterProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void

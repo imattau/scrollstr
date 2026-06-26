@@ -1,8 +1,24 @@
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Home, Compass, PlusSquare, Bell, User, Settings, LogOut, Download } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
+
+const navItems = [
+  { path: '/', label: 'Home', icon: Home },
+  { path: '/discover', label: 'Discover', icon: Compass },
+  { path: '/post', label: 'Post', icon: PlusSquare },
+  { path: '/activity', label: 'Activity', icon: Bell },
+  { path: '/settings', label: 'Settings', icon: Settings },
+]
+
+const mobileNavItems = [
+  { path: '/', label: 'Home', icon: Home },
+  { path: '/discover', label: 'Discover', icon: Compass },
+  { path: '/post', label: 'Post', icon: PlusSquare },
+  { path: '/activity', label: 'Activity', icon: Bell },
+  { path: '/profile/me', label: 'Profile', icon: User },
+]
 
 interface MainLayoutProps {
   children: React.ReactNode
@@ -12,34 +28,18 @@ interface MainLayoutProps {
   feedType?: string
 }
 
-export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, immersive = false, pathname, feedType = 'explore' }) => {
+export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, immersive = false, pathname, feedType = 'explore' }) => {
   const { session, logout } = useNostr()
   const { isInstallable, installApp } = usePWAInstall()
 
-  const navItems = [
-    { path: '/', label: 'Home', icon: Home },
-    { path: '/discover', label: 'Discover', icon: Compass },
-    { path: '/post', label: 'Post', icon: PlusSquare },
-    { path: '/activity', label: 'Activity', icon: Bell },
-    { path: '/settings', label: 'Settings', icon: Settings },
-  ]
-
-  const mobileNavItems = [
-    { path: '/', label: 'Home', icon: Home },
-    { path: '/discover', label: 'Discover', icon: Compass },
-    { path: '/post', label: 'Post', icon: PlusSquare },
-    { path: '/activity', label: 'Activity', icon: Bell },
-    { path: '/profile/me', label: 'Profile', icon: User },
-  ]
-
   const [showFeedToggles, setShowFeedToggles] = useState(true)
 
-  const isActive = (path: string) => {
+  const isActive = useCallback((path: string) => {
     if (path === '/') {
       return pathname === '/'
     }
     return pathname.startsWith(path)
-  }
+  }, [pathname])
 
   if (immersive) {
     return (
@@ -334,4 +334,4 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, rightPanel, im
       </nav>
     </div>
   )
-}
+})

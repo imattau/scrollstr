@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Fuse from 'fuse.js'
 import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
@@ -69,6 +69,7 @@ export const DiscoverPage: React.FC = () => {
   const { session, pool, signEvent } = useNostr()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -293,9 +294,15 @@ export const DiscoverPage: React.FC = () => {
     )
   }, [myContactListEvent])
 
-  // Filter videos based on the search query using fuzzy search
+  // Debounce search input before running expensive Fuse.js search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  // Filter videos based on the debounced search query using fuzzy search
   const filteredVideos = useMemo(() => {
-    if (!searchQuery.trim()) return []
+    if (!debouncedSearch.trim()) return []
 
     const enriched = videos.map(v => ({
       ...v,
@@ -316,10 +323,10 @@ export const DiscoverPage: React.FC = () => {
       threshold: 0.4,
     })
 
-    return fuse.search(searchQuery).map(r => r.item)
-  }, [videos, searchQuery, authorProfileMap])
+    return fuse.search(debouncedSearch).map(r => r.item)
+  }, [videos, debouncedSearch, authorProfileMap])
 
-  const handleFollow = async (targetPubkey: string) => {
+  const handleFollow = useCallback(async (targetPubkey: string) => {
     if (!session) {
       alert('Please connect your Nostr account to follow creators')
       return
@@ -335,7 +342,7 @@ export const DiscoverPage: React.FC = () => {
       console.error('Follow toggle failed:', err)
       alert('Failed to update follow status: ' + (err.message || err))
     }
-  }
+  }, [session, signEvent, myContactListEvent])
 
   return (
     <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">

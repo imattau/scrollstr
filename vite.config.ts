@@ -40,11 +40,12 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
         navigateFallback: 'index.html',
+        navigateFallbackAllowlist: [/^\/.*$/],
         runtimeCaching: [
           {
             // Only cache m3u8 playlists (small text files); skip mp4/webm
             // to avoid filling Cache Storage with multi-MB video files
-            urlPattern: /^https:\/\/.+\.(m3u8)$/,
+            urlPattern: /^https:\/\/.+\.m3u8(\?.*)?$/i,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'videos',
@@ -52,6 +53,19 @@ export default defineConfig({
               expiration: {
                 maxEntries: 20,
                 maxAgeSeconds: 24 * 60 * 60, // 1 day
+                purgeOnQuotaError: true,
+              },
+            },
+          },
+          {
+            // Cache Google Fonts stylesheets and font files
+            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'fonts',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
                 purgeOnQuotaError: true,
               },
             },
@@ -68,6 +82,26 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
     alias: {
       '@': path.resolve(__dirname, './src'),
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) {
+            return 'vendor-react'
+          }
+          if (id.includes('node_modules/nostr-tools') || id.includes('node_modules/applesauce') || id.includes('node_modules/nostr-passkey') || id.includes('node_modules/nostr-passkey')) {
+            return 'vendor-nostr'
+          }
+          if (id.includes('node_modules/swiper') || id.includes('node_modules/vaul') || id.includes('node_modules/lucide-react')) {
+            return 'vendor-ui'
+          }
+          if (id.includes('node_modules/media-chrome') || id.includes('node_modules/hls.js')) {
+            return 'vendor-video'
+          }
+        },
+      },
     },
   },
 })

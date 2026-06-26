@@ -42,16 +42,16 @@ const worker = new Worker(
 
 export { worker as backfillWorker }
 
-const YIELD_MS = 5
-
 async function processBackfillEvents(events: any[]) {
-  for (const event of events) {
+  for (let i = 0; i < events.length; i++) {
     try {
-      await saveEventToCache(event)
+      await saveEventToCache(events[i])
     } catch (err) {
-      console.warn(`[pool] Failed to cache event ${event.id}:`, err)
+      console.warn(`[pool] Failed to cache event ${events[i].id}:`, err)
     }
-    await new Promise((r) => setTimeout(r, YIELD_MS))
+    if (i % 10 === 9) {
+      await new Promise((r) => setTimeout(r, 0))
+    }
   }
 }
 
@@ -163,6 +163,7 @@ MOCK_EVENTS.forEach((ev) => {
 // Limits concurrent subscriptions to avoid "too many requests" from relays.
 
 const MAX_CONCURRENT_SUBS = 6
+const MAX_QUEUE_SIZE = 50
 let activeSubCount = 0
 const subQueue: Array<{
   id: string
@@ -204,8 +205,10 @@ export function subscribeToRelays(
   if (activeSubCount < MAX_CONCURRENT_SUBS) {
     activeSubCount++
     worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
-  } else {
+  } else if (subQueue.length < MAX_QUEUE_SIZE) {
     subQueue.push({ id, relays, filters: filterList, unsub: doUnsubscribe })
+  } else {
+    console.warn(`[pool] Subscription queue full (${MAX_QUEUE_SIZE}), dropping sub ${id}`)
   }
 
   return doUnsubscribe

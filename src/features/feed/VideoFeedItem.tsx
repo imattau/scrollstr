@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useMemo, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
@@ -91,14 +91,15 @@ function ActionPill({
 const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange }) => {
   const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
-  const creatorLabel = `@${profile.displayName || profile.name}`
+  const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
   const [showInfo, setShowInfo] = useState(false)
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
-  const settings = loadSettings()
-  const isNsfwBlurred = settings.nsfwBlur && !!video.contentWarning && !nsfwRevealed
+  const nsfwBlur = useRef(loadSettings().nsfwBlur)
+  const isNsfwBlurred = nsfwBlur.current && !!video.contentWarning && !nsfwRevealed
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLongPress = useRef(false)
+  const onLike = useCallback(() => onActionClick('like', video.id, video.kind), [onActionClick, video.id, video.kind])
 
   const handleTouchStart = useCallback(() => {
     isLongPress.current = false
@@ -144,7 +145,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
           isActive={isActive && !isNsfwBlurred}
           isNearActive={isNearActive}
           isMuted={isMuted}
-          onLike={() => onActionClick('like', video.id, video.kind)}
+          onLike={onLike}
           showControls={false}
         />
       </div>
@@ -247,5 +248,6 @@ export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, next
     prevProps.video.hasZapped === nextProps.video.hasZapped &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.isNearActive === nextProps.isNearActive &&
-    prevProps.isMuted === nextProps.isMuted
+    prevProps.isMuted === nextProps.isMuted &&
+    prevProps.uiHidden === nextProps.uiHidden
 })

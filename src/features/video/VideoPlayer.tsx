@@ -1,10 +1,17 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react'
 import { useGesture } from '@use-gesture/react'
 import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, MediaTimeRange } from 'media-chrome/react'
-import Hls from 'hls.js'
 import { RotateCw } from 'lucide-react'
 import { updateMediaStatus } from '../../nostr/cache'
 import { isInternalUrl, isSafeVideoUrl } from '../../lib/crypto'
+
+let hlsModule: typeof import('hls.js').default | null = null
+async function getHls() {
+  if (!hlsModule) {
+    hlsModule = (await import('hls.js')).default
+  }
+  return hlsModule
+}
 
 interface VideoPlayerProps {
   url: string
@@ -16,9 +23,9 @@ interface VideoPlayerProps {
   showControls?: boolean
 }
 
-export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false }) => {
+export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const hlsInstanceRef = useRef<Hls | null>(null)
+  const hlsInstanceRef = useRef<any>(null)
   const [isHls, setIsHls] = useState(false)
   const [wasPlayingBeforePress, setWasPlayingBeforePress] = useState(false)
   const [isLandscape, setIsLandscape] = useState(false)
@@ -73,6 +80,9 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
   }, [isMuted])
 
+  // Retain video source during scroll grace period to avoid re-fetch on rapid scroll-back
+  const unloadTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+
   // Set up HLS or native playback only when near active viewport
   useEffect(() => {
     const video = videoRef.current
@@ -85,13 +95,18 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
 
     if (!isNearActive) {
-      // Fully strip media resource to release browser decoding memory
-      video.pause()
-      video.removeAttribute('src')
-      try {
-        video.load()
-      } catch (_) {}
+      // Keep source alive for 10s grace period; rapid scroll-back won't re-fetch
+      clearTimeout(unloadTimerRef.current)
+      unloadTimerRef.current = setTimeout(() => {
+        video.pause()
+        video.removeAttribute('src')
+        try {
+          video.load()
+        } catch (_) {}
+      }, 10000)
       return
+    } else {
+      clearTimeout(unloadTimerRef.current)
     }
 
     // Validate URL before probing to prevent SSRF
@@ -126,16 +141,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
 
     // Load source immediately, in parallel with the HEAD request
     if (isHls) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          maxMaxBufferLength: 10, // Optimize memory for vertical feed
-        })
-        hls.loadSource(url)
-        hls.attachMedia(video)
-        hlsInstanceRef.current = hls
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url
-      }
+      getHls().then(Hls => {
+        if (isAborted) return
+        if (Hls.isSupported()) {
+          const hls = new Hls({
+            maxMaxBufferLength: 10, // Optimize memory for vertical feed
+          })
+          hls.loadSource(url)
+          hls.attachMedia(video)
+          hlsInstanceRef.current = hls
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url
+        }
+      })
     } else {
       video.src = url
     }
@@ -241,10 +259,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
     }
   }, [wasPlayingBeforePress])
 
-  // @use-gesture/react: horizontal swipe to seek + hover tracking
+  // @use-gesture/react: horizontal swipe to seek + hover tracking (only active when near viewport)
+  const isNearActiveRef = useRef(isNearActive)
+  useEffect(() => { isNearActiveRef.current = isNearActive }, [isNearActive])
   const bindGestures = useGesture({
     onDrag: ({ down, movement: [mx], event }) => {
-      if (!down) return
+      if (!down || !isNearActiveRef.current) return
       const video = videoRef.current
       if (!video || !video.duration) return
 
@@ -257,6 +277,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       }
     },
     onHover: ({ hovering }) => {
+      if (!isNearActiveRef.current) return
       setIsHovering(hovering ?? false)
     },
   })
@@ -310,4 +331,4 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ url, poster, isActive,
       </MediaController>
     </div>
   )
-}
+})
