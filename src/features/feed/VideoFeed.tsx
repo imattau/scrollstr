@@ -48,6 +48,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const [newEventsCount, setNewEventsCount] = useState(0)
   const [uiHidden, setUiHidden] = useState(false)
   const endVideoIdsRef = useRef<Set<string>>(new Set())
+  const activeVideoIdRef = useRef<string | null>(null)
+  const prevVideosLengthRef = useRef(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -254,6 +256,14 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
 
+  // Track the active video ID so we can restore position when new events arrive
+  useEffect(() => {
+    const video = videos[activeIndex]
+    if (video) {
+      activeVideoIdRef.current = video.id
+    }
+  }, [activeIndex, videos])
+
   const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
 
   // Restore saved feed position from sessionStorage
@@ -357,6 +367,33 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     }, 1000)
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
+
+  // Restore Swiper position when new videos are appended to the feed
+  useEffect(() => {
+    const swiper = swiperRef.current
+    if (!swiper) return
+
+    const prevLength = prevVideosLengthRef.current
+    prevVideosLengthRef.current = videos.length
+
+    if (videos.length <= prevLength) return
+    if (initialVideoId) return
+
+    const activeId = activeVideoIdRef.current
+    if (!activeId) return
+
+    const currentSlideVideo = videos[swiper.activeIndex]
+    if (currentSlideVideo?.id === activeId) return
+
+    const newIndex = videos.findIndex(v => v.id === activeId)
+    if (newIndex >= 0) {
+      requestAnimationFrame(() => {
+        if (swiperRef.current && !swiperRef.current.destroyed) {
+          swiperRef.current.slideTo(newIndex, 0)
+        }
+      })
+    }
+  }, [videos.length, initialVideoId])
 
   // Scroll to deep-linked video on load
   useEffect(() => {
@@ -470,8 +507,6 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         initialSlide={swiperInitialSlide}
         onSwiper={(s) => { swiperRef.current = s }}
         onSlideChange={handleSlideChange}
-        observer
-        observeSlideChildren
         className="h-full w-full"
       >
         {videos.map((video, index) => (
