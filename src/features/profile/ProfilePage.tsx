@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar, ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -90,6 +90,9 @@ export const ProfilePage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'videos' | 'boosts' | 'about'>('videos')
   const [listView, setListView] = useState<'followers' | 'following' | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // Resolve target pubkey (route param or self session key)
   const targetPubkey = pubkey && pubkey !== 'me' ? pubkey : session?.pubkey
@@ -100,7 +103,7 @@ export const ProfilePage: React.FC = () => {
   }, [targetPubkey])
 
   // Fetch creator profile details
-  const profile = useProfile(targetPubkey || '')
+  const profile = useProfile(targetPubkey || '', refreshKey)
   const displayName = profile.displayName || profile.name || 'Nostr User'
   const creatorLabel = `@${profile.name}`
 
@@ -242,7 +245,7 @@ export const ProfilePage: React.FC = () => {
       cancelled = true
       cleanup?.()
     }
-  }, [targetPubkey, relayUrls])
+  }, [targetPubkey, relayUrls, refreshKey])
 
   // Subscribe to video events for the target user — only if cache seems stale
   useEffect(() => {
@@ -252,7 +255,7 @@ export const ProfilePage: React.FC = () => {
 
     db.cachedEvents.where('pubkey').equals(targetPubkey).filter(e => VIDEO_KINDS.includes(e.kind)).count().then((count) => {
       if (cancelled) return
-      if (count >= 10) {
+      if (count >= 10 && !refreshKey) {
         console.log(`[Profile] Skipping video sub for ${targetPubkey} — cache has ${count} events`)
         return
       }
@@ -270,7 +273,7 @@ export const ProfilePage: React.FC = () => {
       cancelled = true
       cleanup?.()
     }
-  }, [targetPubkey, relayUrls])
+  }, [targetPubkey, relayUrls, refreshKey])
 
   // Subscribe to the session user's mute list
   useEffect(() => {
@@ -383,12 +386,26 @@ export const ProfilePage: React.FC = () => {
       {/* Header */}
       <div className="flex h-[56px] items-center justify-between">
         <h2 className="text-[18px] font-bold truncate pr-3">{creatorLabel}</h2>
-        <button
-          onClick={() => navigate('/settings')}
-          className="text-neutral-400 hover:text-white p-1"
-        >
-          <MoreHorizontal className="h-5 w-5" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              setRefreshKey(k => k + 1)
+              setIsRefreshing(true)
+              clearTimeout(refreshTimerRef.current)
+              refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
+            }}
+            className="text-neutral-400 hover:text-white p-1 transition-colors"
+            title="Refresh profile data"
+          >
+            <RotateCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => navigate('/settings')}
+            className="text-neutral-400 hover:text-white p-1"
+          >
+            <MoreHorizontal className="h-5 w-5" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-[16px]">

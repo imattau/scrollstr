@@ -53,7 +53,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ onActionTrigger, onVideoCh
       : Promise.resolve([] as any[]),
     [session?.pubkey ?? '']
   ) ?? []
-  const contactListEvent = contactListEvents[contactListEvents.length - 1]?.event
+  const contactListEvent = contactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const followingPubkeys = useMemo(() => {
     if (!contactListEvent) return []

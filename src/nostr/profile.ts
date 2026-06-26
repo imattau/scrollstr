@@ -79,7 +79,8 @@ function cancelProfileFetch(pubkey: string) {
 }
 
 // React hook to fetch creator profile reactively from Dexie cache
-export const useProfile = (pubkey: string): CreatorProfile => {
+// Pass refreshKey to force a re-fetch even when the profile is cached.
+export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile => {
   const { session } = useNostr()
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const relayUrlsRef = useRef(relayUrls)
@@ -93,13 +94,13 @@ export const useProfile = (pubkey: string): CreatorProfile => {
   }, [pubkey])
 
   useEffect(() => {
-    if (!cachedProfile && pubkey) {
+    if (pubkey) {
       scheduleProfileFetch(pubkey, relayUrlsRef.current)
     }
     return () => {
       cancelProfileFetch(pubkeyRef.current)
     }
-  }, [pubkey, cachedProfile])
+  }, [pubkey, refreshKey])
 
   if (cachedProfile) {
     return {

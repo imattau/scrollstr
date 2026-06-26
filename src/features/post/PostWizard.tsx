@@ -82,7 +82,7 @@ export const PostWizard: React.FC = () => {
     },
     [userPubkey]
   ) ?? []
-  const blossomListEvent = blossomListEvents[blossomListEvents.length - 1]?.event
+  const blossomListEvent = blossomListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const nip96ListEvents: any[] = useLiveQuery(
     async () => {
@@ -91,7 +91,7 @@ export const PostWizard: React.FC = () => {
     },
     [userPubkey]
   ) ?? []
-  const nip96ListEvent = nip96ListEvents[nip96ListEvents.length - 1]?.event
+  const nip96ListEvent = nip96ListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   // Combine custom configured servers with priority order
   const uploadServers = useMemo(() => {
