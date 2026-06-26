@@ -38,7 +38,6 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
     const events = await pool.querySync(relayUrls, {
       kinds: [0],
       authors: pubkeys,
-      limit: 1,
     })
     return events
   } catch (err) {

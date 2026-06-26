@@ -60,7 +60,6 @@ function flushBatch(relayUrls: string[]) {
   batchUnsub = subscribeToRelays(relayUrls, {
     kinds: [0],
     authors: pubkeys,
-    limit: 1,
   })
 }
 
