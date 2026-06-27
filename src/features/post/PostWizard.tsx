@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -7,6 +8,7 @@ import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events'
 import { db } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { isSupportedVideo, convertToWebM } from './convertVideo'
 
 const postSchema = z.object({
   title: z.string().min(1, 'Title is required'),
@@ -72,6 +74,7 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
 
 export const PostWizard: React.FC = () => {
   const { pool, signEvent, session } = useNostr()
+  const navigate = useNavigate()
   const userPubkey = session?.pubkey
 
   // Retrieve user's configured Blossom and NIP-96 lists from Dexie cache
@@ -149,16 +152,22 @@ export const PostWizard: React.FC = () => {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState('')
+  const [selectedResolution, setSelectedResolution] = useState<number>(720)
+  const [conversionProgress, setConversionProgress] = useState(0)
+  const [isConverting, setIsConverting] = useState(false)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('video/')) {
-      alert('Please select a valid video file')
+    if (!isSupportedVideo(file)) {
+      alert('Unsupported format. Please use MP4, WebM, MOV, AVI, MKV, or OGG.')
       return
     }
     setVideoFile(file)
     setVideoPreview(URL.createObjectURL(file))
+    setSelectedResolution(720)
+    setConversionProgress(0)
+    setIsConverting(false)
   }
 
   const handlePublish = async () => {
@@ -170,13 +179,40 @@ export const PostWizard: React.FC = () => {
 
     setError('')
     setUploadProgress(10)
+
+    let uploadFile = videoFile
+    let mimeType = videoFile.type
+
+    if (videoFile.type !== 'video/webm') {
+      setIsConverting(true)
+      setConversionProgress(0)
+      setStatusMessage('Converting to WebM...')
+
+      try {
+        const webmBlob = await convertToWebM(
+          videoFile,
+          selectedResolution > 0 ? selectedResolution : 0,
+          (p) => setConversionProgress(p.percent)
+        )
+        uploadFile = new File([webmBlob], videoFile.name.replace(/\.[^.]+$/, '.webm'), { type: 'video/webm' })
+        mimeType = 'video/webm'
+      } catch (err: any) {
+        setIsConverting(false)
+        setStatusMessage('')
+        setError(`Conversion failed: ${err.message}`)
+        return
+      }
+
+      setIsConverting(false)
+    }
+
     setStatusMessage('Generating poster frame...')
     try {
-      const thumbnailBlob = await generateThumbnailFromVideo(videoFile).catch(() => null)
-      
+      const thumbnailBlob = await generateThumbnailFromVideo(uploadFile).catch(() => null)
+
       setUploadProgress(20)
       setStatusMessage('Calculating video hash...')
-      const videoHash = await calculateSha256(videoFile)
+      const videoHash = await calculateSha256(uploadFile)
 
       let videoUploadResult = null
       let posterUrl = ''
@@ -193,7 +229,7 @@ export const PostWizard: React.FC = () => {
 
           setUploadProgress(70)
           setStatusMessage(`Uploading video to ${server}...`)
-          videoUploadResult = await uploadMedia(signEvent, videoFile, server)
+          videoUploadResult = await uploadMedia(signEvent, uploadFile, server)
 
           uploadError = null
           break
@@ -221,9 +257,10 @@ export const PostWizard: React.FC = () => {
         videoUploadResult.url,
         videoHash,
         posterUrl,
-        values.title || videoFile.name,
+        values.title || uploadFile.name,
         `${values.description} ${values.altText}`.trim(),
-        tagsArray
+        tagsArray,
+        mimeType
       )
 
       setUploadProgress(100)
@@ -241,7 +278,7 @@ export const PostWizard: React.FC = () => {
     <div className="flex min-h-full flex-col bg-[#09090b] text-[#f7f7f8]">
       <div className="flex h-[56px] items-center justify-between px-4">
         <h2 className="text-[18px] font-bold">Post video</h2>
-        <button className="text-[22px] leading-none">×</button>
+        <button className="text-[22px] leading-none" onClick={() => navigate(-1)}>×</button>
       </div>
 
       <div className="flex flex-1 flex-col gap-[17px] overflow-y-auto px-[18px] pb-[76px]">
@@ -253,16 +290,60 @@ export const PostWizard: React.FC = () => {
           <span className="rounded-[18px] bg-[#18181d] px-[13px] py-[7px] text-[12px] font-medium">3 Publish</span>
         </div>
 
-        <label className="flex h-[350px] w-full flex-col items-center justify-center rounded-[18px] bg-[#21172e]">
-          {videoPreview ? (
-            <video src={videoPreview} className="h-full w-full rounded-[18px] object-cover" controls />
-          ) : (
-            <>
-              <span className="text-[14px] font-medium text-[#a1a1aa]">9:16 preview</span>
-              <input type="file" accept="video/mp4,video/*" className="hidden" onChange={handleFileChange} />
-            </>
-          )}
-        </label>
+        {videoPreview ? (
+          <div className="relative flex h-[350px] w-full flex-col items-center justify-center overflow-hidden rounded-[18px] bg-[#21172e]">
+            <video src={videoPreview} className="h-full w-full rounded-[18px] object-cover" controls playsInline />
+            <label className="absolute inset-0 cursor-pointer">
+              <input type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,video/ogg" className="hidden" onChange={handleFileChange} />
+            </label>
+          </div>
+        ) : (
+          <label className="flex h-[350px] w-full cursor-pointer flex-col items-center justify-center rounded-[18px] bg-[#21172e]">
+            <span className="text-[14px] font-medium text-[#a1a1aa]">9:16 preview</span>
+            <input type="file" accept="video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,video/ogg" className="hidden" onChange={handleFileChange} />
+          </label>
+        )}
+
+        {videoFile && videoFile.type !== 'video/webm' && !isConverting && (
+          <div className="flex items-center gap-3 rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+            <span className="text-[11px] font-medium text-[#a1a1aa]">Resolution</span>
+            <label className="flex items-center gap-1.5 text-[13px]">
+              <input type="radio" name="resolution" value={720}
+                checked={selectedResolution === 720}
+                onChange={() => setSelectedResolution(720)} />
+              720p
+            </label>
+            <label className="flex items-center gap-1.5 text-[13px]">
+              <input type="radio" name="resolution" value={1080}
+                checked={selectedResolution === 1080}
+                onChange={() => setSelectedResolution(1080)} />
+              1080p
+            </label>
+            <label className="flex items-center gap-1.5 text-[13px]">
+              <input type="radio" name="resolution" value={0}
+                checked={selectedResolution === 0}
+                onChange={() => setSelectedResolution(0)} />
+              Original
+            </label>
+          </div>
+        )}
+
+        {videoFile && videoFile.size > 200 * 1024 * 1024 && (
+          <div className="rounded-[12px] border border-amber-500/25 bg-amber-500/10 p-3 text-[12px] text-amber-300">
+            Large file ({Math.round(videoFile.size / 1024 / 1024)} MB). Conversion may take a while.
+          </div>
+        )}
+
+        {isConverting && (
+          <div className="flex flex-col gap-2 rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
+            <span className="text-[11px] font-medium text-[#a1a1aa]">Converting to WebM...</span>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#27272a]">
+              <div className="h-1.5 rounded-full bg-[#8b5cf6] transition-all duration-300"
+                style={{ width: `${conversionProgress}%` }} />
+            </div>
+            <span className="text-right text-[11px] text-[#a1a1aa]">{conversionProgress}%</span>
+          </div>
+        )}
 
         <div className="flex flex-col gap-[5px] rounded-[12px] bg-[#18181d] px-[14px] py-[10px]">
           <span className="text-[11px] font-medium text-[#a1a1aa]">Title</span>
@@ -297,7 +378,7 @@ export const PostWizard: React.FC = () => {
         <button
           type="button"
           onClick={handlePublish}
-          disabled={!session || !videoFile || !!statusMessage}
+          disabled={!session || !videoFile || isConverting || !!statusMessage}
           className="rounded-[11px] bg-[#8b5cf6] px-[16px] py-[11px] text-[13px] font-semibold text-white disabled:opacity-50"
         >
           Upload and publish

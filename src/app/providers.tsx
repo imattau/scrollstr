@@ -126,7 +126,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
     console.log('Unlocking passkey identity for login...')
     const result = await unlockPasskeyIdentity(record)
-    const signer = new PasskeySigner(result.record, result.secretKey)
+    const signer = new PasskeySigner(result.record, { key: result.secretKey })
     const pubkey = result.pubkey
     setSession({
       pubkey,
@@ -147,7 +147,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const result = nsec
       ? await importPasskeyIdentityFromNsec(nsec, options)
       : await registerPasskeyIdentity(options)
-    const signer = new PasskeySigner(result.record, result.secretKey)
+    const signer = new PasskeySigner(result.record, { key: result.secretKey })
     const pubkey = result.pubkey
     setSession({
       pubkey,
@@ -185,7 +185,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const record = readStoredPasskeyIdentity()
         if (!record) throw new Error('No passkey identity record found on device')
         const result = await unlockPasskeyIdentity(record)
-        activeSigner = new PasskeySigner(result.record, result.secretKey)
+        activeSigner = new PasskeySigner(result.record, { key: result.secretKey })
         setSession({
           pubkey: session.pubkey,
           method: 'passkey',

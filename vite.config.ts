@@ -100,6 +100,9 @@ export default defineConfig({
           if (id.includes('node_modules/media-chrome') || id.includes('node_modules/hls.js')) {
             return 'vendor-video'
           }
+          if (id.includes('node_modules/@ffmpeg')) {
+            return 'vendor-ffmpeg'
+          }
         },
       },
     },

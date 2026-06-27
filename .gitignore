@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 .claude/worktrees/
 test-results/
+public/ffmpeg-core/

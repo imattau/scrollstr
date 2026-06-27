@@ -80,7 +80,8 @@ export const publishVideoEvent = async (
   posterUrl: string,
   title: string,
   description: string,
-  hashtags: string[]
+  hashtags: string[],
+  mimeType: string = 'video/mp4'
 ): Promise<any> => {
   // Validate required fields
   if (!videoUrl) throw new Error('Video URL is required')
@@ -116,7 +117,7 @@ export const publishVideoEvent = async (
       ['published_at', Math.floor(Date.now() / 1000).toString()],
       ['alt', title],
       ...hashtags.map((tag) => ['t', tag.trim().toLowerCase()]),
-      ['imeta', `url ${videoUrl}`, `m video/mp4`, `x ${videoHash}`, `image ${posterUrl}`],
+      ['imeta', `url ${videoUrl}`, `m ${mimeType}`, `x ${videoHash}`, `image ${posterUrl}`],
     ],
   }
 
