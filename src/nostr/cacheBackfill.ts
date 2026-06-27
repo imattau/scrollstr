@@ -115,16 +115,17 @@ export async function startFollowedVideoBackfill(relayUrls: string[], followedPu
 
   if (targetPubkeys.length === 0) return
 
-  // Filter out pubkeys that already have cached video shapes
-  const uncached: string[] = []
-  for (const pk of targetPubkeys) {
-    const count = await db.videoShapes
-      .where('pubkey')
-      .equals(pk)
-      .filter(s => s.mediaStatus !== 'failed')
-      .count()
-    if (count < 3) uncached.push(pk)
+  // Batch-check which pubkeys have fewer than 3 cached video shapes
+  const allCached = await db.videoShapes
+    .where('pubkey')
+    .anyOf(targetPubkeys)
+    .filter(s => s.mediaStatus !== 'failed')
+    .toArray()
+  const counts = new Map<string, number>()
+  for (const s of allCached) {
+    counts.set(s.pubkey, (counts.get(s.pubkey) ?? 0) + 1)
   }
+  const uncached = targetPubkeys.filter(pk => (counts.get(pk) ?? 0) < 3)
 
   if (uncached.length === 0) {
     console.log('[CacheBackfill] All followed pubkeys already have cached videos.')

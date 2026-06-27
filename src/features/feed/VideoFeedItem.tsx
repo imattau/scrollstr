@@ -94,13 +94,13 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
   const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
   const [showInfo, setShowInfo] = useState(false)
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
-  const isNsfwBlurred = (() => {
+  const isNsfwBlurred = useMemo(() => {
     const s = loadSettings()
     if (!s.nsfwBlur) return false
     const hasContentWarning = !!video.contentWarning
     const isCreatorNsfw = s.nsfwPubkeys?.includes(video.creator.pubkey) ?? false
     return (hasContentWarning || isCreatorNsfw) && !nsfwRevealed
-  })()
+  }, [nsfwRevealed, video.contentWarning, video.creator.pubkey])
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLongPress = useRef(false)
@@ -221,7 +221,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
       <div className={`absolute bottom-0 left-0 right-0 z-10 bg-gradient-to-t from-[#09090b]/90 via-[#09090b]/60 to-transparent transition-all duration-300 ${showInfo && !uiHidden ? 'h-[230px] md:h-[120px]' : 'h-0 overflow-hidden'}`}>
         <div className={`absolute left-4 w-[278px] max-w-[calc(100%-96px)] space-y-[6px] leading-none md:left-[18px] md:w-[320px] transition-all duration-300 ${showInfo ? 'bottom-[16px] opacity-100' : 'bottom-[-10px] opacity-0'}`}>
           <p className="text-[15px] font-semibold text-[#f7f7f8]">
-            {creatorLabel} {video.creator.isVerified ? '✓' : ''}
+            {creatorLabel} {profile.isVerified ? '✓' : ''}
           </p>
           <div className="block w-full text-left text-[14px] font-normal text-[#f7f7f8]">
             <span className="block leading-[1.35]">

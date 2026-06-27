@@ -155,8 +155,10 @@ const MOCK_EVENTS = import.meta.env.DEV
     ]
   : []
 
-MOCK_EVENTS.forEach((ev) => {
-  saveEventToCache(ev as any).catch(() => {})
+queueMicrotask(() => {
+  MOCK_EVENTS.forEach((ev) => {
+    saveEventToCache(ev as any).catch(() => {})
+  })
 })
 
 // ── Subscription concurrency manager ────────────────────────────────────
@@ -164,18 +166,23 @@ MOCK_EVENTS.forEach((ev) => {
 
 const MAX_CONCURRENT_SUBS = 6
 const MAX_QUEUE_SIZE = 50
-let activeSubCount = 0
+const subMetadata = new Map<string, 'queued' | 'active'>()
 const subQueue: Array<{
   id: string
   relays: string[]
   filters: any[]
-  unsub: () => void
 }> = []
 
 function processQueue() {
-  while (subQueue.length > 0 && activeSubCount < MAX_CONCURRENT_SUBS) {
-    const item = subQueue.shift()!
-    activeSubCount++
+  while (subQueue.length > 0 && subMetadata.size < MAX_CONCURRENT_SUBS) {
+    const item = subQueue[0]
+    // Skip if this sub was unsubscribed while queued
+    if (!subMetadata.has(item.id)) {
+      subQueue.shift()
+      continue
+    }
+    subQueue.shift()
+    subMetadata.set(item.id, 'active')
     worker.postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
   }
 }
@@ -195,18 +202,22 @@ export function subscribeToRelays(
     const idx = subQueue.findIndex((item) => item.id === id)
     if (idx !== -1) {
       subQueue.splice(idx, 1)
+      subMetadata.delete(id)
       return
     }
-    worker.postMessage({ type: 'unsubscribe', id })
-    activeSubCount--
-    processQueue()
+    if (subMetadata.get(id) === 'active') {
+      subMetadata.delete(id)
+      worker.postMessage({ type: 'unsubscribe', id })
+      processQueue()
+    }
   }
 
-  if (activeSubCount < MAX_CONCURRENT_SUBS) {
-    activeSubCount++
+  if (subMetadata.size < MAX_CONCURRENT_SUBS) {
+    subMetadata.set(id, 'active')
     worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
   } else if (subQueue.length < MAX_QUEUE_SIZE) {
-    subQueue.push({ id, relays, filters: filterList, unsub: doUnsubscribe })
+    subMetadata.set(id, 'queued')
+    subQueue.push({ id, relays, filters: filterList })
   } else {
     console.warn(`[pool] Subscription queue full (${MAX_QUEUE_SIZE}), dropping sub ${id}`)
   }

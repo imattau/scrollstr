@@ -47,6 +47,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const swiperRef = useRef<SwiperType | null>(null)
   const [newEventsCount, setNewEventsCount] = useState(0)
   const [uiHidden, setUiHidden] = useState(false)
+  const [deeplinkFailed, setDeeplinkFailed] = useState(false)
   const endVideoIdsRef = useRef<Set<string>>(new Set())
   const activeVideoIdRef = useRef<string | null>(null)
   const prevVideosLengthRef = useRef(0)
@@ -203,7 +204,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
     id: shape.id,
-    kind: 22,
+    kind: shape.kind ?? 22,
     createdAt: shape.created_at,
     firstSeen: shape.firstSeen,
     insertOrder: shape.insertOrder,
@@ -265,6 +266,12 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [activeIndex, videos])
 
   const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
+
+  useEffect(() => {
+    if (!initialVideoId) return
+    const timer = setTimeout(() => setDeeplinkFailed(true), 10000)
+    return () => clearTimeout(timer)
+  }, [initialVideoId])
 
   // Restore saved feed position from sessionStorage
   const savedFeedState = useMemo(() => {
@@ -486,8 +493,17 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     return (
       <div className="flex h-dvh w-full items-center justify-center bg-[#09090b] md:h-full">
         <div className="flex flex-col items-center gap-3">
-          <div className="size-8 animate-spin rounded-full border-2 border-[#27272a] border-t-[#8b5cf6]" />
-          <p className="text-[14px] text-[#a1a1aa]">Finding video...</p>
+          {deeplinkFailed ? (
+            <>
+              <p className="text-[14px] text-[#a1a1aa]">Video not found</p>
+              <p className="text-[12px] text-[#71717a]">The video could not be loaded from relays.</p>
+            </>
+          ) : (
+            <>
+              <div className="size-8 animate-spin rounded-full border-2 border-[#27272a] border-t-[#8b5cf6]" />
+              <p className="text-[14px] text-[#a1a1aa]">Finding video...</p>
+            </>
+          )}
         </div>
       </div>
     )

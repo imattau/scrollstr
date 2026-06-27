@@ -18,6 +18,7 @@ export interface CachedEvent {
 
 export interface VideoShape {
   id: string;
+  kind?: number;
   pubkey: string;
   created_at: number;
   firstSeen?: number;
@@ -228,37 +229,127 @@ function parseImetaTag(imetaTag: string[]): Record<string, string> {
 }
 
 export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | null> {
-  try {
-    const isVideo = event.kind === 1 || event.kind === 21 || event.kind === 22 || event.kind === 34236
-    if (!isVideo) return null
+  const isVideo = event.kind === 1 || event.kind === 21 || event.kind === 22 || event.kind === 34236
+  if (!isVideo) return null
 
-    // Kind-1: extract video URL from content text
+  try {
     if (event.kind === 1) {
-      const videoUrl = extractVideoUrlFromContent(event.content || '')
-      if (!videoUrl) return null
+      return await db.transaction('rw', db.videoShapes, db.userVideoState, async () => {
+        const videoUrl = extractVideoUrlFromContent(event.content || '')
+        if (!videoUrl) return null
+
+        const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
+        const existing = await db.videoShapes.get(event.id)
+
+        const cachedUserState = existing ? await db.userVideoState.get(event.id) : undefined
+        const userState = cachedUserState ? {
+          watched: cachedUserState.watched,
+          skipped: cachedUserState.skipped,
+          liked: cachedUserState.liked,
+          boosted: cachedUserState.boosted,
+          zapped: cachedUserState.zapped
+        } : existing?.userState
+
+        const shape: VideoShape = {
+          id: event.id,
+          kind: event.kind,
+          pubkey: event.pubkey,
+          created_at: event.created_at,
+          firstSeen: existing?.firstSeen ?? Date.now(),
+          insertOrder: existing?.insertOrder ?? nextInsertOrder(),
+          videoUrl,
+          thumbnailUrl: existing?.thumbnailUrl,
+          title: existing?.title ?? '',
+          summary: event.content || (existing?.summary ?? ''),
+          hashtags: hashtags.length > 0 ? hashtags : (existing?.hashtags ?? []),
+          mimeType: existing?.mimeType,
+          size: existing?.size,
+          duration: existing?.duration,
+          mediaStatus: existing?.mediaStatus ?? 'unknown',
+          isFailed: existing?.mediaStatus === 'failed',
+          contentWarning: existing?.contentWarning,
+          userState,
+          reactionCount: existing?.reactionCount ?? 0,
+          repostCount: existing?.repostCount ?? 0,
+          replyCount: existing?.replyCount ?? 0,
+          zapCount: existing?.zapCount ?? 0,
+          zapTotalSats: existing?.zapTotalSats ?? 0,
+          updatedAt: Date.now()
+        }
+
+        await db.videoShapes.put(shape)
+        return shape
+      })
+    }
+
+    return await db.transaction('rw', db.videoShapes, db.userVideoState, db.mediaStatus, async () => {
+      const existing = await db.videoShapes.get(event.id)
+
+      const titleTag = event.tags.find((t: any) => t[0] === 'title')
+      const title = titleTag ? titleTag[1] : (existing?.title ?? '')
+
+      const altTag = event.tags.find((t: any) => t[0] === 'alt')
+      const summary = event.content || (altTag ? altTag[1] : (existing?.summary ?? ''))
 
       const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
+      const finalHashtags = hashtags.length > 0 ? hashtags : (existing?.hashtags ?? [])
 
-      const existing = await db.videoShapes.get(event.id)
+      const cwTag = event.tags.find((t: any) => t[0] === 'content-warning')
+      const nsfwLabel = event.tags.find((t: any) => t[0] === 'l' && t[1] === 'nsfw')
+      const hasNsfwContent = /\b(NSFW|porn|PORN)\b/i.test(event.content || '')
+      const contentWarning = cwTag?.[1] || nsfwLabel?.[1] || (hasNsfwContent ? 'NSFW' : undefined) || existing?.contentWarning
+
+      const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
+      let videoUrl = existing?.videoUrl ?? ''
+      let thumbnailUrl = existing?.thumbnailUrl
+      let mimeType = existing?.mimeType
+      let size = existing?.size
+
+      if (imetaTag) {
+        const imetaData = parseImetaTag(imetaTag)
+        if (imetaData['url']) videoUrl = imetaData['url']
+        if (imetaData['image']) thumbnailUrl = imetaData['image']
+        if (imetaData['m']) mimeType = imetaData['m']
+        if (imetaData['size']) size = parseInt(imetaData['size'], 10)
+      }
+
+      if (!videoUrl) return null
+
+      const cachedMedia = (existing?.videoUrl === videoUrl && existing?.mediaStatus !== 'unknown')
+        ? null
+        : await db.mediaStatus.get(videoUrl)
+      const mediaStatus = cachedMedia?.status ?? existing?.mediaStatus ?? 'unknown'
+      const isFailed = mediaStatus === 'failed'
+      const duration = cachedMedia?.duration ?? existing?.duration
+
+      const cachedUserState = existing ? await db.userVideoState.get(event.id) : undefined
+      const userState = cachedUserState ? {
+        watched: cachedUserState.watched,
+        skipped: cachedUserState.skipped,
+        liked: cachedUserState.liked,
+        boosted: cachedUserState.boosted,
+        zapped: cachedUserState.zapped
+      } : existing?.userState
 
       const shape: VideoShape = {
         id: event.id,
+        kind: event.kind,
         pubkey: event.pubkey,
         created_at: event.created_at,
         firstSeen: existing?.firstSeen ?? Date.now(),
         insertOrder: existing?.insertOrder ?? nextInsertOrder(),
         videoUrl,
-        thumbnailUrl: existing?.thumbnailUrl,
-        title: existing?.title ?? '',
-        summary: event.content || (existing?.summary ?? ''),
-        hashtags: hashtags.length > 0 ? hashtags : (existing?.hashtags ?? []),
-        mimeType: existing?.mimeType,
-        size: existing?.size,
-        duration: existing?.duration,
-        mediaStatus: existing?.mediaStatus ?? 'unknown',
-        isFailed: existing?.mediaStatus === 'failed',
-        contentWarning: existing?.contentWarning,
-        userState: existing?.userState,
+        thumbnailUrl,
+        title,
+        summary,
+        hashtags: finalHashtags,
+        mimeType,
+        size,
+        duration,
+        mediaStatus,
+        isFailed,
+        contentWarning,
+        userState,
         reactionCount: existing?.reactionCount ?? 0,
         repostCount: existing?.repostCount ?? 0,
         replyCount: existing?.replyCount ?? 0,
@@ -269,84 +360,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
 
       await db.videoShapes.put(shape)
       return shape
-    }
-
-    const existing = await db.videoShapes.get(event.id)
-
-    const titleTag = event.tags.find((t: any) => t[0] === 'title')
-    const title = titleTag ? titleTag[1] : (existing?.title ?? '')
-
-    const altTag = event.tags.find((t: any) => t[0] === 'alt')
-    const summary = event.content || (altTag ? altTag[1] : (existing?.summary ?? ''))
-
-    const hashtags = event.tags.filter((t: any) => t[0] === 't').map((t: any) => t[1])
-    const finalHashtags = hashtags.length > 0 ? hashtags : (existing?.hashtags ?? [])
-
-    const cwTag = event.tags.find((t: any) => t[0] === 'content-warning')
-    const nsfwLabel = event.tags.find((t: any) => t[0] === 'l' && t[1] === 'nsfw')
-    const hasNsfwContent = /\b(NSFW|porn|PORN)\b/i.test(event.content || '')
-    const contentWarning = cwTag?.[1] || nsfwLabel?.[1] || (hasNsfwContent ? 'NSFW' : undefined) || existing?.contentWarning
-
-    const imetaTag = event.tags.find((t: any) => t[0] === 'imeta')
-    let videoUrl = existing?.videoUrl ?? ''
-    let thumbnailUrl = existing?.thumbnailUrl
-    let mimeType = existing?.mimeType
-    let size = existing?.size
-
-    if (imetaTag) {
-      const imetaData = parseImetaTag(imetaTag)
-      if (imetaData['url']) videoUrl = imetaData['url']
-      if (imetaData['image']) thumbnailUrl = imetaData['image']
-      if (imetaData['m']) mimeType = imetaData['m']
-      if (imetaData['size']) size = parseInt(imetaData['size'], 10)
-    }
-
-    if (!videoUrl) return null
-
-    const cachedMedia = (existing?.videoUrl === videoUrl && existing?.mediaStatus !== 'unknown')
-      ? null
-      : await db.mediaStatus.get(videoUrl)
-    const mediaStatus = cachedMedia?.status ?? existing?.mediaStatus ?? 'unknown'
-    const isFailed = mediaStatus === 'failed'
-    const duration = cachedMedia?.duration ?? existing?.duration
-
-    const cachedUserState = existing ? await db.userVideoState.get(event.id) : undefined
-    const userState = cachedUserState ? {
-      watched: cachedUserState.watched,
-      skipped: cachedUserState.skipped,
-      liked: cachedUserState.liked,
-      boosted: cachedUserState.boosted,
-      zapped: cachedUserState.zapped
-    } : existing?.userState
-
-    const shape: VideoShape = {
-      id: event.id,
-      pubkey: event.pubkey,
-      created_at: event.created_at,
-      firstSeen: existing?.firstSeen ?? Date.now(),
-      insertOrder: existing?.insertOrder ?? nextInsertOrder(),
-      videoUrl,
-      thumbnailUrl,
-      title,
-      summary,
-      hashtags: finalHashtags,
-      mimeType,
-      size,
-      duration,
-      mediaStatus,
-      isFailed,
-      contentWarning,
-      userState,
-      reactionCount: existing?.reactionCount ?? 0,
-      repostCount: existing?.repostCount ?? 0,
-      replyCount: existing?.replyCount ?? 0,
-      zapCount: existing?.zapCount ?? 0,
-      zapTotalSats: existing?.zapTotalSats ?? 0,
-      updatedAt: Date.now()
-    }
-
-    await db.videoShapes.put(shape)
-    return shape
+    })
   } catch (err) {
     console.error('[Cache] Failed to build video shape:', err)
     return null
@@ -516,32 +530,40 @@ export async function saveEventToCache(event: any): Promise<void> {
 }
 
 async function incrementVideoCounts(videoId: string, reactionEvent: any): Promise<void> {
-  const shape = await db.videoShapes.get(videoId)
-  if (!shape) return
-
   const kind = reactionEvent.kind
   if (kind === 7) {
-    shape.reactionCount = (shape.reactionCount ?? 0) + 1
+    await db.videoShapes.where('id').equals(videoId).modify(s => {
+      s.reactionCount = (s.reactionCount ?? 0) + 1
+      s.updatedAt = Date.now()
+    })
   } else if (kind === 6 || kind === 16) {
-    shape.repostCount = (shape.repostCount ?? 0) + 1
+    await db.videoShapes.where('id').equals(videoId).modify(s => {
+      s.repostCount = (s.repostCount ?? 0) + 1
+      s.updatedAt = Date.now()
+    })
   } else if (kind === 1111) {
-    shape.replyCount = (shape.replyCount ?? 0) + 1
+    await db.videoShapes.where('id').equals(videoId).modify(s => {
+      s.replyCount = (s.replyCount ?? 0) + 1
+      s.updatedAt = Date.now()
+    })
   } else if (kind === 9735) {
-    shape.zapCount = (shape.zapCount ?? 0) + 1
     const descriptionTag = reactionEvent.tags.find((t: any) => t[0] === 'description')?.[1]
+    let zapSats = 0
     if (descriptionTag) {
       try {
         const parsedDesc = JSON.parse(descriptionTag)
         const amount = parsedDesc.tags.find((t: any) => t[0] === 'amount')?.[1]
         if (amount) {
-          shape.zapTotalSats = (shape.zapTotalSats ?? 0) + Math.floor(parseInt(amount, 10) / 1000)
+          zapSats = Math.floor(parseInt(amount, 10) / 1000)
         }
       } catch (_) {}
     }
+    await db.videoShapes.where('id').equals(videoId).modify(s => {
+      s.zapCount = (s.zapCount ?? 0) + 1
+      s.zapTotalSats = (s.zapTotalSats ?? 0) + zapSats
+      s.updatedAt = Date.now()
+    })
   }
-
-  shape.updatedAt = Date.now()
-  await db.videoShapes.put(shape)
 }
 
 export async function getCacheVideoCount(): Promise<number> {
