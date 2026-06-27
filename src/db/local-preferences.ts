@@ -7,6 +7,7 @@ export interface AppSettings {
   autoplay: boolean
   mutedUsers: string[]
   nsfwBlur: boolean
+  nsfwPubkeys: string[]
 }
 
 const STORAGE_KEY = 'nostr-clips-settings'
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoplay: true,
   mutedUsers: [],
   nsfwBlur: true,
+  nsfwPubkeys: [],
 }
 
 let cachedSettings: AppSettings | null = null
@@ -52,6 +54,32 @@ export const saveSettings = (settings: AppSettings): void => {
   } catch (err) {
     console.error('Failed to save settings:', err)
   }
+}
+
+// Fields that have their own dedicated Nostr event kinds and are excluded from the
+// encrypted kind-30078 app-settings blob.
+const NOSTR_SYNC_EXCLUDE = new Set([
+  'relays',         // kind-10002 relay list
+  'blossomServers', // kind-10063 blossom list
+  'walletString',   // encrypted locally via AES-GCM
+  'mutedUsers',     // kind-10000 mute list
+])
+
+export function getNostrSyncableSettings(settings: AppSettings): Partial<AppSettings> {
+  const result: Record<string, any> = {}
+  for (const key of Object.keys(settings) as (keyof AppSettings)[]) {
+    if (!NOSTR_SYNC_EXCLUDE.has(key)) {
+      result[key] = settings[key]
+    }
+  }
+  return result as Partial<AppSettings>
+}
+
+export function mergeSettings(
+  target: AppSettings,
+  source: Partial<AppSettings>
+): AppSettings {
+  return { ...target, ...source }
 }
 
 export async function loadWalletString(): Promise<string> {

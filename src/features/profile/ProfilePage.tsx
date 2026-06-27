@@ -11,6 +11,8 @@ import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { useMuteList } from '../../nostr/useMuteList'
+import { loadSettings, saveSettings, getNostrSyncableSettings } from '../../db/local-preferences'
+import { publishSettingsEvent, encryptSettingsJson, getNip44FromSigner } from '../../nostr/events/settings'
 
 const EMPTY_VIDEOS: any[] = []
 const EMPTY_EVENTS: any[] = []
@@ -97,6 +99,9 @@ export const ProfilePage: React.FC = () => {
 
   // Resolve target pubkey (route param or self session key)
   const targetPubkey = pubkey && pubkey !== 'me' ? pubkey : session?.pubkey
+
+  const [nsfwPubkeys, setNsfwPubkeys] = useState<string[]>(() => loadSettings().nsfwPubkeys)
+  const isNsfwMarked = targetPubkey ? nsfwPubkeys.includes(targetPubkey) : false
 
   // Reset list view when navigating to a different profile
   useEffect(() => {
@@ -325,6 +330,32 @@ export const ProfilePage: React.FC = () => {
     }
   }
 
+  const handleNsfwToggle = async () => {
+    if (!targetPubkey) return
+    const newPubkeys = isNsfwMarked
+      ? nsfwPubkeys.filter((pk) => pk !== targetPubkey)
+      : [...nsfwPubkeys, targetPubkey]
+    setNsfwPubkeys(newPubkeys)
+    const settings = loadSettings()
+    settings.nsfwPubkeys = newPubkeys
+    saveSettings(settings)
+    alert(isNsfwMarked ? 'Removed NSFW mark' : 'Marked creator as NSFW')
+
+    if (session && session.method !== 'readonly') {
+      const nip44 = getNip44FromSigner(session.signer)
+      if (nip44) {
+        try {
+          const syncable = getNostrSyncableSettings(settings)
+          const encrypted = await encryptSettingsJson(nip44, session.pubkey, syncable)
+          const signed = await publishSettingsEvent(signEvent, encrypted)
+          await saveEventToCache(signed)
+        } catch (err) {
+          console.warn('[Profile] Failed to publish NSFW settings to Nostr:', err)
+        }
+      }
+    }
+  }
+
   const handleFollow = async (target: string) => {
     if (!session) return
     try {
@@ -475,6 +506,16 @@ export const ProfilePage: React.FC = () => {
               }`}
             >
               {isBlocked ? 'Unblock' : 'Block'}
+            </button>
+            <button
+              onClick={handleNsfwToggle}
+              className={`h-[40px] flex-1 rounded-[12px] text-[13px] font-bold transition-colors ${
+                isNsfwMarked
+                  ? 'bg-pink-600/20 text-pink-400 hover:bg-pink-600/30'
+                  : 'bg-[#27272a] text-[#a1a1aa] hover:bg-pink-600/20 hover:text-pink-400'
+              }`}
+            >
+              {isNsfwMarked ? 'Unmark NSFW' : 'Mark NSFW'}
             </button>
           </div>
         )}

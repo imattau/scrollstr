@@ -12,6 +12,8 @@ import {
 import { PasskeySigner } from 'nostr-passkey/applesauce'
 import { NostrContext, type UserSession } from './nostrContext'
 import { NostrConnectSigner, parseBunkerUrl } from '../nostr/nip46'
+import { loadSettings, saveSettings, mergeSettings } from '../db/local-preferences'
+import { loadRawSettingsEvent, decryptSettingsJson, getNip44, getNip44FromSigner } from '../nostr/events/settings'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -64,6 +66,29 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
   }, [])
+
+  // Try to sync app settings from Nostr kind-30078 event
+  useEffect(() => {
+    if (!session || session.method === 'readonly') return
+
+    const trySync = async () => {
+      const nip44 = getNip44() ?? (session.signer ? getNip44FromSigner(session.signer) : null)
+      if (!nip44) return
+
+      const encrypted = await loadRawSettingsEvent(session.pubkey)
+      if (!encrypted) return
+
+      const decrypted = await decryptSettingsJson(nip44, session.pubkey, encrypted)
+      if (!decrypted) return
+
+      const current = loadSettings()
+      const merged = mergeSettings(current, decrypted)
+      saveSettings(merged)
+      console.log('[settings] Synced settings from Nostr kind-30078')
+    }
+
+    trySync().catch((err) => console.warn('[settings] Failed to sync from Nostr:', err))
+  }, [session?.pubkey, session?.method])
 
   const loginWithNip07 = useCallback(async (): Promise<string> => {
     if (!window.nostr) {

@@ -94,8 +94,13 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
   const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
   const [showInfo, setShowInfo] = useState(false)
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
-  const nsfwBlur = useRef(loadSettings().nsfwBlur)
-  const isNsfwBlurred = nsfwBlur.current && !!video.contentWarning && !nsfwRevealed
+  const isNsfwBlurred = (() => {
+    const s = loadSettings()
+    if (!s.nsfwBlur) return false
+    const hasContentWarning = !!video.contentWarning
+    const isCreatorNsfw = s.nsfwPubkeys?.includes(video.creator.pubkey) ?? false
+    return (hasContentWarning || isCreatorNsfw) && !nsfwRevealed
+  })()
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLongPress = useRef(false)
