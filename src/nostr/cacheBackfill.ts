@@ -101,16 +101,23 @@ export async function maybeResumeProfileBackfill(relayUrls: string[], knownPubke
  * Fetches video events (kinds 21, 22, 34236) scoped to specific authors
  * so the Following feed is populated quickly.
  */
-export async function startFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[]): Promise<void> {
+export async function startFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[], mutedPubkeys?: Set<string>): Promise<void> {
   if (isFollowedVideoBackfillRunning) {
     console.log('[CacheBackfill] Followed-video backfill already running, skipping.')
     return
   }
   if (followedPubkeys.length === 0) return
 
+  // Filter out muted pubkeys so we don't re-fetch blocked creators' content
+  const targetPubkeys = mutedPubkeys?.size
+    ? followedPubkeys.filter(pk => !mutedPubkeys.has(pk))
+    : followedPubkeys
+
+  if (targetPubkeys.length === 0) return
+
   // Filter out pubkeys that already have cached video shapes
   const uncached: string[] = []
-  for (const pk of followedPubkeys) {
+  for (const pk of targetPubkeys) {
     const count = await db.videoShapes
       .where('pubkey')
       .equals(pk)
@@ -144,9 +151,9 @@ export async function startFollowedVideoBackfill(relayUrls: string[], followedPu
 /**
  * Triggers followed-video backfill only if one isn't already running.
  */
-export async function maybeResumeFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[]): Promise<void> {
+export async function maybeResumeFollowedVideoBackfill(relayUrls: string[], followedPubkeys: string[], mutedPubkeys?: Set<string>): Promise<void> {
   if (isFollowedVideoBackfillRunning) return
-  await startFollowedVideoBackfill(relayUrls, followedPubkeys)
+  await startFollowedVideoBackfill(relayUrls, followedPubkeys, mutedPubkeys)
 }
 
 /**

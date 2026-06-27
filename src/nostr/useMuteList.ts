@@ -36,11 +36,14 @@ export function useMuteList(sessionPubkey?: string | null): {
     [muteListEvent]
   )
 
-  const prevPubkeysRef = useRef<Set<string>>(new Set())
+  const prevPubkeysRef = useRef<Set<string> | null>(null)
 
   useEffect(() => {
     const prev = prevPubkeysRef.current
-    if (prev.size === 0 && mutedPubkeys.size === 0) return
+    if (prev === null) {
+      prevPubkeysRef.current = new Set(mutedPubkeys)
+      return
+    }
 
     const newlyBlocked: string[] = []
     for (const pk of mutedPubkeys) {
