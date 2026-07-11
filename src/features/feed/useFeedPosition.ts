@@ -33,7 +33,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (video) {
       activeVideoIdRef.current = video.id
     }
-  }, [activeIndex, videos])
+  }, [activeIndex])
 
   const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
 
@@ -96,7 +96,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
 
-  // Restore Swiper position when new videos are appended to the feed
+  // Restore Swiper position when new videos are inserted at the front of the feed
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
   useEffect(() => {

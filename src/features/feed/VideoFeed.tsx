@@ -18,7 +18,7 @@ import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
 
 import { useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowDown, Sparkles, RotateCw } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles, RotateCw } from 'lucide-react'
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
@@ -257,7 +257,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         >
           <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
           <span>{newEventsCount} new</span>
-          <ArrowDown className="w-3.5 h-3.5 flex-shrink-0" />
+          <ArrowUp className="w-3.5 h-3.5 flex-shrink-0" />
         </button>
       )}
 
