@@ -2,8 +2,12 @@ import Dexie, { type Table } from 'dexie'
 import { verifyEvent } from 'nostr-tools'
 
 let insertOrderCounter = 0
+let lastInsertOrderTs = 0
 function nextInsertOrder(): number {
-  return Date.now() * 1000 + (++insertOrderCounter)
+  const now = Date.now() * 1000
+  const ts = now > lastInsertOrderTs ? now : lastInsertOrderTs + 1
+  lastInsertOrderTs = ts
+  return ts + (++insertOrderCounter)
 }
 
 export interface CachedEvent {
@@ -94,6 +98,15 @@ export interface CreatorProfileRecord {
   updatedAt: number
 }
 
+export interface VideoCountersRecord {
+  id: string
+  reactionCount: number
+  repostCount: number
+  replyCount: number
+  zapCount: number
+  zapTotalSats: number
+}
+
 export interface KindOneRejectionRecord {
   id: string
   reason: string
@@ -106,22 +119,19 @@ class ScrollstrCacheDatabase extends Dexie {
   mediaStatus!: Table<MediaStatusRecord, string>
   userVideoState!: Table<UserVideoStateRecord, string>
   authorProfiles!: Table<CreatorProfileRecord, string>
+  videoCounters!: Table<VideoCountersRecord, string>
   kindOneRejections!: Table<KindOneRejectionRecord, string>
 
   constructor() {
     super('scrollstr-event-cache')
-    this.version(11).stores({
+    this.version(12).stores({
       cachedEvents: 'id, [kind+pubkey], [pubkey+kind], kind, pubkey, created_at, *eTags, *pTags',
       videoShapes: 'id, pubkey, created_at, videoUrl, insertOrder, *hashtags, mediaStatus, isFailed',
       mediaStatus: 'url, status',
       userVideoState: 'id',
       authorProfiles: 'pubkey',
+      videoCounters: 'id',
       kindOneRejections: 'id, checkedAt',
-    }).upgrade(async tx => {
-      await tx.table('cachedEvents').toCollection().modify(event => {
-        event.eTags = (event.event?.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
-        event.pTags = (event.event?.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
-      })
     })
   }
 }
@@ -486,6 +496,14 @@ export async function saveEventToCache(event: any): Promise<void> {
   const isVideo = kind === 1 || kind === 21 || kind === 22 || kind === 34236
   const isReactionOrComment = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
 
+  let wroteCachedEvent = false
+  const cleanup = async () => {
+    if (wroteCachedEvent) {
+      await db.cachedEvents.delete(id).catch(() => {})
+      await db.videoShapes.delete(id).catch(() => {})
+    }
+  }
+
   try {
     // Fast-path: skip kind-1 notes already examined and rejected
     if (kind === 1) {
@@ -500,6 +518,7 @@ export async function saveEventToCache(event: any): Promise<void> {
     const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
 
     await db.cachedEvents.put({ id, kind, pubkey, created_at, event, eTags, pTags })
+    wroteCachedEvent = true
 
     if (isVideo) {
       const shape = await buildOrUpdateVideoShape(event)
@@ -525,45 +544,71 @@ export async function saveEventToCache(event: any): Promise<void> {
       await buildOrUpdateAuthorProfile(event)
     }
   } catch (error) {
-    console.error(`[Cache] Error saving event ${id} to cache:`, error)
+    console.error(`[Cache] Error saving event ${id} (kind=${kind}, pubkey=${pubkey.slice(0,8)}):`, error)
+    await cleanup()
   }
 }
 
 async function incrementVideoCounts(videoId: string, reactionEvent: any): Promise<void> {
-  const kind = reactionEvent.kind
-  if (kind === 7) {
-    await db.videoShapes.where('id').equals(videoId).modify(s => {
-      s.reactionCount = (s.reactionCount ?? 0) + 1
-      s.updatedAt = Date.now()
-    })
-  } else if (kind === 6 || kind === 16) {
-    await db.videoShapes.where('id').equals(videoId).modify(s => {
-      s.repostCount = (s.repostCount ?? 0) + 1
-      s.updatedAt = Date.now()
-    })
-  } else if (kind === 1111) {
-    await db.videoShapes.where('id').equals(videoId).modify(s => {
-      s.replyCount = (s.replyCount ?? 0) + 1
-      s.updatedAt = Date.now()
-    })
-  } else if (kind === 9735) {
-    const descriptionTag = reactionEvent.tags.find((t: any) => t[0] === 'description')?.[1]
-    let zapSats = 0
-    if (descriptionTag) {
-      try {
-        const parsedDesc = JSON.parse(descriptionTag)
-        const amount = parsedDesc.tags.find((t: any) => t[0] === 'amount')?.[1]
-        if (amount) {
-          zapSats = Math.floor(parseInt(amount, 10) / 1000)
-        }
-      } catch (_) {}
+  await db.transaction('rw', db.videoCounters, async () => {
+    const kind = reactionEvent.kind
+    const existing = await db.videoCounters.get(videoId) ?? { id: videoId, reactionCount: 0, repostCount: 0, replyCount: 0, zapCount: 0, zapTotalSats: 0 }
+
+    if (kind === 7) {
+      existing.reactionCount += 1
+    } else if (kind === 6 || kind === 16) {
+      existing.repostCount += 1
+    } else if (kind === 1111) {
+      existing.replyCount += 1
+    } else if (kind === 9735) {
+      existing.zapCount += 1
+      const descriptionTag = reactionEvent.tags.find((t: any) => t[0] === 'description')?.[1]
+      if (descriptionTag) {
+        try {
+          const parsedDesc = JSON.parse(descriptionTag)
+          const amount = parsedDesc.tags.find((t: any) => t[0] === 'amount')?.[1]
+          if (amount) {
+            existing.zapTotalSats += Math.floor(parseInt(amount, 10) / 1000)
+          }
+        } catch (_) {}
+      }
     }
-    await db.videoShapes.where('id').equals(videoId).modify(s => {
-      s.zapCount = (s.zapCount ?? 0) + 1
-      s.zapTotalSats = (s.zapTotalSats ?? 0) + zapSats
-      s.updatedAt = Date.now()
-    })
+
+    await db.videoCounters.put(existing)
+  })
+}
+
+export async function mergeCountersIntoShape(shape: VideoShape): Promise<VideoShape> {
+  const counters = await db.videoCounters.get(shape.id)
+  if (!counters) return shape
+  return {
+    ...shape,
+    reactionCount: counters.reactionCount,
+    repostCount: counters.repostCount,
+    replyCount: counters.replyCount,
+    zapCount: counters.zapCount,
+    zapTotalSats: counters.zapTotalSats,
   }
+}
+
+export async function mergeCountersIntoShapes(shapes: VideoShape[]): Promise<VideoShape[]> {
+  if (shapes.length === 0) return shapes
+  const ids = shapes.map(s => s.id)
+  const counters = await db.videoCounters.where('id').anyOf(ids).toArray()
+  if (counters.length === 0) return shapes
+  const counterMap = new Map(counters.map(c => [c.id, c]))
+  return shapes.map(shape => {
+    const c = counterMap.get(shape.id)
+    if (!c) return shape
+    return {
+      ...shape,
+      reactionCount: c.reactionCount,
+      repostCount: c.repostCount,
+      replyCount: c.replyCount,
+      zapCount: c.zapCount,
+      zapTotalSats: c.zapTotalSats,
+    }
+  })
 }
 
 export async function getCacheVideoCount(): Promise<number> {

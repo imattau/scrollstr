@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback, useLayoutEffect } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react'
 import { Swiper, SwiperSlide } from 'swiper/react'
 import { Virtual, Keyboard, Mousewheel } from 'swiper/modules'
 import type { Swiper as SwiperType } from 'swiper'
@@ -8,19 +8,17 @@ import 'swiper/css/keyboard'
 import 'swiper/css/mousewheel'
 import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { db, VideoShape } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
-import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill, maybeResumeFollowBackfill, maybeResumeUserVideoBackfill } from '../../nostr/cacheBackfill'
+import { subscribeToRelays } from '../../nostr/pool'
+import { useFeedVideos } from './useFeedVideos'
+import { useFeedPosition } from './useFeedPosition'
+import { useFeedSubscriptions } from './useFeedSubscriptions'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowDown, Sparkles, RotateCw } from 'lucide-react'
-import { sortByInsertOrder } from './feedSort'
-
-const PAGE_SIZE = 50
-const LOAD_MORE_THRESHOLD = 5
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
@@ -38,22 +36,14 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const [activeIndex, setActiveIndex] = useState(0)
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
-  const [isFetchingOlder, setIsFetchingOlder] = useState(false)
-  const lastOlderFetchAtRef = useRef(0)
-  const userMetadataSubscribedRef = useRef<string | null>(null)
-  const initialBackfillsFiredRef = useRef(false)
-  const relayUrls = useUserRelayUrls(session?.pubkey)
-
-  const swiperRef = useRef<SwiperType | null>(null)
-  const [newEventsCount, setNewEventsCount] = useState(0)
   const [uiHidden, setUiHidden] = useState(false)
-  const [deeplinkFailed, setDeeplinkFailed] = useState(false)
-  const endVideoIdsRef = useRef<Set<string>>(new Set())
-  const activeVideoIdRef = useRef<string | null>(null)
-  const prevVideosLengthRef = useRef(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const relayUrls = useUserRelayUrls(session?.pubkey)
+
+  const swiperRef = useRef<SwiperType | null>(null)
 
   // Reactively query the user's kind:3 contact list from Dexie cache
   const contactListEvents = useLiveQuery(
@@ -62,6 +52,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       : Promise.resolve([] as any[]),
     [session?.pubkey ?? '']
   ) ?? []
+
   const contactListEvent = contactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
 
   const followingPubkeys = useMemo(() => {
@@ -71,265 +62,48 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
-  // Track whether we have loaded the user's initial metadata/relay lists from relays
-  const [isMetadataLoaded, setIsMetadataLoaded] = useState(false)
-
-  // Loading indicator for the feed subscription
-  const [isFeedLoading, setIsFeedLoading] = useState(true)
-
-  // Sync pool default relays whenever the user's relay list resolves.
-  useEffect(() => {
-    if (relayUrls.length > 0) {
-      console.log('[VideoFeed] Updating active relays to user list:', relayUrls)
-      setActiveRelays(relayUrls)
-      void maybeResumeBackfill(relayUrls)
-    }
-  }, [relayUrls])
-
-  // Profile backfill: pre-fetch kind:0 metadata and video events for
-  // followed users so the Following feed is populated quickly.
-  useEffect(() => {
-    if (followingPubkeys.length > 0 && relayUrls.length > 0) {
-      void maybeResumeProfileBackfill(relayUrls, followingPubkeys)
-      void maybeResumeFollowedVideoBackfill(relayUrls, followingPubkeys, mutedPubkeys)
-    }
-  }, [followingPubkeys, relayUrls])
-
-  // Bootstrap user metadata from cache + relays
-  useEffect(() => {
-    if (!session?.pubkey) {
-      setIsMetadataLoaded(true)
-      return
-    }
-
-    let cancelled = false
-
-    Promise.all([
-      db.cachedEvents.where({ kind: 0, pubkey: session.pubkey }).first(),
-      db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).first(),
-      db.cachedEvents.where({ kind: 10002, pubkey: session.pubkey }).first(),
-    ]).then(([kind0, kind3, kind10002]) => {
-      if (cancelled) return
-      if (kind0 && kind3 && kind10002) {
-        console.log(`[VideoFeed] User metadata found in cache, setting loaded immediately`)
-        setIsMetadataLoaded(true)
-      }
-    })
-
-    const bootstrapRelays = [
-      'wss://purplepag.es',
-      'wss://relay.damus.io',
-      'wss://nos.lol',
-      'wss://relay.snort.social',
-    ]
-
-    console.log(`[VideoFeed] Fetching user profile and relay list for ${session.pubkey} over bootstrap relays:`, bootstrapRelays)
-
-    const unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [session.pubkey], limit: 3 })
-
-    const timer = setTimeout(() => {
-      console.log(`[VideoFeed] Metadata loaded (or timeout)`)
-      setIsMetadataLoaded(true)
-    }, 1500)
-
-    return () => {
-      cancelled = true
-      unsub()
-      clearTimeout(timer)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.pubkey])
-
-  // Background backfills at startup: fetch the user's kind:3 contact list
-  // and their own video events so the Following feed is populated correctly.
-  useEffect(() => {
-    if (!session?.pubkey || relayUrls.length === 0) return
-    if (initialBackfillsFiredRef.current) return
-    initialBackfillsFiredRef.current = true
-
-    console.log('[VideoFeed] Firing initial follow & user-video backfills')
-    maybeResumeFollowBackfill(relayUrls, [session.pubkey])
-    maybeResumeUserVideoBackfill(relayUrls, [session.pubkey])
-  }, [session?.pubkey, relayUrls])
-
-  // Feed subscription: fetch recent videos from all relays into the cache.
-  useEffect(() => {
-    if (relayUrls.length === 0) return
-    console.log('[VideoFeed] Fetching videos...')
-    setIsFeedLoading(true)
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
-    })
-    const timer = setTimeout(() => setIsFeedLoading(false), 2000)
-    return () => {
-      unsub()
-      clearTimeout(timer)
-    }
-  }, [relayUrls, refreshKey])
-
-  // Query all non-failed videos for Explore feed (reactive to Dexie changes)
-  const _allShapes = useLiveQuery(async () => {
-    try {
-      return await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
-    } catch (err) {
-      console.error('[VideoFeed] Error in video query:', err)
-      return []
-    }
-  }, [])
-  const allShapes = useMemo(() => {
-    const shapes = _allShapes ?? []
-    if (mutedPubkeys.size === 0) return shapes
-    return shapes.filter((s: VideoShape) => !mutedPubkeys.has(s.pubkey))
-  }, [_allShapes, mutedPubkeys])
-
-  // Query videos from followed pubkeys using the pubkey index (reactive to Dexie changes)
-  const _followedShapes = useLiveQuery(async () => {
-    if (!session || followingPubkeys.length === 0) return []
-    try {
-      return await db.videoShapes
-        .where('pubkey').anyOf(followingPubkeys)
-        .filter(shape => shape.mediaStatus !== 'failed')
-        .toArray()
-    } catch (err) {
-      console.error('[VideoFeed] Error in following video query:', err)
-      return []
-    }
-  }, [session, followingPubkeys])
-  const followedShapes = useMemo(() => {
-    const shapes = _followedShapes ?? []
-    if (mutedPubkeys.size === 0) return shapes
-    return shapes.filter((s: VideoShape) => !mutedPubkeys.has(s.pubkey))
-  }, [_followedShapes, mutedPubkeys])
-
-  const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
-    id: shape.id,
-    kind: shape.kind ?? 22,
-    createdAt: shape.created_at,
-    firstSeen: shape.firstSeen,
-    insertOrder: shape.insertOrder,
-    title: shape.title ?? '',
-    description: shape.summary ?? '',
-    url: shape.videoUrl,
-    poster: shape.thumbnailUrl,
-    creator: {
-      pubkey: shape.pubkey,
-      name: shape.authorName || shape.pubkey.slice(0, 8),
-      picture: shape.authorPicture
-    },
-    hashtags: shape.hashtags || [],
-    likesCount: shape.reactionCount || 0,
-    commentsCount: shape.replyCount || 0,
-    boostsCount: shape.repostCount || 0,
-    zapsCount: shape.zapCount || 0,
-    hasLiked: shape.userState?.liked || false,
-    hasBoosted: shape.userState?.boosted || false,
-    hasZapped: shape.userState?.zapped || false,
-    music: 'Original Clip Audio',
-    mediaStatus: shape.mediaStatus,
-    contentWarning: shape.contentWarning,
-    width: shape.width,
-    height: shape.height,
-    duration: shape.duration,
-    size: shape.size,
-    mimeType: shape.mimeType
+  // Feed data: videos, filtering, sorting
+  const { videos: rawVideos, feedKey, videosRef } = useFeedVideos({
+    sessionPubkey: session?.pubkey,
+    feedType,
+    followingPubkeys,
+    mutedPubkeys,
+    mutedHashtags,
+    filterTag,
+    refreshKey,
   })
 
-  const videos = useMemo(() => {
-    const source = feedType === 'following' && session ? followedShapes : allShapes
-    let list = source.map(mapShapeToVideoItem)
+  // Stabilize videos array reference to prevent React/Swiper DOM conflicts
+  const videos = useMemo(() => rawVideos, [rawVideos])
 
-    if (filterTag) {
-      list = list.filter((v: VideoItemData) =>
-        v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
-      )
-    }
+  // Feed position: deep link, sessionStorage, Swiper position restoration
+  const {
+    swiperInitialSlide,
+    deeplinkFailed,
+    deeplinkPending,
+    activeVideoIdRef,
+    prevVideosLengthRef,
+  } = useFeedPosition({
+    initialVideoId,
+    feedType,
+    filterTag,
+    videos,
+    swiperRef,
+    activeIndex,
+    setActiveIndex,
+  })
 
-    if (mutedHashtags.size > 0) {
-      list = list.filter((v: VideoItemData) =>
-        !v.hashtags?.some((t: string) => mutedHashtags.has(t.toLowerCase()))
-      )
-    }
-
-    return [...list].sort(sortByInsertOrder)
-  }, [allShapes, followedShapes, feedType, session, filterTag, mutedHashtags])
-
-  const videosRef = useRef(videos)
-  useEffect(() => { videosRef.current = videos }, [videos])
-
-  // Track the active video ID so we can restore position when new events arrive
-  useEffect(() => {
-    const video = videos[activeIndex]
-    if (video) {
-      activeVideoIdRef.current = video.id
-    }
-  }, [activeIndex, videos])
-
-  const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
-
-  useEffect(() => {
-    if (!initialVideoId) return
-    const timer = setTimeout(() => setDeeplinkFailed(true), 10000)
-    return () => clearTimeout(timer)
-  }, [initialVideoId])
-
-  // Restore saved feed position from sessionStorage
-  const savedFeedState = useMemo(() => {
-    try {
-      const raw = sessionStorage.getItem('scrollstr-feed-state')
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
-    }
-  }, [])
-
-  const swiperInitialSlide = useMemo(() => {
-    if (initialVideoId) {
-      const idx = videos.findIndex(v => v.id === initialVideoId)
-      return idx >= 0 ? idx : 0
-    }
-    if (savedFeedState?.videoId) {
-      const idx = videos.findIndex(v => v.id === savedFeedState.videoId)
-      if (idx >= 0) return idx
-    }
-    return 0
-  }, [initialVideoId, videos, savedFeedState])
-
-  // Feed identity string for effect dependencies (only changes when IDs/order changes)
-  const feedKey = useMemo(
-    () => videos.length === 0 ? '' : `${videos.length}:${videos[0]?.id}:${videos[videos.length - 1]?.id}`,
-    [videos]
-  )
-
-  // Load more older content when approaching the beginning of the feed (index 0).
-  // Since all content uses insertOrder = Date.now() on first discovery, older
-  // backfilled events also append at the end of the list.
-  const oldestCreatedAt = videos[0]?.createdAt
-  useEffect(() => {
-    if (videos.length === 0) return
-    if (activeIndex > LOAD_MORE_THRESHOLD) return
-    if (isFetchingOlder) return
-
-    if (!oldestCreatedAt) return
-
-    const now = Date.now()
-    if (now - lastOlderFetchAtRef.current < 1500) return
-    lastOlderFetchAtRef.current = now
-    setIsFetchingOlder(true)
-
-    console.log(`Loading older videos before ${oldestCreatedAt}...`)
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      limit: PAGE_SIZE,
-      until: oldestCreatedAt - 1,
-    })
-    const doneTimer = setTimeout(() => setIsFetchingOlder(false), 3000)
-
-    return () => {
-      unsub()
-      clearTimeout(doneTimer)
-    }
-  }, [activeIndex, isFetchingOlder, videos.length, oldestCreatedAt, relayUrls])
+  // Subscriptions: relays, backfills, load-more
+  const oldestCreatedAt = videos[videos.length - 1]?.createdAt
+  useFeedSubscriptions({
+    relayUrls,
+    sessionPubkey: session?.pubkey,
+    followingPubkeys,
+    mutedPubkeys,
+    activeIndex,
+    videosLength: videos.length,
+    oldestCreatedAt,
+  })
 
   // Progressive comments & zaps subscription for videos near the viewport
   const lastSubscribedVideoIdsRef = useRef<string[]>([])
@@ -359,101 +133,25 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, feedKey, relayUrls])
 
-  // Save feed position to sessionStorage on slide change (skip when deep link is active)
-  const currentVideoId = videos[activeIndex]?.id
-  const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => {
-    if (!currentVideoId || initialVideoId) return
-    clearTimeout(feedStateTimer.current)
-    feedStateTimer.current = setTimeout(() => {
-      sessionStorage.setItem('scrollstr-feed-state', JSON.stringify({
-        videoId: currentVideoId,
-        feedType,
-        filterTag,
-      }))
-    }, 1000)
-    return () => clearTimeout(feedStateTimer.current)
-  }, [currentVideoId, feedType, filterTag, initialVideoId])
+  // New-events counter
+  const [newEventsCount, setNewEventsCount] = useState(0)
+  const seenVideoIdsRef = useRef<Set<string>>(new Set())
 
-  // Restore Swiper position when new videos are appended to the feed
-  useEffect(() => {
-    const swiper = swiperRef.current
-    if (!swiper) return
-
-    const prevLength = prevVideosLengthRef.current
-    prevVideosLengthRef.current = videos.length
-
-    if (videos.length <= prevLength) return
-    if (initialVideoId) return
-
-    const activeId = activeVideoIdRef.current
-    if (!activeId) return
-
-    const currentSlideVideo = videos[swiper.activeIndex]
-    if (currentSlideVideo?.id === activeId) return
-
-    const newIndex = videos.findIndex(v => v.id === activeId)
-    if (newIndex >= 0) {
-      requestAnimationFrame(() => {
-        if (swiperRef.current && !swiperRef.current.destroyed) {
-          swiperRef.current.slideTo(newIndex, 0)
-        }
-      })
-    }
-  }, [videos.length, initialVideoId])
-
-  // Scroll to deep-linked video on load
-  useEffect(() => {
-    if (!initialVideoId || videos.length === 0 || !swiperRef.current) return
-    const idx = videosRef.current.findIndex(v => v.id === initialVideoId)
-    if (idx < 0) return
-    swiperRef.current.slideTo(idx, 0)
-    setActiveIndex(idx)
-  }, [initialVideoId, videos.length])
-
-  // Restore saved feed position on load (when no deep link)
-  useEffect(() => {
-    if (initialVideoId || videos.length === 0 || !swiperRef.current) return
-    const saved = savedFeedState
-    if (!saved?.videoId) return
-    if (saved.feedType !== feedType) return
-    if (saved.filterTag !== filterTag) return
-    const idx = videosRef.current.findIndex(v => v.id === saved.videoId)
-    if (idx < 0) return
-    swiperRef.current.slideTo(idx, 0)
-    setActiveIndex(idx)
-  }, [videos.length, savedFeedState, initialVideoId, feedType, filterTag])
-
-  // Propagate active video to parent
-  const handleSlideChange = useCallback((swiper: SwiperType) => {
-    const idx = swiper.activeIndex
-    setActiveIndex(idx)
-    const video = videosRef.current[idx]
-    if (onVideoChange && video) {
-      onVideoChange(video)
-    }
-  }, [onVideoChange])
-
-  // New-events counter: tracks how many new items appeared before the current end position.
-  // With ascending sort, new videos append at the end (highest insertOrder).
   useLayoutEffect(() => {
     if (videos.length === 0) return
 
-    // Initialise seen IDs on first render
-    if (endVideoIdsRef.current.size === 0) {
-      endVideoIdsRef.current = new Set(videos.map(v => v.id))
+    if (seenVideoIdsRef.current.size === 0) {
+      seenVideoIdsRef.current = new Set(videos.map(v => v.id))
       return
     }
 
-    // Near the end → reset seen set
-    if (activeIndexRef.current >= videos.length - 1) {
-      endVideoIdsRef.current = new Set(videos.map(v => v.id))
+    if (activeIndexRef.current <= 0) {
+      seenVideoIdsRef.current = new Set(videos.map(v => v.id))
       setNewEventsCount(0)
       return
     }
 
-    // Count videos that aren't in the seen set
-    const unseen = videos.filter(v => !endVideoIdsRef.current.has(v.id)).length
+    const unseen = videos.filter(v => !seenVideoIdsRef.current.has(v.id)).length
     if (unseen > 0) {
       setNewEventsCount(unseen)
     }
@@ -463,16 +161,25 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const scrollToNewest = useCallback(() => {
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    swiperRef.current?.slideTo(currentVideos.length - 1, 300)
-    setActiveIndex(currentVideos.length - 1)
+    swiperRef.current?.slideTo(0, 300)
+    setActiveIndex(0)
     setNewEventsCount(0)
-    endVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
-  }, [])
+    seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
+  }, [videosRef])
+
+  const handleSlideChange = useCallback((swiper: SwiperType) => {
+    const idx = swiper.activeIndex
+    setActiveIndex(idx)
+    const video = videosRef.current[idx]
+    if (onVideoChange && video) {
+      onVideoChange(video)
+    }
+  }, [onVideoChange, videosRef])
 
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
     const video = videosRef.current.find((v: VideoItemData) => v.id === videoId)
     onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
-  }, [onActionTrigger])
+  }, [onActionTrigger, videosRef])
 
   if (videos.length === 0) {
     return (
@@ -511,7 +218,6 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   return (
     <div className="w-full h-full relative overflow-hidden">
-      {isFeedLoading && <div className="feed-loading-bar" />}
       <Swiper
         modules={[Virtual, Keyboard, Mousewheel]}
         direction="vertical"
@@ -523,6 +229,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         initialSlide={swiperInitialSlide}
         onSwiper={(s) => { swiperRef.current = s }}
         onSlideChange={handleSlideChange}
+        observer
+        observeParents
+        observeSlideChildren
         className="h-full w-full"
       >
         {videos.map((video, index) => (
@@ -540,8 +249,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         ))}
       </Swiper>
 
-      {/* New events pill — shown at bottom when user has scrolled away from end and new videos arrived */}
-      {newEventsCount > 0 && activeIndex < videos.length - 1 && !uiHidden && (
+      {newEventsCount > 0 && activeIndex > 0 && !uiHidden && (
         <button
           onClick={scrollToNewest}
           className="new-events-pill"
@@ -553,7 +261,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         </button>
       )}
 
-      {/* Floating navigation buttons for desktop */}
+      {/* Desktop navigation */}
       <div className={`hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
         <button
           onClick={() => {
@@ -571,7 +279,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           onClick={() => swiperRef.current?.slideTo(0, 300)}
           disabled={activeIndex === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to oldest"
+          title="Jump to newest"
         >
           <ChevronsUp className="w-5 h-5" />
         </button>
@@ -595,13 +303,13 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           onClick={() => swiperRef.current?.slideTo(videos.length - 1, 300)}
           disabled={activeIndex === videos.length - 1 || videos.length === 0}
           className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to newest"
+          title="Jump to oldest"
         >
           <ChevronsDown className="w-5 h-5" />
         </button>
       </div>
 
-      {/* Mobile jump buttons */}
+      {/* Mobile navigation */}
       <div className={`md:hidden flex flex-col gap-2 absolute left-3 top-1/2 -translate-y-1/2 z-40 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
         <button
           onClick={() => {
@@ -619,7 +327,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           onClick={() => swiperRef.current?.slideTo(0, 300)}
           disabled={activeIndex === 0}
           className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to oldest"
+          title="Jump to newest"
         >
           <ChevronsUp className="w-4 h-4" />
         </button>
@@ -627,7 +335,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           onClick={() => swiperRef.current?.slideTo(videos.length - 1, 300)}
           disabled={activeIndex === videos.length - 1 || videos.length === 0}
           className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to newest"
+          title="Jump to oldest"
         >
           <ChevronsDown className="w-4 h-4" />
         </button>

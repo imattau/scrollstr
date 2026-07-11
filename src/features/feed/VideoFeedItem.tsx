@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
 import { loadSettings } from '../../db/local-preferences'
-import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff } from 'lucide-react'
+import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff, AlertTriangle, SkipForward } from 'lucide-react'
 
 export interface CreatorProfile {
   pubkey: string
@@ -154,6 +154,26 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
           showControls={false}
         />
       </div>
+
+      {(video.mediaStatus === 'failed' || video.mediaStatus === 'too_large' || video.mediaStatus === 'unsupported') && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80">
+          <AlertTriangle className="w-10 h-10 text-[#a1a1aa]" />
+          <span className="text-[15px] font-semibold text-[#f7f7f8]">
+            {video.mediaStatus === 'failed' && 'Failed to load'}
+            {video.mediaStatus === 'too_large' && 'Video too large'}
+            {video.mediaStatus === 'unsupported' && 'Unsupported format'}
+          </span>
+          <span className="text-[12px] text-[#a1a1aa] text-center px-8">
+            {video.mediaStatus === 'failed' && 'This video could not be loaded from the server.'}
+            {video.mediaStatus === 'too_large' && 'This video exceeds the maximum file size.'}
+            {video.mediaStatus === 'unsupported' && 'Your browser does not support this video format.'}
+          </span>
+          <span className="flex items-center gap-1 mt-1 text-[11px] text-[#71717a]">
+            <SkipForward className="w-3 h-3" />
+            Scroll past to continue
+          </span>
+        </div>
+      )}
 
       {isNsfwBlurred && (
         <button

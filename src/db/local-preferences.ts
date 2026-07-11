@@ -31,30 +31,41 @@ const DEFAULT_SETTINGS: AppSettings = {
   nsfwPubkeys: [],
 }
 
-let cachedSettings: AppSettings | null = null
-let cacheTime = 0
+const SETTINGS_CHANGED_EVENT = 'scrollstr-settings-changed'
 
-export const loadSettings = (): AppSettings => {
-  const now = Date.now()
-  if (cachedSettings && now - cacheTime < 100) return cachedSettings
+let cachedSettings: AppSettings | null = null
+
+const loadRawSettings = (): AppSettings => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    cachedSettings = raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS
-    cacheTime = now
-  } catch (err) {
-    console.error('Failed to load settings:', err)
-    cachedSettings = DEFAULT_SETTINGS
+    return raw ? { ...DEFAULT_SETTINGS, ...JSON.parse(raw) } : DEFAULT_SETTINGS
+  } catch {
+    return DEFAULT_SETTINGS
   }
-  return cachedSettings!
+}
+
+export const loadSettings = (): AppSettings => {
+  if (cachedSettings) return cachedSettings
+  cachedSettings = loadRawSettings()
+  return cachedSettings
 }
 
 export const saveSettings = (settings: AppSettings): void => {
+  cachedSettings = settings
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
   } catch (err) {
     console.error('Failed to save settings:', err)
   }
+  window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT))
 }
+
+// Listen for settings changes from other tabs and invalidate cache
+window.addEventListener('storage', (e) => {
+  if (e.key === STORAGE_KEY) {
+    cachedSettings = null
+  }
+})
 
 // Fields that have their own dedicated Nostr event kinds and are excluded from the
 // encrypted kind-30078 app-settings blob.

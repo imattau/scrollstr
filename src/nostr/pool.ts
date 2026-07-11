@@ -163,25 +163,44 @@ queueMicrotask(() => {
 
 // ── Subscription concurrency manager ────────────────────────────────────
 // Limits concurrent subscriptions to avoid "too many requests" from relays.
+// Supports priority levels to prevent important subscriptions from starving.
 
 const MAX_CONCURRENT_SUBS = 6
 const MAX_QUEUE_SIZE = 50
+type SubPriority = 'high' | 'normal' | 'low'
 const subMetadata = new Map<string, 'queued' | 'active'>()
 const subQueue: Array<{
   id: string
   relays: string[]
   filters: any[]
+  priority: SubPriority
 }> = []
 
 function processQueue() {
   while (subQueue.length > 0 && subMetadata.size < MAX_CONCURRENT_SUBS) {
-    const item = subQueue[0]
+    // Find highest-priority item in queue
+    let bestIdx = 0
+    let bestPriority: SubPriority = 'low'
+    for (let i = 0; i < subQueue.length; i++) {
+      const p = subQueue[i].priority
+      if (p === 'high') {
+        bestIdx = i
+        bestPriority = 'high'
+        break
+      }
+      if (p === 'normal' && bestPriority === 'low') {
+        bestIdx = i
+        bestPriority = 'normal'
+      }
+    }
+
+    const item = subQueue[bestIdx]
     // Skip if this sub was unsubscribed while queued
     if (!subMetadata.has(item.id)) {
-      subQueue.shift()
+      subQueue.splice(bestIdx, 1)
       continue
     }
-    subQueue.shift()
+    subQueue.splice(bestIdx, 1)
     subMetadata.set(item.id, 'active')
     worker.postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
   }
@@ -193,7 +212,8 @@ let subIdCounter = 0
 
 export function subscribeToRelays(
   relays: string[],
-  filters: any | any[]
+  filters: any | any[],
+  priority: SubPriority = 'normal'
 ): () => void {
   const id = `sub_${++subIdCounter}`
   const filterList = Array.isArray(filters) ? filters : [filters]
@@ -217,7 +237,33 @@ export function subscribeToRelays(
     worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
   } else if (subQueue.length < MAX_QUEUE_SIZE) {
     subMetadata.set(id, 'queued')
-    subQueue.push({ id, relays, filters: filterList })
+    subQueue.push({ id, relays, filters: filterList, priority })
+  } else if (priority === 'high') {
+    // Drop lowest-priority queued item to make room for high-priority sub
+    let dropIdx = -1
+    for (let i = subQueue.length - 1; i >= 0; i--) {
+      if (subQueue[i].priority === 'low') {
+        dropIdx = i
+        break
+      }
+    }
+    if (dropIdx === -1) {
+      for (let i = subQueue.length - 1; i >= 0; i--) {
+        if (subQueue[i].priority === 'normal') {
+          dropIdx = i
+          break
+        }
+      }
+    }
+    if (dropIdx >= 0) {
+      const dropped = subQueue.splice(dropIdx, 1)[0]
+      subMetadata.delete(dropped.id)
+      console.warn(`[pool] Dropped low-priority sub ${dropped.id} for high-priority sub ${id}`)
+      subMetadata.set(id, 'queued')
+      subQueue.push({ id, relays, filters: filterList, priority })
+    } else {
+      console.warn(`[pool] Subscription queue full (${MAX_QUEUE_SIZE}), dropping high-priority sub ${id}`)
+    }
   } else {
     console.warn(`[pool] Subscription queue full (${MAX_QUEUE_SIZE}), dropping sub ${id}`)
   }
