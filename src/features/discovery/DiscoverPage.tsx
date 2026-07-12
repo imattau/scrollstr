@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Fuse from 'fuse.js'
 import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays, searchRelays } from '../../nostr/pool'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
@@ -73,6 +73,7 @@ export const DiscoverPage: React.FC = () => {
   const [refreshKey, setRefreshKey] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [isSearchingRelays, setIsSearchingRelays] = useState(false)
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -300,6 +301,34 @@ export const DiscoverPage: React.FC = () => {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
+  // Search relays via NIP-50 when debounced query changes
+  useEffect(() => {
+    if (!debouncedSearch.trim() || !relayUrls.length) {
+      setIsSearchingRelays(false)
+      return
+    }
+
+    const controller = new AbortController()
+    setIsSearchingRelays(true)
+
+    searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: 50 })
+      .then(async (events) => {
+        if (controller.signal.aborted) return
+        for (const event of events) {
+          if (controller.signal.aborted) return
+          try { await saveEventToCache(event) } catch { /* best-effort */ }
+        }
+      })
+      .catch((err) => {
+        if (err.name !== 'AbortError') console.error('Relay search failed:', err)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsSearchingRelays(false)
+      })
+
+    return () => controller.abort()
+  }, [debouncedSearch, relayUrls])
+
   // Filter videos based on the debounced search query using fuzzy search
   const filteredVideos = useMemo(() => {
     if (!debouncedSearch.trim()) return []
@@ -381,6 +410,9 @@ export const DiscoverPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-[16px] font-semibold text-[#a1a1aa]">
                 Search Results ({filteredVideos.length})
+                {isSearchingRelays && (
+                  <span className="ml-2 text-[12px] font-normal text-[#a78bfa]">· searching network...</span>
+                )}
               </h3>
               <button
                 type="button"
@@ -392,7 +424,9 @@ export const DiscoverPage: React.FC = () => {
             </div>
             {filteredVideos.length === 0 ? (
               <p className="text-[13px] text-[#71717a] py-6 text-center">
-                No videos or creators matched your search.
+                {isSearchingRelays
+                  ? 'Searching network for matching videos...'
+                  : 'No videos or creators matched your search.'}
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-3 pb-8">

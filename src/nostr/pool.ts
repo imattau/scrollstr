@@ -288,6 +288,17 @@ export async function fetchFromRelays(relays: string[], filters: any | any[]): P
   return results.flat()
 }
 
+export async function searchRelays(
+  relays: string[],
+  query: string,
+  options?: { kinds?: number[]; limit?: number }
+): Promise<any[]> {
+  const filter: any = { search: query }
+  if (options?.kinds) filter.kinds = options.kinds
+  if (options?.limit) filter.limit = options.limit
+  return fetchFromRelays(relays, filter)
+}
+
 export const nostrPool: NostrPool = {
   async publish(relays, event) {
     const results = pool.publish(relays, event)
