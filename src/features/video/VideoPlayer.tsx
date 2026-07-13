@@ -21,9 +21,11 @@ interface VideoPlayerProps {
   isMuted: boolean
   onLike?: () => void
   showControls?: boolean
+  autoScroll?: boolean
+  onVideoEnded?: () => void
 }
 
-export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false }) => {
+export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive, isNearActive, isMuted, onLike, showControls = false, autoScroll, onVideoEnded }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsInstanceRef = useRef<any>(null)
   const [isHls, setIsHls] = useState(false)
@@ -291,9 +293,10 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
           className={`w-full h-full ${isLandscape ? 'object-contain' : 'object-cover'}`}
           poster={poster}
           preload={isActive ? 'auto' : 'metadata'}
-          loop
-          muted={isMuted} // Start muted for autoplay browser policies, sync with isMuted
+          loop={!autoScroll}
+          muted={isMuted}
           playsInline
+          onEnded={onVideoEnded || undefined}
           onClick={handleSingleClick}
           onDoubleClick={handleDoubleClick}
           onPointerDown={handlePressStart}
@@ -319,6 +322,25 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
           <div className="pointer-events-none absolute top-3 left-3 z-20 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[11px] text-[#a1a1aa] backdrop-blur-sm">
             <RotateCw className="size-3" />
             <span>Rotate for full view</span>
+          </div>
+        )}
+        {isNearActive && (
+          <div className="absolute bottom-0 left-0 right-0 z-30 flex flex-col justify-end">
+            <MediaTimeRange
+              className="w-full hover:opacity-100"
+              style={{
+                '--media-range-track-height': '3px',
+                '--media-range-track-background': 'rgba(255,255,255,0.15)',
+                '--media-range-bar-color': '#ffffff',
+                '--media-range-thumb-width': '10px',
+                '--media-range-thumb-height': '10px',
+                '--media-range-thumb-background': '#ffffff',
+                '--media-range-thumb-border-radius': '9999px',
+                '--media-range-padding': '0px',
+                '--media-range-track-border-radius': '2px',
+                '--media-control-height': '3px',
+              } as React.CSSProperties}
+            />
           </div>
         )}
         {showControls && (

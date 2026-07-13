@@ -16,6 +16,7 @@ import { subscribeToRelays } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
 import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
+import { loadSettings } from '../../db/local-preferences'
 
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles, RotateCw } from 'lucide-react'
@@ -44,6 +45,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
   const swiperRef = useRef<SwiperType | null>(null)
+  const lastDirection = useRef<'down' | 'up'>('down')
+  const prevActiveIndex = useRef(activeIndex)
+  const isAutoScrolling = useRef(false)
 
   // Destroy Swiper synchronously before React removes DOM nodes on unmount,
   // preventing "removeChild" errors caused by Swiper's virtual module
@@ -186,12 +190,32 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   const handleSlideChange = useCallback((swiper: SwiperType) => {
     const idx = swiper.activeIndex
+    if (!isAutoScrolling.current) {
+      if (idx > prevActiveIndex.current) lastDirection.current = 'down'
+      else if (idx < prevActiveIndex.current) lastDirection.current = 'up'
+    }
+    prevActiveIndex.current = idx
     setActiveIndex(idx)
     const video = videosRef.current[idx]
     if (onVideoChange && video) {
       onVideoChange(video)
     }
   }, [onVideoChange, videosRef])
+
+  const onVideoEnded = useCallback(() => {
+    const settings = loadSettings()
+    if (!settings.autoScroll) return
+    const swiper = swiperRef.current
+    if (!swiper) return
+
+    isAutoScrolling.current = true
+    if (lastDirection.current === 'down' && !swiper.isEnd) {
+      swiper.slideNext(400)
+    } else if (lastDirection.current === 'up' && !swiper.isBeginning) {
+      swiper.slidePrev(400)
+    }
+    setTimeout(() => { isAutoScrolling.current = false }, 100)
+  }, [])
 
   const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
     const video = videosRef.current.find((v: VideoItemData) => v.id === videoId)
@@ -261,6 +285,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
               onActionClick={handleActionClick}
               uiHidden={uiHidden}
               onUiHiddenChange={setUiHidden}
+              autoScroll={loadSettings().autoScroll}
+              onVideoEnded={onVideoEnded}
             />
           </SwiperSlide>
         ))}

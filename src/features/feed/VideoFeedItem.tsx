@@ -53,6 +53,8 @@ interface VideoFeedItemProps {
   onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'mute', videoId: string, videoKind?: number) => void
   uiHidden: boolean
   onUiHiddenChange: (hidden: boolean) => void
+  autoScroll?: boolean
+  onVideoEnded?: () => void
 }
 
 function ActionPill({
@@ -88,7 +90,7 @@ function ActionPill({
   )
 }
 
-const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange, autoScroll, onVideoEnded }) => {
   const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
@@ -150,6 +152,8 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
           isMuted={isMuted}
           onLike={onLike}
           showControls={false}
+          autoScroll={autoScroll}
+          onVideoEnded={onVideoEnded}
         />
       </div>
 

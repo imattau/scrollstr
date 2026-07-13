@@ -4,7 +4,7 @@ import { useNostr } from '../../app/providers'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff, Play } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
 import { loadSettings, saveSettings, loadWalletString, saveWalletString } from '../../db/local-preferences'
 import { forceRestartBackfill } from '../../nostr/cacheBackfill'
@@ -28,6 +28,7 @@ export const SettingsPage: React.FC = () => {
   const [localMuteTags, setLocalMuteTags] = useState<string[]>([])
   const [localWalletString, setLocalWalletString] = useState('')
   const [localNsfwBlur, setLocalNsfwBlur] = useState(true)
+  const [localAutoScroll, setLocalAutoScroll] = useState(true)
 
   // Input states for adding new entries
   const [newRelayUrl, setNewRelayUrl] = useState('')
@@ -75,6 +76,7 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     const s = loadSettings()
     setLocalNsfwBlur(s.nsfwBlur)
+    setLocalAutoScroll(s.autoScroll)
     loadWalletString().then(setLocalWalletString)
   }, [activeSubView])
 
@@ -755,6 +757,31 @@ export const SettingsPage: React.FC = () => {
               setLocalNsfwBlur(checked)
               const s = loadSettings()
               s.nsfwBlur = checked
+              saveSettings(s)
+            }}
+            className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors data-[state=checked]:bg-[#8b5cf6] data-[state=unchecked]:bg-[#27272a]"
+          >
+            <Switch.Thumb className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform data-[state=checked]:translate-x-6 data-[state=unchecked]:translate-x-1" />
+          </Switch.Root>
+        </div>
+
+        {/* Auto-scroll */}
+        <div className="flex items-center justify-between py-[18px] px-2">
+          <div className="flex items-center gap-3">
+            <Play className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Auto-scroll</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localAutoScroll ? 'Auto-advance to next video when current ends' : 'Loop current video'}
+              </p>
+            </div>
+          </div>
+          <Switch.Root
+            checked={localAutoScroll}
+            onCheckedChange={(checked) => {
+              setLocalAutoScroll(checked)
+              const s = loadSettings()
+              s.autoScroll = checked
               saveSettings(s)
             }}
             className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors data-[state=checked]:bg-[#8b5cf6] data-[state=unchecked]:bg-[#27272a]"
