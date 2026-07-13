@@ -3,6 +3,7 @@ import * as Tabs from '@radix-ui/react-tabs'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar, ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNostr } from '../../app/providers'
+import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -87,6 +88,7 @@ const CreatorListItem: React.FC<{
 
 export const ProfilePage: React.FC = () => {
   const { session, pool, signEvent } = useNostr()
+  const { toast } = useToast()
   const { pubkey } = useParams<{ pubkey: string }>()
   const navigate = useNavigate()
   const relayUrls = useUserRelayUrls(session?.pubkey)
@@ -298,7 +300,7 @@ export const ProfilePage: React.FC = () => {
 
   const handleFollowToggle = async () => {
     if (!session) {
-      alert('Please connect your Nostr account to follow creators')
+      toast('Please connect your Nostr account to follow creators', 'info')
       return
     }
     try {
@@ -308,10 +310,10 @@ export const ProfilePage: React.FC = () => {
         myContactListEvent || null
       )
       await saveEventToCache(signed)
-      alert(action === 'follow' ? 'Followed creator!' : 'Unfollowed creator!')
+      toast(action === 'follow' ? 'Followed creator!' : 'Unfollowed creator!', 'success')
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
-      alert('Failed to update follow status: ' + (err.message || err))
+      toast('Failed to update follow status', 'error')
     }
   }
 
@@ -323,10 +325,10 @@ export const ProfilePage: React.FC = () => {
         : [...Array.from(mutedPubkeys), targetPubkey]
       const { signed } = await publishMuteList(signEvent, newPubkeys, [])
       await saveEventToCache(signed)
-      alert(isBlocked ? 'Unblocked creator!' : 'Blocked creator!')
+      toast(isBlocked ? 'Unblocked creator!' : 'Blocked creator!', 'success')
     } catch (err: any) {
       console.error('Block toggle failed:', err)
-      alert('Failed to update block list: ' + (err.message || err))
+      toast('Failed to update block list', 'error')
     }
   }
 
@@ -339,7 +341,7 @@ export const ProfilePage: React.FC = () => {
     const settings = loadSettings()
     settings.nsfwPubkeys = newPubkeys
     saveSettings(settings)
-    alert(isNsfwMarked ? 'Removed NSFW mark' : 'Marked creator as NSFW')
+    toast(isNsfwMarked ? 'Removed NSFW mark' : 'Marked creator as NSFW', 'success')
 
     if (session && session.method !== 'readonly') {
       const nip44 = getNip44FromSigner(session.signer)
@@ -361,10 +363,10 @@ export const ProfilePage: React.FC = () => {
     try {
       const { signed, action } = await publishFollow(signEvent, target, myContactListEvent || null)
       await saveEventToCache(signed)
-      alert(action === 'follow' ? 'Followed!' : 'Unfollowed!')
+      toast(action === 'follow' ? 'Followed!' : 'Unfollowed!', 'success')
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
-      alert('Failed to update follow status: ' + (err.message || err))
+      toast('Failed to update follow status', 'error')
     }
   }
 

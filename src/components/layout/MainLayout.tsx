@@ -79,7 +79,20 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
               </div>
             </div>
           </div>
-          <div className="h-full" onClick={() => setShowFeedToggles(prev => !prev)}>
+          {/* Toggle handle to show/hide feed toggles */}
+          <button
+            type="button"
+            onClick={() => setShowFeedToggles(prev => !prev)}
+            className={`absolute top-14 left-1/2 z-30 -translate-x-1/2 transition-all duration-300 ${
+              showFeedToggles ? 'opacity-0 pointer-events-none' : 'opacity-100'
+            }`}
+            aria-label="Show feed filters"
+          >
+            <div className="flex size-7 items-center justify-center rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 shadow-lg backdrop-blur-sm">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+          </button>
+          <div className="h-full">
             {children}
           </div>
           {/* Mobile Navigation (Bottom) */}
@@ -335,7 +348,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     </div>
     )}
     {needRefresh && (
-      <div className="fixed bottom-20 left-1/2 z-[60] -translate-x-1/2">
+      <div className="fixed bottom-24 left-1/2 z-[60] -translate-x-1/2 md:bottom-6">
         <div className="flex items-center gap-3 rounded-full bg-[#18181d]/95 px-5 py-3 shadow-lg backdrop-blur-md border border-[#27272a]">
           <span className="text-[13px] text-[#f7f7f8] whitespace-nowrap">
             A new version is available

@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNostr } from '../../app/providers'
+import { useToast } from '../../components/feedback/Toast'
 import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events'
 import { db } from '../../nostr/cache'
@@ -74,6 +75,7 @@ const generateThumbnailFromVideo = (videoFile: File): Promise<Blob> =>
 
 export const PostWizard: React.FC = () => {
   const { pool, signEvent, session } = useNostr()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const userPubkey = session?.pubkey
 
@@ -130,14 +132,12 @@ export const PostWizard: React.FC = () => {
   const { register, handleSubmit, getValues, formState: { errors } } = useForm<PostFormValues>({
     resolver: zodResolver(postSchema),
     defaultValues: {
-      title: 'Night walk in Melbourne',
-      description: 'The city after rain.',
-      hashtags: '#melbourne #nightwalk',
-      altText: 'Wet city street reflecting lights at night',
+      title: '',
+      description: '',
+      hashtags: '',
+      altText: '',
     },
   })
-
-  const [step] = useState(2)
   const [videoFile, setVideoFile] = useState<File | null>(null)
   const [videoPreview, setVideoPreview] = useState('')
 
@@ -160,7 +160,7 @@ export const PostWizard: React.FC = () => {
     const file = e.target.files?.[0]
     if (!file) return
     if (!isSupportedVideo(file)) {
-      alert('Unsupported format. Please use MP4, WebM, MOV, AVI, MKV, or OGG.')
+      toast('Unsupported format. Use MP4, WebM, MOV, AVI, MKV, or OGG.', 'error')
       return
     }
     setVideoFile(file)
@@ -173,7 +173,7 @@ export const PostWizard: React.FC = () => {
   const handlePublish = async () => {
     if (!videoFile) return
     if (!session) {
-      alert('Please connect your Nostr account to publish videos')
+      toast('Please connect your Nostr account to publish videos', 'info')
       return
     }
 
@@ -264,7 +264,7 @@ export const PostWizard: React.FC = () => {
       )
 
       setUploadProgress(100)
-      alert('Clip published!')
+      toast('Clip published!', 'success')
     } catch (err: any) {
       console.error('Publish pipeline failed:', err)
       setError(err.message || 'Publishing failed')
@@ -285,9 +285,9 @@ export const PostWizard: React.FC = () => {
         {error && <div className="rounded-[12px] border border-red-500/25 bg-red-500/10 p-3 text-[12px] text-red-300">{error}</div>}
 
         <div className="flex gap-[6px]">
-          <span className="rounded-[18px] bg-[#18181d] px-[13px] py-[7px] text-[12px] font-medium">1 Select</span>
-          <span className="rounded-[18px] bg-[#f7f7f8] px-[13px] py-[7px] text-[12px] font-semibold text-[#09090b]">2 Details</span>
-          <span className="rounded-[18px] bg-[#18181d] px-[13px] py-[7px] text-[12px] font-medium">3 Publish</span>
+          <span className={`rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium ${videoFile ? 'bg-[#8b5cf6]/20 text-[#a78bfa]' : 'bg-[#f7f7f8] text-[#09090b] font-semibold'}`}>1 Select</span>
+          <span className={`rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium ${videoFile ? 'bg-[#f7f7f8] text-[#09090b] font-semibold' : 'bg-[#18181d] text-neutral-400'}`}>2 Details</span>
+          <span className={`rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium ${videoFile ? 'bg-[#8b5cf6]/20 text-[#a78bfa]' : 'bg-[#18181d] text-neutral-400'}`}>3 Publish</span>
         </div>
 
         {videoPreview ? (

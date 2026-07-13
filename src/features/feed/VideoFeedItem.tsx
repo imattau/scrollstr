@@ -256,7 +256,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
             )}
           </div>
           <p className="text-[12px] font-medium text-[#a78bfa]">
-            {(video.hashtags || ['melbourne', 'nightwalk', 'nostr']).map((tag) => `#${tag}`).join('  ')}
+              {video.hashtags && video.hashtags.length > 0 ? video.hashtags.map((tag) => `#${tag}`).join('  ') : null}
           </p>
         </div>
       </div>

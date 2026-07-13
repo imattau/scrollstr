@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events'
+import { useToast } from '../../components/feedback/Toast'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -36,6 +37,7 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
 
 export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
   const { pool, session, signEvent } = useNostr()
+  const { toast } = useToast()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
   const relayUrls = useUserRelayUrls(session?.pubkey)
@@ -60,7 +62,7 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
     e.preventDefault()
     if (!inputText.trim() || !video) return
     if (!session) {
-      alert('Please connect your Nostr account to comment')
+      toast('Please connect your Nostr account to comment', 'info')
       return
     }
 
@@ -70,7 +72,7 @@ export const DesktopCommentsPanel: React.FC<{ video: any }> = ({ video }) => {
       setInputText('')
     } catch (err) {
       console.error('Failed to post comment:', err)
-      alert('Error posting comment: ' + err)
+      toast('Error posting comment', 'error')
     }
   }
 

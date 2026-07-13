@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Fuse from 'fuse.js'
 import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
+import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -115,6 +116,7 @@ const TrendingCreatorRow: React.FC<{
 
 export const DiscoverPage: React.FC = () => {
   const { session, pool, signEvent } = useNostr()
+  const { toast } = useToast()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -544,7 +546,7 @@ export const DiscoverPage: React.FC = () => {
 
   const handleFollow = useCallback(async (targetPubkey: string) => {
     if (!session) {
-      alert('Please connect your Nostr account to follow creators')
+      toast('Please connect your Nostr account to follow creators', 'info')
       return
     }
     try {
@@ -556,7 +558,7 @@ export const DiscoverPage: React.FC = () => {
       await saveEventToCache(signed)
     } catch (err: any) {
       console.error('Follow toggle failed:', err)
-      alert('Failed to update follow status: ' + (err.message || err))
+      toast('Failed to update follow status', 'error')
     }
   }, [session, signEvent, myContactListEvent])
 

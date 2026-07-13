@@ -97,11 +97,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     refreshKey,
   })
 
-  // Track active video by ID instead of index so the playing video stays active
-  // when new videos are prepended and indices shift.
-  const activeVideoId = videos[activeIndex]?.id
-
   // Feed position: deep link, sessionStorage, Swiper position restoration
+  // Must be called before activeVideoId computation below since it provides activeVideoIdRef.
   const {
     swiperInitialSlide,
     deeplinkFailed,
@@ -117,6 +114,15 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     activeIndex,
     setActiveIndex,
   })
+
+  // Derive active video ID from the ref-tracked ID rather than stale activeIndex,
+  // so the playing video stays active when new videos are prepended and indices shift.
+  const activeVideoId = useMemo(() => {
+    const id = activeVideoIdRef.current
+    if (id && videos.some(v => v.id === id)) return id
+    return videos[activeIndex]?.id
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos, activeIndex])
 
   // Subscriptions: relays, backfills, load-more
   const oldestCreatedAt = videos[videos.length - 1]?.createdAt

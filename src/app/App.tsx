@@ -4,6 +4,7 @@ import { AppRouter } from './router'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
 import { db, saveEventToCache, updateUserVideoState } from '../nostr/cache'
+import { ToastProvider, useToast } from '../components/feedback/Toast'
 
 const LoginSheet = React.lazy(() => import('../features/auth/LoginSheet').then(m => ({ default: m.LoginSheet })))
 const CommentsSheet = React.lazy(() => import('../features/comments/CommentsSheet').then(m => ({ default: m.CommentsSheet })))
@@ -12,6 +13,7 @@ const SplashScreen = React.lazy(() => import('../features/splash/SplashScreen').
 
 function AppContent() {
   const { pool, signEvent, session } = useNostr()
+  const { toast } = useToast()
   const [isLoginOpen, setIsLoginOpen] = useState(false)
   const [isCommentsOpen, setIsCommentsOpen] = useState(false)
   const [isZapOpen, setIsZapOpen] = useState(false)
@@ -82,7 +84,7 @@ function AppContent() {
         await updateUserVideoState(videoId, { liked: true })
       } catch (err) {
         console.error('Like failed:', err)
-        alert('Failed to publish Like: ' + err)
+        toast('Failed to publish Like', 'error')
       }
     } else if (actionType === 'boost') {
       try {
@@ -91,7 +93,7 @@ function AppContent() {
         await updateUserVideoState(videoId, { boosted: true })
       } catch (err) {
         console.error('Boost failed:', err)
-        alert('Failed to publish Boost: ' + err)
+        toast('Failed to publish Boost', 'error')
       }
     } else if (actionType === 'share') {
       try {
@@ -104,10 +106,10 @@ function AppContent() {
         }
         const textToCopy = videoUrl || (window.location.origin + `/video/${videoId}`)
         await navigator.clipboard.writeText(textToCopy)
-        alert('Copied video link to clipboard!')
+        toast('Copied video link to clipboard!', 'success')
       } catch (err) {
         console.error('Failed to copy link:', err)
-        alert('Failed to copy share link: ' + err)
+        toast('Failed to copy share link', 'error')
       }
     } else if (actionType === 'mute') {
       setIsMuted(!isMuted)
@@ -187,7 +189,9 @@ function AppContent() {
 function App() {
   return (
     <NostrProvider>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+      </ToastProvider>
     </NostrProvider>
   )
 }

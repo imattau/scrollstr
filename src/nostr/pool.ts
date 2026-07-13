@@ -46,15 +46,39 @@ export { worker as backfillWorker }
 // When new search-capable relays are discovered, update the worker's relay set
 setOnDiscoveredChange(() => syncSearchRelaysToWorker())
 
-const BACKFILL_BATCH = 10
+// ── Backfill event batching ─────────────────────────────────────────────
+// Batch accumulator for backfill events — coalesces rapid worker batches
+// before flushing to bulkSaveEventsToCache, reducing IDB pressure.
+const BACKFILL_FLUSH_SIZE = 20
+const BACKFILL_FLUSH_DELAY = 50
+let backfillBuffer: any[] = []
+let backfillFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushBackfillBuffer(): void {
+  backfillFlushTimer = null
+  const batch = backfillBuffer
+  backfillBuffer = []
+  if (batch.length > 0) {
+    void processBackfillEvents(batch).catch((err) =>
+      console.warn(`[pool] Failed to cache backfill buffer (${batch.length} events):`, err)
+    )
+  }
+}
+
+function pushBackfillEvents(events: any[]): void {
+  backfillBuffer.push(...events)
+  if (!backfillFlushTimer) {
+    backfillFlushTimer = setTimeout(flushBackfillBuffer, BACKFILL_FLUSH_DELAY)
+  }
+}
 
 async function processBackfillEvents(events: any[]) {
-  for (let i = 0; i < events.length; i += BACKFILL_BATCH) {
-    const batch = events.slice(i, i + BACKFILL_BATCH)
+  for (let i = 0; i < events.length; i += BACKFILL_FLUSH_SIZE) {
+    const batch = events.slice(i, i + BACKFILL_FLUSH_SIZE)
     await bulkSaveEventsToCache(batch).catch((err) =>
       console.warn(`[pool] Failed to cache backfill batch:`, err)
     )
-    if (i + BACKFILL_BATCH < events.length) {
+    if (i + BACKFILL_FLUSH_SIZE < events.length) {
       await new Promise((r) => setTimeout(r, 0))
     }
   }
@@ -95,7 +119,7 @@ worker.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
     case 'backfillEvents': {
-      void processBackfillEvents((msg as any).events)
+      pushBackfillEvents((msg as any).events)
       break
     }
     case 'subscriptionEvent': {

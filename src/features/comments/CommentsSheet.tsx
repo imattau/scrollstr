@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react'
 import { Drawer } from 'vaul'
 import { useNostr } from '../../app/providers'
 import { publishComment } from '../../nostr/events'
+import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, saveEventToCache } from '../../nostr/cache'
@@ -43,6 +44,7 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
 
 export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
   const { pool, session, signEvent } = useNostr()
+  const { toast } = useToast()
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(false)
   const relayUrls = useUserRelayUrls(session?.pubkey)
@@ -74,7 +76,7 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
     e.preventDefault()
     if (!inputText.trim()) return
     if (!session) {
-      alert('Please connect your Nostr account to comment')
+      toast('Please connect your Nostr account to comment', 'info')
       return
     }
 
@@ -90,7 +92,7 @@ export const CommentsSheet: React.FC<CommentsSheetProps> = ({ isOpen, videoId, c
       setInputText('')
     } catch (err) {
       console.error('Failed to post comment:', err)
-      alert('Error posting comment: ' + err)
+      toast('Error posting comment', 'error')
     }
   }
 

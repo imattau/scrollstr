@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import * as Switch from '@radix-ui/react-switch'
 import { useNostr } from '../../app/providers'
+import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -13,6 +14,7 @@ import { usePWAInstall } from '../../pwa/usePWAInstall'
 
 export const SettingsPage: React.FC = () => {
   const { session, pool, signEvent, logout } = useNostr()
+  const { toast } = useToast()
   const userPubkey = session?.pubkey
   const { isInstallable, installApp } = usePWAInstall()
   const relayUrls = useUserRelayUrls(userPubkey)
@@ -142,7 +144,7 @@ export const SettingsPage: React.FC = () => {
     if (!newRelayUrl.trim()) return
     const formattedUrl = newRelayUrl.trim().includes('://') ? newRelayUrl.trim() : `wss://${newRelayUrl.trim()}`
     if (localRelays.some((r) => r.url === formattedUrl)) {
-      alert('Relay already in list')
+      toast('Relay already in list', 'info')
       return
     }
     setLocalRelays([...localRelays, { url: formattedUrl, read: newRelayRead, write: newRelayWrite }])
@@ -162,10 +164,10 @@ export const SettingsPage: React.FC = () => {
       const newRelayUrls = localRelays.map((r) => r.url)
       setActiveRelays(newRelayUrls)
       forceRestartBackfill(newRelayUrls)
-      alert('Relay list published to relays!')
+      toast('Relay list published to relays!', 'success')
     } catch (e) {
       console.error(e)
-      alert('Failed to publish: ' + e)
+      toast('Failed to publish relay list', 'error')
     } finally {
       setSaving(false)
     }
@@ -176,7 +178,7 @@ export const SettingsPage: React.FC = () => {
     if (!newBlossomUrl.trim()) return
     const formattedUrl = newBlossomUrl.trim().includes('://') ? newBlossomUrl.trim() : `https://${newBlossomUrl.trim()}`
     if (localBlossom.includes(formattedUrl)) {
-      alert('Server already in list')
+      toast('Server already in list', 'info')
       return
     }
     setLocalBlossom([...localBlossom, formattedUrl])
@@ -193,10 +195,10 @@ export const SettingsPage: React.FC = () => {
     try {
       const ev = await publishBlossomList(signEvent, localBlossom)
       await saveEventToCache(ev)
-      alert('Blossom media servers published!')
+      toast('Blossom media servers published!', 'success')
     } catch (e) {
       console.error(e)
-      alert('Failed to publish: ' + e)
+      toast('Failed to publish Blossom servers', 'error')
     } finally {
       setSaving(false)
     }
@@ -207,7 +209,7 @@ export const SettingsPage: React.FC = () => {
     if (!newNip96Url.trim()) return
     const formattedUrl = newNip96Url.trim().includes('://') ? newNip96Url.trim() : `https://${newNip96Url.trim()}`
     if (localNip96.includes(formattedUrl)) {
-      alert('Server already in list')
+      toast('Server already in list', 'info')
       return
     }
     setLocalNip96([...localNip96, formattedUrl])
@@ -224,10 +226,10 @@ export const SettingsPage: React.FC = () => {
     try {
       const ev = await publishNip96List(signEvent, localNip96)
       await saveEventToCache(ev)
-      alert('NIP-96 media servers published!')
+      toast('NIP-96 media servers published!', 'success')
     } catch (e) {
       console.error(e)
-      alert('Failed to publish: ' + e)
+      toast('Failed to publish NIP-96 servers', 'error')
     } finally {
       setSaving(false)
     }
@@ -264,10 +266,10 @@ export const SettingsPage: React.FC = () => {
     try {
       const ev = await publishMuteList(signEvent, localMutePubkeys, localMuteTags)
       await saveEventToCache(ev)
-      alert('Mute list successfully published!')
+      toast('Mute list successfully published!', 'success')
     } catch (e) {
       console.error(e)
-      alert('Failed to publish: ' + e)
+      toast('Failed to publish mute list', 'error')
     } finally {
       setSaving(false)
     }
@@ -276,14 +278,14 @@ export const SettingsPage: React.FC = () => {
   // Handlers for Wallet NWC Connection
   const handleSaveWallet = async () => {
     await saveWalletString(localWalletString.trim())
-    alert('Wallet NWC connection settings updated!')
+    toast('Wallet NWC connection settings updated!', 'success')
     setActiveSubView('main')
   }
 
   const handleCopyPubkey = async () => {
     if (userPubkey) {
       await navigator.clipboard.writeText(userPubkey)
-      alert('Copied pubkey hex to clipboard!')
+      toast('Copied pubkey hex to clipboard!', 'success')
     }
   }
 

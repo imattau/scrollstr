@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Drawer } from 'vaul'
 import { useNostr } from '../../app/providers'
+import { useToast } from '../../components/feedback/Toast'
 import { fetchFromRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useProfile } from '../../nostr/profile'
@@ -28,13 +29,16 @@ interface ZapSheetProps {
 }
 
 const PRESETS = [21, 100, 500, 1000]
+const CUSTOM_AMOUNT = -1
 
 export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubkey, onClose }) => {
   const { pool, session, signEvent } = useNostr()
+  const { toast } = useToast()
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const profile = useProfile(creatorPubkey)
   const [amount, setAmount] = useState<number>(100)
-  const [comment, setComment] = useState('Great video!')
+  const [customAmount, setCustomAmount] = useState('')
+  const [comment, setComment] = useState('')
   const [paying, setPaying] = useState(false)
   const [invoice, setInvoice] = useState('')
   const [error, setError] = useState('')
@@ -51,7 +55,7 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
 
   const handleSendZap = async () => {
     if (!session) {
-      alert('Please connect your Nostr account to zap')
+      toast('Please connect your Nostr account to zap', 'info')
       return
     }
 
@@ -107,7 +111,8 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
       const callback = lnurlData.callback
       if (!callback) throw new Error('LNURL response missing callback URL')
 
-      const amountMsat = amount * 1000
+      const satsAmount = amount === CUSTOM_AMOUNT ? Math.max(1, parseInt(customAmount) || 1) : amount
+      const amountMsat = satsAmount * 1000
 
       if (lnurlData.allowsNostr && lnurlData.nostrPubkey) {
         const relays = ['wss://nos.lol', 'wss://relay.damus.io', 'wss://relay.snort.social']
@@ -153,7 +158,6 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
     } catch (err: any) {
       console.error('Zap failed:', err)
       setError(err.message || 'Payment request failed')
-      setInvoice(`lnbc${amount}000n1p3l...mockinvoice...`)
     } finally {
       setPaying(false)
     }
@@ -190,12 +194,12 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
             )}
             <p className="text-[14px] font-normal text-[#a1a1aa]">Choose an amount</p>
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 justify-center">
               {PRESETS.map((preset) => (
                 <button
                   key={preset}
                   type="button"
-                  onClick={() => setAmount(preset)}
+                  onClick={() => { setAmount(preset); setCustomAmount('') }}
                   className={[
                     'rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium transition-colors',
                     amount === preset ? 'bg-[#f7f7f8] text-[#09090b]' : 'bg-[#18181d] text-[#f7f7f8]',
@@ -204,10 +208,32 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
                   {preset}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setAmount(CUSTOM_AMOUNT)}
+                className={[
+                  'rounded-[18px] px-[13px] py-[7px] text-[12px] font-medium transition-colors',
+                  amount === CUSTOM_AMOUNT ? 'bg-[#f7f7f8] text-[#09090b]' : 'bg-[#18181d] text-[#f7f7f8]',
+                ].join(' ')}
+              >
+                Custom
+              </button>
             </div>
 
             <div className="flex items-start gap-2 rounded-[14px] bg-[#18181d] px-4 py-[14px]">
-              <span className="text-[28px] font-bold leading-none text-[#f7f7f8]">{amount}</span>
+              {amount === CUSTOM_AMOUNT ? (
+                <input
+                  type="number"
+                  min={1}
+                  value={customAmount}
+                  onChange={(e) => setCustomAmount(e.target.value)}
+                  placeholder="21"
+                  className="w-20 bg-transparent text-[28px] font-bold leading-none text-[#f7f7f8] outline-none"
+                  autoFocus
+                />
+              ) : (
+                <span className="text-[28px] font-bold leading-none text-[#f7f7f8]">{amount}</span>
+              )}
               <span className="pt-2 text-[14px] font-medium text-[#a1a1aa]">sats</span>
             </div>
 
@@ -224,10 +250,10 @@ export const ZapSheet: React.FC<ZapSheetProps> = ({ isOpen, videoId, creatorPubk
               <button
                 type="button"
                 onClick={handleSendZap}
-                disabled={paying || amount <= 0}
+                disabled={paying || (amount === CUSTOM_AMOUNT ? !customAmount : amount <= 0)}
                 className="flex h-[42px] w-full items-center justify-center rounded-[11px] bg-[#8b5cf6] text-[13px] font-semibold text-white disabled:opacity-50"
               >
-                {paying ? 'Requesting Invoice...' : `Send ${amount} sats`}
+                {paying ? 'Requesting Invoice...' : `Send ${amount === CUSTOM_AMOUNT ? (parseInt(customAmount) || '?') : amount} sats`}
               </button>
             ) : (
               <div className="w-full space-y-3 text-center">
