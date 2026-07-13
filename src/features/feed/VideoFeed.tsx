@@ -15,7 +15,7 @@ import { loadSettings } from '../../db/local-preferences'
 import { useProfile } from '../../nostr/profile'
 
 
-import { useSearchParams, Link } from 'react-router-dom'
+import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { ArrowUp, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
 
 interface VideoFeedProps {
@@ -33,6 +33,9 @@ function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
   if (!vp) return
   const height = vp.clientHeight
   vp.scrollTo({ top: index * height, behavior })
+  // Programmatic scrollTo doesn't fire the scroll event, so dispatch it
+  // so MediaStack's internal handleScroll updates its active index.
+  vp.dispatchEvent(new Event('scroll'))
 }
 
 export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoChange, isMuted }) => {
@@ -198,7 +201,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const scrollToNewest = useCallback(() => {
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    scrollToIndex(0, 'smooth')
+    scrollToIndex(0, 'instant')
     setActiveIndex(0)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
@@ -335,7 +338,40 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           const v = item.customData as VideoItemData
           onActionTrigger('share', v.id)
         }}
+        onAuthorClick={(item: MediaItemData) => {
+          const v = item.customData as VideoItemData
+          window.location.href = `/profile/${v.creator.pubkey}`
+        }}
 
+        renderLikeButton={(isActive, onClick) => {
+          const v = videos[activeIndex] as VideoItemData | undefined
+          return (
+            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Like">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill={v?.hasLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+            </button>
+          )
+        }}
+        renderCommentButton={(onClick) => {
+          return (
+            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Comment">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </button>
+          )
+        }}
+        renderShareButton={(onClick) => {
+          return (
+            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Share">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </button>
+          )
+        }}
         renderExtraActions={(item, index) => {
           const v = item.customData as VideoItemData
           return (

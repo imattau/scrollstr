@@ -46,11 +46,11 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
       {immersive ? (
         <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
         <div className="md:hidden h-dvh flex flex-col bg-[#1b1327] relative">
-          <div className="flex-1 min-h-0 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-hidden pb-16">
             {children}
           </div>
           {/* Mobile Navigation (Bottom) */}
-          <nav className="shrink-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
+          <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
             {mobileNavItems.map((item) => {
               const Icon = item.icon
               const active = isActive(item.path)
@@ -167,9 +167,9 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
         </div>
       </div>
     ) : (
-      <div className="min-h-dvh bg-neutral-950 text-neutral-100 flex flex-col selection:bg-purple-600 selection:text-white">
+      <div className="h-dvh bg-neutral-950 text-neutral-100 flex flex-col selection:bg-purple-600 selection:text-white">
       {/* Mobile content area (takes remaining space, scrolls) */}
-      <div className="flex-1 min-h-0 overflow-y-auto md:flex md:justify-center">
+      <div className="flex-1 min-h-0 overflow-y-auto md:flex md:justify-center pb-16 md:pb-0">
         {/* Container */}
         <div className="w-full max-w-[1250px] md:flex">
           
@@ -256,8 +256,8 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
         </div>
       </div>
 
-      {/* Mobile Navigation (Bottom) - in flex flow, not fixed */}
-      <nav className="md:hidden shrink-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
+      {/* Mobile Navigation (Bottom) */}
+      <nav className="fixed bottom-0 left-0 right-0 md:hidden h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
         {mobileNavItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.path)
