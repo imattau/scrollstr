@@ -2,7 +2,7 @@ import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
-import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory } from './search-relays'
+import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -42,6 +42,9 @@ const worker = new Worker(
 )
 
 export { worker as backfillWorker }
+
+// When new search-capable relays are discovered, update the worker's relay set
+setOnDiscoveredChange(() => syncSearchRelaysToWorker())
 
 const BACKFILL_BATCH = 10
 
@@ -88,7 +91,15 @@ worker.onmessage = (e: MessageEvent) => {
 }
 
 export const setActiveRelays = (urls: string[]) => {
-  activeRelays = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
+  const base = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
+  activeRelays = getSearchRelays(base)
+  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+}
+
+/** Re-sync the worker's relay set — call after new search-capable relays are discovered */
+export function syncSearchRelaysToWorker(): void {
+  const base = activeRelays.length > 0 ? activeRelays : [...DEFAULT_RELAYS]
+  activeRelays = getSearchRelays(base)
   worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
 }
 
@@ -315,12 +326,14 @@ export async function fetchFromRelays(relays: string[], filters: any | any[]): P
 export async function searchRelays(
   relays: string[],
   query: string,
-  options?: { kinds?: number[]; limit?: number; until?: number }
+  options?: { kinds?: number[]; limit?: number; until?: number; signal?: AbortSignal }
 ): Promise<any[]> {
   const expandedRelays = getSearchRelays(relays)
   if (expandedRelays.length > relays.length) {
     console.log(`[Pool] Expanded search relays: ${relays.length} → ${expandedRelays.length} relays`)
   }
+  const safeQuery = sanitizeSearchQuery(query)
+  if (!safeQuery) return Promise.resolve([])
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
     searchCallbacks.set(id, { resolve, reject, createdAt: Date.now() })
@@ -328,11 +341,28 @@ export async function searchRelays(
       type: 'search',
       id,
       relays: expandedRelays,
-      query,
+      query: safeQuery,
       kinds: options?.kinds,
       limit: options?.limit,
       until: options?.until,
     })
+
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        worker.postMessage({ type: 'abortSearch', id })
+        searchCallbacks.delete(id)
+        reject(new DOMException('Aborted', 'AbortError'))
+        return
+      }
+      options.signal.addEventListener('abort', () => {
+        worker.postMessage({ type: 'abortSearch', id })
+        const cb = searchCallbacks.get(id)
+        if (cb) {
+          cb.reject(new DOMException('Aborted', 'AbortError'))
+          searchCallbacks.delete(id)
+        }
+      }, { once: true })
+    }
   })
 }
 

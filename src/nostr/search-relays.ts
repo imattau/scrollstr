@@ -1,3 +1,9 @@
+let _onDiscoveredChange: (() => void) | null = null
+
+export function setOnDiscoveredChange(cb: () => void): void {
+  _onDiscoveredChange = cb
+}
+
 const KNOWN_SEARCH_RELAYS = [
   'wss://relay.nostr.band',
   'wss://search.nos.today',
@@ -5,17 +11,60 @@ const KNOWN_SEARCH_RELAYS = [
 ]
 
 const discoveredRelays: string[] = []
+const MAX_DISCOVERED = 25
 
 let directoryCache: string[] = []
 let lastDirectoryFetch = 0
 const DIRECTORY_CACHE_TTL = 60 * 60 * 1000
 
+// ── NIP-50 capability cache ──────────────────────────────────────────────
+
+const nip50Capable = new Set<string>()
+const nip50Checked = new Set<string>()
+const NIP11_CACHE_TTL = 6 * 60 * 60 * 1000 // 6 hours
+const nip11Cache = new Map<string, { expires: number }>()
+
+async function checkNip50Support(relayUrl: string): Promise<boolean> {
+  if (KNOWN_SEARCH_RELAYS.includes(relayUrl)) return true
+  if (nip50Capable.has(relayUrl)) return true
+  if (nip50Checked.has(relayUrl)) return false
+
+  const cached = nip11Cache.get(relayUrl)
+  if (cached && cached.expires > Date.now()) return nip50Capable.has(relayUrl)
+
+  try {
+    const httpUrl = relayUrl.replace(/^wss:/i, 'https:').replace(/^ws:/i, 'http:')
+    const res = await fetch(httpUrl, { method: 'GET', signal: AbortSignal.timeout(3000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const doc: any = await res.json()
+    const supportsNip50 = Array.isArray(doc?.supported_nips) && doc.supported_nips.includes(50)
+    if (supportsNip50) nip50Capable.add(relayUrl)
+    nip11Cache.set(relayUrl, { expires: Date.now() + NIP11_CACHE_TTL })
+    nip50Checked.add(relayUrl)
+    return supportsNip50
+  } catch {
+    nip50Checked.add(relayUrl)
+    return false
+  }
+}
+
 export function addDiscoveredRelays(urls: string[]): void {
+  let changed = false
   for (const url of urls) {
     const normalized = url.trim()
-    if (normalized && !discoveredRelays.includes(normalized)) {
-      discoveredRelays.push(normalized)
+    if (!normalized || discoveredRelays.includes(normalized)) continue
+    if (discoveredRelays.length >= MAX_DISCOVERED) {
+      const evicted = discoveredRelays.shift()!
+      nip50Capable.delete(evicted)
+      nip50Checked.delete(evicted)
     }
+    discoveredRelays.push(normalized)
+    changed = true
+    // Fire-and-forget NIP-50 check; results used in getSearchRelays
+    checkNip50Support(normalized).catch(() => {})
+  }
+  if (changed) {
+    _onDiscoveredChange?.()
   }
 }
 
@@ -41,6 +90,16 @@ export async function fetchRelayDirectory(): Promise<string[]> {
   }
 }
 
+const MAX_QUERY_LENGTH = 200
+
+export function sanitizeSearchQuery(query: string): string {
+  return query
+    .trim()
+    .slice(0, MAX_QUERY_LENGTH)
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/\s+/g, ' ')
+}
+
 export function getSearchRelays(userRelays: string[]): string[] {
   const seen = new Set<string>()
   const result: string[] = []
@@ -52,7 +111,11 @@ export function getSearchRelays(userRelays: string[]): string[] {
     if (!seen.has(url)) { seen.add(url); result.push(url) }
   }
   for (const url of discoveredRelays) {
-    if (!seen.has(url)) { seen.add(url); result.push(url) }
+    if (seen.has(url)) continue
+    // Only include discovered relays confirmed NIP-50 capable
+    if (nip50Capable.has(url)) {
+      seen.add(url); result.push(url)
+    }
   }
 
   return result

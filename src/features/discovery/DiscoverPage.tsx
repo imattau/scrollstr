@@ -128,6 +128,7 @@ export const DiscoverPage: React.FC = () => {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const processedRelayListIds = useRef(new Set<string>())
   const processedSearchPubkeys = useRef(new Set<string>())
+  const seenSearchIds = useRef(new Set<string>())
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -421,17 +422,19 @@ export const DiscoverPage: React.FC = () => {
     setAccumulatedResults([])
     setSearchCursor(undefined)
     setIsSearchExhausted(false)
+    seenSearchIds.current = new Set()
     const controller = new AbortController()
     setIsSearchingRelays(true)
 
     console.log('[Search] Dispatching relay search:', debouncedSearch, 'relays:', relayUrls)
-    searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: 50 })
+    searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: 50, signal: controller.signal })
       .then(async (events) => {
         if (controller.signal.aborted) return
         console.log('[Search] Received', events.length, 'events from relays')
         const items: VideoItemData[] = []
         for (const event of events) {
           if (controller.signal.aborted) return
+          seenSearchIds.current.add(event.id)
           try { await saveEventToCache(event) } catch { /* best-effort */ }
           const item = eventToVideoItem(event)
           if (item) items.push(item)
@@ -458,16 +461,15 @@ export const DiscoverPage: React.FC = () => {
   }, [debouncedSearch, relayUrls])
 
   // Filter videos based on the debounced search query using fuzzy search
+  const enrichedVideos = useMemo(() => videos.map(v => ({
+    ...v,
+    displayName: authorProfileMap[v.creator.pubkey]?.displayName ?? '',
+    nip05: authorProfileMap[v.creator.pubkey]?.nip05 ?? '',
+  })), [videos, authorProfileMap])
+
   const filteredVideos = useMemo(() => {
     if (!debouncedSearch.trim()) return []
-
-    const enriched = videos.map(v => ({
-      ...v,
-      displayName: authorProfileMap[v.creator.pubkey]?.displayName ?? '',
-      nip05: authorProfileMap[v.creator.pubkey]?.nip05 ?? '',
-    }))
-
-    const fuse = new Fuse(enriched, {
+    const fuse = new Fuse(enrichedVideos, {
       keys: [
         { name: 'title', weight: 0.3 },
         { name: 'description', weight: 0.2 },
@@ -479,9 +481,8 @@ export const DiscoverPage: React.FC = () => {
       ],
       threshold: 0.4,
     })
-
     return fuse.search(debouncedSearch).map(r => r.item)
-  }, [videos, debouncedSearch, authorProfileMap])
+  }, [debouncedSearch, enrichedVideos])
 
   // Merge relay results (first) with local Fuse results, dedup by id
   const combinedResults = useMemo(() => {
@@ -511,22 +512,28 @@ export const DiscoverPage: React.FC = () => {
       console.log('[Search] Load more received', events.length, 'events')
       const items: VideoItemData[] = []
       for (const event of events) {
+        seenSearchIds.current.add(event.id)
         try { await saveEventToCache(event) } catch { /* best-effort */ }
         const item = eventToVideoItem(event)
         if (item) items.push(item)
       }
 
+      let newItemsAdded = false
       setAccumulatedResults(prev => {
         const seen = new Set(prev.map(i => i.id))
         const newItems = items.filter(i => !seen.has(i.id))
+        if (newItems.length > 0) newItemsAdded = true
         return [...prev, ...newItems]
       })
 
       if (events.length < 50) {
         setIsSearchExhausted(true)
-      } else if (events.length > 0) {
+      } else if (newItemsAdded && events.length > 0) {
         const oldest = Math.min(...events.map((e: any) => e.created_at))
         setSearchCursor(oldest - 1)
+      } else if (!newItemsAdded) {
+        // All returned events were already seen — cursor didn't advance
+        setIsSearchExhausted(true)
       }
     } catch (err) {
       console.error('[Search] Load more failed:', err)

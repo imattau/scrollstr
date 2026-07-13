@@ -9,6 +9,7 @@ let isBackfillRunning = false
 let isProfileBackfillRunning = false
 let isFollowedVideoBackfillRunning = false
 let activeRelays: string[] = []
+const searchedIdsAborted = new Set<string>()
 
 const BACKFILL_BATCH_SIZE = 100
 const BATCH_DELAY_MS = 800
@@ -335,14 +336,19 @@ function handleUnsubscribe(id: string) {
 
 async function handleSearch(id: string, relays: string[], query: string, kinds?: number[], limit?: number, until?: number) {
   try {
+    if (searchedIdsAborted.has(id)) return
     const filter: any = { search: query }
     if (kinds) filter.kinds = kinds
     if (limit) filter.limit = limit
     if (until) filter.until = until
     const events = await queryWithTimeout(relays, filter, 5000)
+    if (searchedIdsAborted.has(id)) return
     self.postMessage({ type: 'searchResults', id, events })
   } catch (err: any) {
+    if (searchedIdsAborted.has(id)) return
     self.postMessage({ type: 'searchError', id, error: err.message })
+  } finally {
+    searchedIdsAborted.delete(id)
   }
 }
 
@@ -375,6 +381,9 @@ self.onmessage = (e: MessageEvent) => {
       break
     case 'search':
       void handleSearch(msg.id, msg.relays, msg.query, msg.kinds, msg.limit, msg.until)
+      break
+    case 'abortSearch':
+      searchedIdsAborted.add(msg.id)
       break
   }
 }
