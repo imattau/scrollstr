@@ -308,7 +308,7 @@ export async function fetchFromRelays(relays: string[], filters: any | any[]): P
 export async function searchRelays(
   relays: string[],
   query: string,
-  options?: { kinds?: number[]; limit?: number }
+  options?: { kinds?: number[]; limit?: number; until?: number }
 ): Promise<any[]> {
   const expandedRelays = getSearchRelays(relays)
   if (expandedRelays.length > relays.length) {
@@ -324,6 +324,7 @@ export async function searchRelays(
       query,
       kinds: options?.kinds,
       limit: options?.limit,
+      until: options?.until,
     })
   })
 }

@@ -122,7 +122,10 @@ export const DiscoverPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [isSearchingRelays, setIsSearchingRelays] = useState(false)
-  const [relaySearchResults, setRelaySearchResults] = useState<VideoItemData[]>([])
+  const [accumulatedResults, setAccumulatedResults] = useState<VideoItemData[]>([])
+  const [searchCursor, setSearchCursor] = useState<number | undefined>(undefined)
+  const [isSearchExhausted, setIsSearchExhausted] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   const processedRelayListIds = useRef(new Set<string>())
   const processedSearchPubkeys = useRef(new Set<string>())
   const relayUrls = useUserRelayUrls(session?.pubkey)
@@ -193,7 +196,7 @@ export const DiscoverPage: React.FC = () => {
     if (!relayUrls.length) return
 
     const pubkeys: string[] = []
-    for (const item of relaySearchResults) {
+    for (const item of accumulatedResults) {
       const pk = item.creator.pubkey
       if (pk.startsWith('mock-')) continue
       if (processedSearchPubkeys.current.has(pk)) continue
@@ -209,7 +212,7 @@ export const DiscoverPage: React.FC = () => {
       limit: 1,
     })
     return () => unsub()
-  }, [relaySearchResults, relayUrls])
+  }, [accumulatedResults, relayUrls])
 
   // Query all video shapes from the full Dexie cache (no time limit)
   const rawVideoShapes = useLiveQuery(
@@ -405,15 +408,19 @@ export const DiscoverPage: React.FC = () => {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  // Search relays via NIP-50 when debounced query changes
+  // Search relays via NIP-50 when debounced query changes (or when paginating)
   useEffect(() => {
     if (!debouncedSearch.trim() || !relayUrls.length) {
-      setRelaySearchResults([])
+      setAccumulatedResults([])
+      setSearchCursor(undefined)
+      setIsSearchExhausted(false)
       setIsSearchingRelays(false)
       return
     }
 
-    setRelaySearchResults([])
+    setAccumulatedResults([])
+    setSearchCursor(undefined)
+    setIsSearchExhausted(false)
     const controller = new AbortController()
     setIsSearchingRelays(true)
 
@@ -430,7 +437,15 @@ export const DiscoverPage: React.FC = () => {
           if (item) items.push(item)
         }
         console.log('[Search] Produced', items.length, 'VideoItemData items')
-        if (!controller.signal.aborted) setRelaySearchResults(items)
+        if (!controller.signal.aborted) {
+          setAccumulatedResults(items)
+          if (events.length >= 50) {
+            const oldest = Math.min(...events.map((e: any) => e.created_at))
+            setSearchCursor(oldest - 1)
+          } else {
+            setIsSearchExhausted(true)
+          }
+        }
       })
       .catch((err) => {
         console.error('[Search] Relay search failed:', err)
@@ -472,14 +487,53 @@ export const DiscoverPage: React.FC = () => {
   const combinedResults = useMemo(() => {
     const seen = new Set<string>()
     const merged: VideoItemData[] = []
-    for (const item of relaySearchResults) {
+    for (const item of accumulatedResults) {
       if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
     }
     for (const item of filteredVideos) {
       if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
     }
     return merged
-  }, [relaySearchResults, filteredVideos])
+  }, [accumulatedResults, filteredVideos])
+
+  const handleLoadMore = useCallback(async () => {
+    if (!debouncedSearch.trim() || !relayUrls.length || isLoadingMore || isSearchExhausted || !searchCursor) return
+    setIsLoadingMore(true)
+
+    try {
+      console.log('[Search] Loading more before ts', searchCursor)
+      const events = await searchRelays(relayUrls, debouncedSearch, {
+        kinds: VIDEO_KINDS,
+        limit: 50,
+        until: searchCursor,
+      })
+
+      console.log('[Search] Load more received', events.length, 'events')
+      const items: VideoItemData[] = []
+      for (const event of events) {
+        try { await saveEventToCache(event) } catch { /* best-effort */ }
+        const item = eventToVideoItem(event)
+        if (item) items.push(item)
+      }
+
+      setAccumulatedResults(prev => {
+        const seen = new Set(prev.map(i => i.id))
+        const newItems = items.filter(i => !seen.has(i.id))
+        return [...prev, ...newItems]
+      })
+
+      if (events.length < 50) {
+        setIsSearchExhausted(true)
+      } else if (events.length > 0) {
+        const oldest = Math.min(...events.map((e: any) => e.created_at))
+        setSearchCursor(oldest - 1)
+      }
+    } catch (err) {
+      console.error('[Search] Load more failed:', err)
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }, [debouncedSearch, relayUrls, searchCursor, isLoadingMore, isSearchExhausted])
 
   const handleFollow = useCallback(async (targetPubkey: string) => {
     if (!session) {
@@ -555,30 +609,44 @@ export const DiscoverPage: React.FC = () => {
                   : 'No videos or creators matched your search.'}
               </p>
             ) : (
-              <div className="grid grid-cols-2 gap-3 pb-8">
-                {combinedResults.map((video) => (
-                  <div
-                    key={video.id}
-                    onClick={() => navigate(`/?v=${video.id}`)}
-                    className="group relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[16px] bg-[#18181d] transition-all duration-200 hover:scale-[1.02]"
-                  >
-                    {video.poster ? (
-                      <img src={video.poster} alt={video.title || 'Video'} className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[24px]">
-                        ▶
+              <>
+                <div className="grid grid-cols-2 gap-3 pb-8">
+                  {combinedResults.map((video) => (
+                    <div
+                      key={video.id}
+                      onClick={() => navigate(`/?v=${video.id}`)}
+                      className="group relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[16px] bg-[#18181d] transition-all duration-200 hover:scale-[1.02]"
+                    >
+                      {video.poster ? (
+                        <img src={video.poster} alt={video.title || 'Video'} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[24px]">
+                          ▶
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-[#09090b]/20 to-transparent opacity-90" />
+                      <div className="absolute bottom-3 left-3 right-3 space-y-1">
+                        <p className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#f7f7f8]">
+                          {video.description || video.title}
+                        </p>
+                        <p className="text-[9px] text-[#a78bfa] font-medium">@{video.creator.name}</p>
                       </div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-[#09090b]/20 to-transparent opacity-90" />
-                    <div className="absolute bottom-3 left-3 right-3 space-y-1">
-                      <p className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#f7f7f8]">
-                        {video.description || video.title}
-                      </p>
-                      <p className="text-[9px] text-[#a78bfa] font-medium">@{video.creator.name}</p>
                     </div>
+                  ))}
+                </div>
+                {!isSearchExhausted && (
+                  <div className="flex justify-center pb-8">
+                    <button
+                      type="button"
+                      onClick={handleLoadMore}
+                      disabled={isLoadingMore}
+                      className="rounded-[11px] bg-[#18181d] px-6 py-3 text-[13px] font-semibold text-white transition-all duration-150 hover:bg-[#25252b] active:scale-95 disabled:opacity-50"
+                    >
+                      {isLoadingMore ? 'Loading more...' : 'Load more'}
+                    </button>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         ) : (
