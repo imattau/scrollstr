@@ -277,6 +277,18 @@ function handleUnsubscribe(id: string) {
   }
 }
 
+async function handleSearch(id: string, relays: string[], query: string, kinds?: number[], limit?: number) {
+  try {
+    const filter: any = { search: query }
+    if (kinds) filter.kinds = kinds
+    if (limit) filter.limit = limit
+    const events = await pool.querySync(relays, filter)
+    self.postMessage({ type: 'searchResults', id, events })
+  } catch (err: any) {
+    self.postMessage({ type: 'searchError', id, error: err.message })
+  }
+}
+
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
@@ -303,6 +315,9 @@ self.onmessage = (e: MessageEvent) => {
       break
     case 'setActiveRelays':
       activeRelays = msg.relayUrls
+      break
+    case 'search':
+      void handleSearch(msg.id, msg.relays, msg.query, msg.kinds, msg.limit)
       break
   }
 }

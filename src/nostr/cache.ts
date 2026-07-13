@@ -138,7 +138,7 @@ class ScrollstrCacheDatabase extends Dexie {
 
 export const db = new ScrollstrCacheDatabase()
 
-export const MAX_VIDEOS = 5000
+export const MAX_VIDEOS = 10000
 const PRUNE_INTERVAL = 30
 let _saveCounter = 0
 
@@ -386,16 +386,22 @@ export async function updateMediaStatus(url: string, status: MediaStatusRecord['
     updatedAt: Date.now()
   })
 
-  await db.videoShapes
-    .where('videoUrl')
-    .equals(url)
-    .modify((shape) => {
-      shape.mediaStatus = status
-      shape.isFailed = status === 'failed'
-      if (extra?.size !== undefined) shape.size = extra.size
-      if (extra?.duration !== undefined) shape.duration = extra.duration
-      shape.updatedAt = Date.now()
-    })
+  // Only propagate failure status to videoShapes — this avoids triggering feed
+  // re-renders from HEAD probes and metadata loading while still showing error
+  // states in the feed. Success/available updates are read from the mediaStatus
+  // table when needed and don't affect the cached shape.
+  if (status === 'failed') {
+    await db.videoShapes
+      .where('videoUrl')
+      .equals(url)
+      .modify((shape) => {
+        shape.mediaStatus = status
+        shape.isFailed = true
+        if (extra?.size !== undefined) shape.size = extra.size
+        if (extra?.duration !== undefined) shape.duration = extra.duration
+        shape.updatedAt = Date.now()
+      })
+  }
 }
 
 export async function updateUserVideoState(id: string, state: Partial<Omit<UserVideoStateRecord, 'id' | 'updatedAt'>>): Promise<void> {
@@ -509,6 +515,12 @@ export async function saveEventToCache(event: any): Promise<void> {
     if (kind === 1) {
       const rejected = await db.kindOneRejections.get(id)
       if (rejected) return
+      // Don't cache kind-1 notes without a video URL at all
+      const videoUrl = extractVideoUrlFromContent(event.content || '')
+      if (!videoUrl) {
+        await db.kindOneRejections.put({ id, reason: 'no_video_url', checkedAt: Date.now() })
+        return
+      }
     }
 
     const alreadyCached = await db.cachedEvents.get(id)
@@ -521,15 +533,7 @@ export async function saveEventToCache(event: any): Promise<void> {
     wroteCachedEvent = true
 
     if (isVideo) {
-      const shape = await buildOrUpdateVideoShape(event)
-      // For kind-1, if no video detected, add to rejection table
-      if (kind === 1 && !shape) {
-        await db.kindOneRejections.put({
-          id,
-          reason: 'no_video_url',
-          checkedAt: Date.now()
-        })
-      }
+      await buildOrUpdateVideoShape(event)
     }
 
     if (++_saveCounter % PRUNE_INTERVAL === 0) {

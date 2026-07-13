@@ -45,6 +45,18 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   const swiperRef = useRef<SwiperType | null>(null)
 
+  // Destroy Swiper synchronously before React removes DOM nodes on unmount,
+  // preventing "removeChild" errors caused by Swiper's virtual module
+  // moving DOM nodes that React later tries to remove from their original parent.
+  useLayoutEffect(() => {
+    return () => {
+      const swiper = swiperRef.current
+      if (swiper && !swiper.destroyed) {
+        swiper.destroy()
+      }
+    }
+  }, [])
+
   // Reactively query the user's kind:3 contact list from Dexie cache
   const contactListEvents = useLiveQuery(
     () => session?.pubkey
@@ -75,6 +87,10 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   // Stabilize videos array reference to prevent React/Swiper DOM conflicts
   const videos = useMemo(() => rawVideos, [rawVideos])
+
+  // Track active video by ID instead of index so the playing video stays active
+  // when new videos are prepended and indices shift.
+  const activeVideoId = videos[activeIndex]?.id
 
   // Feed position: deep link, sessionStorage, Swiper position restoration
   const {
@@ -238,7 +254,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
           <SwiperSlide key={video.id} virtualIndex={index}>
             <VideoFeedItem
               video={video}
-              isActive={index === activeIndex}
+              isActive={video.id === activeVideoId}
               isNearActive={Math.abs(index - activeIndex) <= 2}
               isMuted={isMuted}
               onActionClick={handleActionClick}

@@ -42,14 +42,19 @@ const worker = new Worker(
 
 export { worker as backfillWorker }
 
+const BACKFILL_BATCH = 10
+
 async function processBackfillEvents(events: any[]) {
-  for (let i = 0; i < events.length; i++) {
-    try {
-      await saveEventToCache(events[i])
-    } catch (err) {
-      console.warn(`[pool] Failed to cache event ${events[i].id}:`, err)
-    }
-    if (i % 10 === 9) {
+  for (let i = 0; i < events.length; i += BACKFILL_BATCH) {
+    const batch = events.slice(i, i + BACKFILL_BATCH)
+    await Promise.all(
+      batch.map((ev) =>
+        saveEventToCache(ev).catch((err) =>
+          console.warn(`[pool] Failed to cache event ${ev.id}:`, err)
+        )
+      )
+    )
+    if (i + BACKFILL_BATCH < events.length) {
       await new Promise((r) => setTimeout(r, 0))
     }
   }
@@ -71,6 +76,17 @@ worker.onmessage = (e: MessageEvent) => {
     }
     case 'backfillComplete':
       break
+    case 'searchResults': {
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { console.log('[Pool] Search', msg.id, 'resolved with', msg.events?.length ?? 0, 'events'); cb.resolve(msg.events); searchCallbacks.delete(msg.id) }
+      break
+    }
+    case 'searchError': {
+      console.error('[Pool] Search', msg.id, 'failed:', msg.error)
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
+      break
+    }
   }
 }
 
@@ -209,6 +225,7 @@ function processQueue() {
 // ── Subscriptions (proxied to worker with concurrency limit) ────────────
 
 let subIdCounter = 0
+const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void }>()
 
 export function subscribeToRelays(
   relays: string[],
@@ -293,10 +310,18 @@ export async function searchRelays(
   query: string,
   options?: { kinds?: number[]; limit?: number }
 ): Promise<any[]> {
-  const filter: any = { search: query }
-  if (options?.kinds) filter.kinds = options.kinds
-  if (options?.limit) filter.limit = options.limit
-  return fetchFromRelays(relays, filter)
+  const id = `search_${++subIdCounter}`
+  return new Promise<any[]>((resolve, reject) => {
+    searchCallbacks.set(id, { resolve, reject })
+    worker.postMessage({
+      type: 'search',
+      id,
+      relays,
+      query,
+      kinds: options?.kinds,
+      limit: options?.limit,
+    })
+  })
 }
 
 export const nostrPool: NostrPool = {

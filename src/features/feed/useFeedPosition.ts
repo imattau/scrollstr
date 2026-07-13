@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { VideoItemData } from './VideoFeedItem'
 
 interface UseFeedPositionInput {
@@ -96,10 +96,10 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
 
-  // Restore Swiper position when new videos are inserted at the front of the feed
+  // Restore Swiper position synchronously when new videos are inserted at the front
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
-  useEffect(() => {
+  useLayoutEffect(() => {
     const swiper = swiperRef.current
     if (!swiper) return
 
@@ -116,12 +116,8 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (currentSlideVideo?.id === activeId) return
 
     const newIndex = videos.findIndex(v => v.id === activeId)
-    if (newIndex >= 0) {
-      requestAnimationFrame(() => {
-        if (swiperRef.current && !swiperRef.current.destroyed) {
-          swiperRef.current.slideTo(newIndex, 0)
-        }
-      })
+    if (newIndex >= 0 && !swiper.destroyed) {
+      swiper.slideTo(newIndex, 0)
     }
   }, [videos.length, initialVideoId])
 

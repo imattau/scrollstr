@@ -1,9 +1,53 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { liveQuery } from 'dexie'
 import { db, VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
 import { useMuteList } from '../../nostr/useMuteList'
 import { sortByInsertOrder } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
+
+// Debounced version of useLiveQuery — batches rapid IndexedDB changes into a
+// single state update, preventing feed flicker when many events arrive at once.
+function useDebouncedLiveQuery<T>(
+  querier: () => Promise<T>,
+  deps: any[],
+  delay = 200
+): T | undefined {
+  const [result, setResult] = useState<T>()
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const mountedRef = useRef(true)
+  const isFirstRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    const subscription = liveQuery(querier).subscribe({
+      next: (value) => {
+        if (isFirstRef.current) {
+          isFirstRef.current = false
+          if (mountedRef.current) setResult(value as T)
+        } else {
+          clearTimeout(timerRef.current)
+          timerRef.current = setTimeout(() => {
+            if (mountedRef.current) setResult(value as T)
+          }, delay)
+        }
+      },
+      error: (err) => {
+        console.error('[Feed] Live query error:', err)
+        if (mountedRef.current) setResult(undefined)
+      },
+    })
+
+    return () => {
+      mountedRef.current = false
+      clearTimeout(timerRef.current)
+      subscription.unsubscribe()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+
+  return result
+}
 
 const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
   id: shape.id,
@@ -60,7 +104,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
-  const _allShapes = useLiveQuery(async () => {
+  const _allShapes = useDebouncedLiveQuery(async () => {
     try {
       const shapes = await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
       return await mergeCountersIntoShapes(shapes)
@@ -68,11 +112,11 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey])
+  }, [refreshKey], 200)
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
-  const _followedShapes = useLiveQuery(async () => {
+  const _followedShapes = useDebouncedLiveQuery(async () => {
     if (!sessionPubkey || followingPubkeys.length === 0) return []
     try {
       const shapes = await db.videoShapes
@@ -84,7 +128,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey])
+  }, [sessionPubkey, followingPubkeys, refreshKey], 200)
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 

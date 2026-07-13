@@ -15,6 +15,54 @@ import { useMuteList } from '../../nostr/useMuteList'
 const EMPTY_VIDEOS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
 
+function imetaValue(imetaTag: string[], key: string): string | undefined {
+  for (const entry of imetaTag) {
+    if (entry.startsWith(key + ' ')) return entry.slice(key.length + 1)
+  }
+}
+
+function eventToVideoItem(event: any): VideoItemData | null {
+  const imetaTag = event.tags?.find((t: string[]) => t[0] === 'imeta')
+  let videoUrl = ''
+  let poster = ''
+  if (imetaTag) {
+    videoUrl = imetaValue(imetaTag, 'url') ?? ''
+    poster = imetaValue(imetaTag, 'image') ?? ''
+  }
+  if (!videoUrl) {
+    const urlTag = event.tags?.find((t: string[]) => t[0] === 'url')
+    if (urlTag) videoUrl = urlTag[1]
+  }
+  if (!videoUrl) {
+    const urlMatch = event.content?.match(/(https?:\/\/[^\s]+)\.(mp4|webm|mov)/i)
+    if (urlMatch) videoUrl = urlMatch[0]
+  }
+  if (!videoUrl) return null
+
+  const titleTag = event.tags?.find((t: string[]) => t[0] === 'title')
+  const altTag = event.tags?.find((t: string[]) => t[0] === 'alt')
+
+  return {
+    id: event.id,
+    kind: event.kind,
+    createdAt: event.created_at,
+    title: titleTag?.[1] ?? '',
+    description: event.content ?? altTag?.[1] ?? '',
+    url: videoUrl,
+    poster,
+    creator: {
+      pubkey: event.pubkey,
+      name: event.pubkey.slice(0, 8),
+    },
+    hashtags: event.tags?.filter((t: string[]) => t[0] === 't').map((t: string[]) => t[1]) ?? [],
+    likesCount: 0,
+    commentsCount: 0,
+    boostsCount: 0,
+    zapsCount: 0,
+    music: 'Original Clip Audio',
+  }
+}
+
 const TrendingCreatorRow: React.FC<{
   creator: { pubkey: string; name: string; subtitle: string; color: string }
   isFollowing: boolean
@@ -74,6 +122,7 @@ export const DiscoverPage: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [isSearchingRelays, setIsSearchingRelays] = useState(false)
+  const [relaySearchResults, setRelaySearchResults] = useState<VideoItemData[]>([])
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -304,23 +353,32 @@ export const DiscoverPage: React.FC = () => {
   // Search relays via NIP-50 when debounced query changes
   useEffect(() => {
     if (!debouncedSearch.trim() || !relayUrls.length) {
+      setRelaySearchResults([])
       setIsSearchingRelays(false)
       return
     }
 
+    setRelaySearchResults([])
     const controller = new AbortController()
     setIsSearchingRelays(true)
 
+    console.log('[Search] Dispatching relay search:', debouncedSearch, 'relays:', relayUrls)
     searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: 50 })
       .then(async (events) => {
         if (controller.signal.aborted) return
+        console.log('[Search] Received', events.length, 'events from relays')
+        const items: VideoItemData[] = []
         for (const event of events) {
           if (controller.signal.aborted) return
           try { await saveEventToCache(event) } catch { /* best-effort */ }
+          const item = eventToVideoItem(event)
+          if (item) items.push(item)
         }
+        console.log('[Search] Produced', items.length, 'VideoItemData items')
+        if (!controller.signal.aborted) setRelaySearchResults(items)
       })
       .catch((err) => {
-        if (err.name !== 'AbortError') console.error('Relay search failed:', err)
+        console.error('[Search] Relay search failed:', err)
       })
       .finally(() => {
         if (!controller.signal.aborted) setIsSearchingRelays(false)
@@ -354,6 +412,19 @@ export const DiscoverPage: React.FC = () => {
 
     return fuse.search(debouncedSearch).map(r => r.item)
   }, [videos, debouncedSearch, authorProfileMap])
+
+  // Merge relay results (first) with local Fuse results, dedup by id
+  const combinedResults = useMemo(() => {
+    const seen = new Set<string>()
+    const merged: VideoItemData[] = []
+    for (const item of relaySearchResults) {
+      if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
+    }
+    for (const item of filteredVideos) {
+      if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
+    }
+    return merged
+  }, [relaySearchResults, filteredVideos])
 
   const handleFollow = useCallback(async (targetPubkey: string) => {
     if (!session) {
@@ -409,7 +480,7 @@ export const DiscoverPage: React.FC = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-[16px] font-semibold text-[#a1a1aa]">
-                Search Results ({filteredVideos.length})
+                Search Results ({combinedResults.length})
                 {isSearchingRelays && (
                   <span className="ml-2 text-[12px] font-normal text-[#a78bfa]">· searching network...</span>
                 )}
@@ -422,7 +493,7 @@ export const DiscoverPage: React.FC = () => {
                 Clear
               </button>
             </div>
-            {filteredVideos.length === 0 ? (
+            {combinedResults.length === 0 ? (
               <p className="text-[13px] text-[#71717a] py-6 text-center">
                 {isSearchingRelays
                   ? 'Searching network for matching videos...'
@@ -430,7 +501,7 @@ export const DiscoverPage: React.FC = () => {
               </p>
             ) : (
               <div className="grid grid-cols-2 gap-3 pb-8">
-                {filteredVideos.map((video) => (
+                {combinedResults.map((video) => (
                   <div
                     key={video.id}
                     onClick={() => navigate(`/?v=${video.id}`)}
