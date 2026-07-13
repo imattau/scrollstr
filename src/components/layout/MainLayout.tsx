@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Home, Compass, PlusSquare, Bell, User, Settings, LogOut, Download } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { usePWAInstall } from '../../pwa/usePWAInstall'
+import { usePWAUpdate } from '../../pwa/usePWAUpdate'
 
 const navItems = [
   { path: '/', label: 'Home', icon: Home },
@@ -31,6 +32,7 @@ interface MainLayoutProps {
 export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, immersive = false, pathname, feedType = 'explore' }) => {
   const { session, logout } = useNostr()
   const { isInstallable, installApp } = usePWAInstall()
+  const { needRefresh, update, dismiss } = usePWAUpdate()
 
   const [showFeedToggles, setShowFeedToggles] = useState(true)
 
@@ -41,9 +43,10 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     return pathname.startsWith(path)
   }, [pathname])
 
-  if (immersive) {
-    return (
-      <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
+  return (
+    <>
+      {immersive ? (
+        <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
         <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327] relative pb-16">
           {/* Top Feed Toggle Bar */}
           <div
@@ -221,11 +224,8 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
           </div>
         </div>
       </div>
-    )
-  }
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex justify-center selection:bg-purple-600 selection:text-white">
+    ) : (
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex justify-center selection:bg-purple-600 selection:text-white">
       {/* Container */}
       <div className="w-full max-w-[1250px] flex">
         
@@ -333,5 +333,29 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
         })}
       </nav>
     </div>
-  )
+    )}
+    {needRefresh && (
+      <div className="fixed bottom-20 left-1/2 z-[60] -translate-x-1/2">
+        <div className="flex items-center gap-3 rounded-full bg-[#18181d]/95 px-5 py-3 shadow-lg backdrop-blur-md border border-[#27272a]">
+          <span className="text-[13px] text-[#f7f7f8] whitespace-nowrap">
+            A new version is available
+          </span>
+          <button
+            onClick={update}
+            className="rounded-full bg-[#8b5cf6] px-4 py-1.5 text-[12px] font-semibold text-white hover:bg-[#7c3aed] active:scale-95 transition-all"
+          >
+            Reload
+          </button>
+          <button
+            onClick={dismiss}
+            className="text-[#71717a] hover:text-[#a1a1aa] text-[18px] leading-none"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    )}
+  </>
+)
 })
