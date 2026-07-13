@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Fuse from 'fuse.js'
 import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
-import { subscribeToRelays, searchRelays } from '../../nostr/pool'
+import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
@@ -123,6 +123,8 @@ export const DiscoverPage: React.FC = () => {
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [isSearchingRelays, setIsSearchingRelays] = useState(false)
   const [relaySearchResults, setRelaySearchResults] = useState<VideoItemData[]>([])
+  const processedRelayListIds = useRef(new Set<string>())
+  const processedSearchPubkeys = useRef(new Set<string>())
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -155,6 +157,59 @@ export const DiscoverPage: React.FC = () => {
     })
     return () => unsub()
   }, [relayUrls, cacheSeemsStale, refreshKey])
+
+  // Warm the relay directory cache on mount so search benefits from
+  // discovered search-capable relays without blocking the first query.
+  useEffect(() => {
+    fetchRelayDirectory()
+  }, [])
+
+  // Watch for kind:10002 relay-list events arriving in the Dexie cache
+  // (from backfill, profile subscriptions, bootstrap, etc.) and feed them
+  // into the search relay pool for future queries.
+  const rawRelayListEvents = useLiveQuery(
+    () => db.cachedEvents.where({ kind: 10002 }).toArray(),
+    []
+  )
+  const relayListEvents = useMemo(() => rawRelayListEvents ?? [], [rawRelayListEvents])
+
+  useEffect(() => {
+    const events = relayListEvents as any[]
+    for (const ev of events) {
+      if (processedRelayListIds.current.has(ev.id)) continue
+      processedRelayListIds.current.add(ev.id)
+      const tags: string[][] = ev.event?.tags ?? []
+      const urls = tags.filter((t: string[]) => t[0] === 'r').map((t: string[]) => t[1])
+      if (urls.length > 0) {
+        console.log('[Discover] Discovered relays from kind:10002:', urls)
+        addDiscoveredRelays(urls)
+      }
+    }
+  }, [relayListEvents])
+
+  // Subscribe to kind:10002 for authors encountered in search results so their
+  // relay lists can expand the search pool for subsequent queries.
+  useEffect(() => {
+    if (!relayUrls.length) return
+
+    const pubkeys: string[] = []
+    for (const item of relaySearchResults) {
+      const pk = item.creator.pubkey
+      if (pk.startsWith('mock-')) continue
+      if (processedSearchPubkeys.current.has(pk)) continue
+      processedSearchPubkeys.current.add(pk)
+      pubkeys.push(pk)
+    }
+    if (pubkeys.length === 0) return
+
+    console.log('[Discover] Subscribing to kind:10002 for', pubkeys.length, 'search result authors')
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: [10002],
+      authors: pubkeys,
+      limit: 1,
+    })
+    return () => unsub()
+  }, [relaySearchResults, relayUrls])
 
   // Query all video shapes from the full Dexie cache (no time limit)
   const rawVideoShapes = useLiveQuery(
@@ -314,9 +369,9 @@ export const DiscoverPage: React.FC = () => {
         const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
         if (uncached.length === 0) return
         unsubRef.current = subscribeToRelays(relayUrls, {
-          kinds: [0],
+          kinds: [0, 10002],
           authors: uncached,
-          limit: 1,
+          limit: 2,
         })
       })
 

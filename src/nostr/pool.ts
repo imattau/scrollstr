@@ -2,6 +2,7 @@ import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
 import { saveEventToCache } from './cache'
+import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory } from './search-relays'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -201,7 +202,6 @@ function processQueue() {
       const p = subQueue[i].priority
       if (p === 'high') {
         bestIdx = i
-        bestPriority = 'high'
         break
       }
       if (p === 'normal' && bestPriority === 'low') {
@@ -310,19 +310,25 @@ export async function searchRelays(
   query: string,
   options?: { kinds?: number[]; limit?: number }
 ): Promise<any[]> {
+  const expandedRelays = getSearchRelays(relays)
+  if (expandedRelays.length > relays.length) {
+    console.log(`[Pool] Expanded search relays: ${relays.length} → ${expandedRelays.length} relays`)
+  }
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
     searchCallbacks.set(id, { resolve, reject })
     worker.postMessage({
       type: 'search',
       id,
-      relays,
+      relays: expandedRelays,
       query,
       kinds: options?.kinds,
       limit: options?.limit,
     })
   })
 }
+
+export { addDiscoveredRelays, fetchRelayDirectory }
 
 export const nostrPool: NostrPool = {
   async publish(relays, event) {

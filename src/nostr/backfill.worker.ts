@@ -36,7 +36,7 @@ async function fetchBatch(relayUrls: string[], until: number): Promise<any[]> {
 async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promise<any[]> {
   try {
     const events = await pool.querySync(relayUrls, {
-      kinds: [0],
+      kinds: [0, 10002],
       authors: pubkeys,
     })
     return events
@@ -44,6 +44,35 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
     console.warn('[Worker] Relay error during profile batch fetch:', err)
     return []
   }
+}
+
+function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Promise<any[]> {
+  return new Promise((resolve) => {
+    let finished = false
+    const events: any[] = []
+    let remaining = relays.length
+
+    const sub = pool.subscribeMany(relays, filter as Filter, {
+      onevent: (event) => {
+        if (!finished) events.push(event)
+      },
+      oneose: () => {
+        remaining--
+        if (remaining === 0 && !finished) {
+          finished = true
+          resolve(events)
+        }
+      },
+    })
+
+    setTimeout(() => {
+      if (!finished) {
+        finished = true
+        sub.close()
+        resolve(events)
+      }
+    }, timeoutMs)
+  })
 }
 
 async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], until: number): Promise<any[]> {
@@ -282,7 +311,7 @@ async function handleSearch(id: string, relays: string[], query: string, kinds?:
     const filter: any = { search: query }
     if (kinds) filter.kinds = kinds
     if (limit) filter.limit = limit
-    const events = await pool.querySync(relays, filter)
+    const events = await queryWithTimeout(relays, filter, 5000)
     self.postMessage({ type: 'searchResults', id, events })
   } catch (err: any) {
     self.postMessage({ type: 'searchError', id, error: err.message })
