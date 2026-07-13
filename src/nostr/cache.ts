@@ -323,6 +323,16 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
         if (imetaData['size']) size = parseInt(imetaData['size'], 10)
       }
 
+      if (!videoUrl) {
+        const urlTag = event.tags.find((t: any) => t[0] === 'url')
+        if (urlTag) videoUrl = urlTag[1]
+      }
+
+      if (!videoUrl) {
+        const urlMatch = event.content?.match(/(https?:\/\/[^\s]+)\.(mp4|webm|mov)/i)
+        if (urlMatch) videoUrl = urlMatch[0]
+      }
+
       if (!videoUrl) return null
 
       const cachedMedia = (existing?.videoUrl === videoUrl && existing?.mediaStatus !== 'unknown')

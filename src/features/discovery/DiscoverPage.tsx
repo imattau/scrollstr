@@ -297,13 +297,6 @@ export const DiscoverPage: React.FC = () => {
       })
     })
 
-    // Fallback static topics if no videos have tags
-    const defaultTopics = [
-      { label: 'melbourne', count: '1 video', bg: '#241a38' },
-      { label: 'nature', count: '1 video', bg: '#30201d' },
-      { label: 'dance', count: '1 video', bg: '#162b2c' },
-    ]
-
     const compiled = Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
@@ -316,7 +309,7 @@ export const DiscoverPage: React.FC = () => {
         }
       })
 
-    return compiled.length > 0 ? compiled : defaultTopics
+    return compiled
   }, [videos, mutedHashtags])
 
   // Extract active creators dynamically from recent videos
@@ -661,22 +654,24 @@ export const DiscoverPage: React.FC = () => {
         ) : (
           /* Main browse sections */
           <>
-            <div>
-              <h3 className="mb-4 text-[18px] font-semibold">Topics</h3>
-              <div className="flex flex-wrap gap-[10px]">
-                {topics.map((topic) => (
-                  <div
-                    key={topic.label}
-                    onClick={() => navigate(`/?tag=${topic.label}`)}
-                    className="flex h-[90px] w-[112px] cursor-pointer flex-col justify-between rounded-[16px] px-3 py-3 transition-transform duration-150 active:scale-95 hover:brightness-110"
-                    style={{ backgroundColor: topic.bg }}
-                  >
-                    <p className="text-[14px] font-semibold">#{topic.label}</p>
-                    <p className="text-[10px] font-normal text-[#a1a1aa]">{topic.count}</p>
-                  </div>
-                ))}
+            {topics.length > 0 && (
+              <div>
+                <h3 className="mb-4 text-[18px] font-semibold">Topics</h3>
+                <div className="flex flex-wrap gap-[10px]">
+                  {topics.map((topic) => (
+                    <div
+                      key={topic.label}
+                      onClick={() => navigate(`/?tag=${topic.label}`)}
+                      className="flex h-[90px] w-[112px] cursor-pointer flex-col justify-between rounded-[16px] px-3 py-3 transition-transform duration-150 active:scale-95 hover:brightness-110"
+                      style={{ backgroundColor: topic.bg }}
+                    >
+                      <p className="text-[14px] font-semibold">#{topic.label}</p>
+                      <p className="text-[10px] font-normal text-[#a1a1aa]">{topic.count}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <div className="space-y-4 pb-8">
               <h3 className="text-[18px] font-semibold">Trending creators</h3>
