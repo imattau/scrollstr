@@ -34,11 +34,30 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({
   url, poster, isActive, isNearActive, isMuted,
   onLike, showControls = false, autoScroll, onVideoEnded,
 }) => {
+  const playerRef = useRef<any>(null)
   const [displayUrl, setDisplayUrl] = useState(isNearActive ? url : '')
   const unloadTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [isLandscape, setIsLandscape] = useState(false)
   const [paused, setPaused] = useState(true)
   const [waiting, setWaiting] = useState(true)
+
+  // Play/pause based on feed active state (debounced pause on inactive)
+  useEffect(() => {
+    const player = playerRef.current
+    if (!player) return
+
+    if (isActive && isNearActive) {
+      player.play().catch((err: any) => {
+        if (err.name !== 'AbortError') console.log('Autoplay blocked:', err)
+      })
+    } else {
+      const timer = setTimeout(() => {
+        player.pause()
+        player.currentTime = 0
+      }, 400)
+      return () => clearTimeout(timer)
+    }
+  }, [isActive, isNearActive])
 
   // Grace period for scroll-back (keep source alive 10s after leaving viewport)
   useEffect(() => {
@@ -84,10 +103,13 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({
     <div className="relative w-full h-full bg-black select-none overflow-hidden">
       {displayUrl ? (
         <MediaPlayer
+          ref={playerRef}
+          className="[aspect-ratio:unset]"
           src={displayUrl}
           poster={poster}
           muted={isMuted}
           loop={!autoScroll}
+          playsInline
           onEnded={onVideoEnded}
           onProviderSetup={onProviderSetup}
           onPlay={() => { setPaused(false); markPlaybackEvent(url, 'play') }}
@@ -101,7 +123,7 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({
             if (el?.videoWidth) setIsLandscape(el.videoWidth > el.videoHeight)
           }}
         >
-          <MediaProvider />
+          <MediaProvider mediaProps={{ className: 'w-full h-full object-cover' }} />
 
           <Gesture event="pointerup" action="toggle:paused" />
           <Gesture event="dblpointerup" onTrigger={() => onLike?.()} />
