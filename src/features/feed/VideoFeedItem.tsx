@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
 import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff, AlertTriangle, SkipForward } from 'lucide-react'
 
@@ -47,13 +46,10 @@ export interface VideoItemData {
 interface VideoFeedItemProps {
   video: VideoItemData
   isActive: boolean
-  isNearActive: boolean
   isMuted: boolean
   onActionClick: (action: 'like' | 'comment' | 'boost' | 'zap' | 'share' | 'more' | 'mute', videoId: string, videoKind?: number) => void
   uiHidden: boolean
   onUiHiddenChange: (hidden: boolean) => void
-  autoScroll?: boolean
-  onVideoEnded?: () => void
   nsfwBlur?: boolean
   nsfwPubkeys?: string[]
 }
@@ -91,7 +87,7 @@ function ActionPill({
   )
 }
 
-const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange, autoScroll, onVideoEnded, nsfwBlur, nsfwPubkeys }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isMuted, onActionClick, uiHidden, onUiHiddenChange, nsfwBlur, nsfwPubkeys }) => {
   const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
@@ -134,28 +130,14 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
 
   return (
     <article
-      className="feed-item relative h-full w-full select-none overflow-hidden bg-[#1b1327] md:mx-auto md:my-3 md:h-[calc(100%-24px)] md:w-[430px] md:rounded-[18px]"
+      className="feed-item absolute inset-0 select-none overflow-hidden md:left-1/2 md:right-auto md:-translate-x-1/2 md:top-3 md:bottom-3 md:w-[430px] md:rounded-[18px]"
       onMouseEnter={() => setShowInfo(true)}
       onMouseLeave={() => setShowInfo(false)}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       onTouchMove={handleTouchMove}
     >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%),linear-gradient(180deg,#1b1327_0%,#1b1327_66%,#09090b_100%)]" />
-
-      <div className="absolute inset-0 z-0">
-        <VideoPlayer
-          url={video.url}
-          poster={video.poster}
-          isActive={isActive && !isNsfwBlurred}
-          isNearActive={isNearActive}
-          isMuted={isMuted}
-          onLike={onLike}
-          showControls={false}
-          autoScroll={autoScroll}
-          onVideoEnded={onVideoEnded}
-        />
-      </div>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_28%,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_50%_12%,rgba(167,139,250,0.06),transparent_24%)]" />
 
       {(video.mediaStatus === 'failed' || video.mediaStatus === 'too_large' || video.mediaStatus === 'unsupported') && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80">
@@ -274,7 +256,6 @@ export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, next
     prevProps.video.hasBoosted === nextProps.video.hasBoosted &&
     prevProps.video.hasZapped === nextProps.video.hasZapped &&
     prevProps.isActive === nextProps.isActive &&
-    prevProps.isNearActive === nextProps.isNearActive &&
     prevProps.isMuted === nextProps.isMuted &&
     prevProps.uiHidden === nextProps.uiHidden
 })

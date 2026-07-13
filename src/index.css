@@ -1,7 +1,14 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-html,
+html {
+  height: 100%;
+  font-size: 16px;
+  line-height: 1.5;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
 body,
 #root {
   height: 100%;
@@ -9,7 +16,9 @@ body,
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
   background: #09090b;
 }
 

@@ -1,12 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react'
-import { Swiper, SwiperSlide } from 'swiper/react'
-import { Virtual, Keyboard, Mousewheel } from 'swiper/modules'
-import type { Swiper as SwiperType } from 'swiper'
-import 'swiper/css'
-import 'swiper/css/virtual'
-import 'swiper/css/keyboard'
-import 'swiper/css/mousewheel'
-import { VideoFeedItem, VideoItemData } from './VideoFeedItem'
+import { MediaStack } from 'react-media-stack'
+import type { MediaItemData } from 'react-media-stack'
+import { VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -17,16 +12,27 @@ import { useFeedVideos } from './useFeedVideos'
 import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
 import { loadSettings } from '../../db/local-preferences'
+import { useProfile } from '../../nostr/profile'
 
-const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
 
-import { useSearchParams } from 'react-router-dom'
-import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles, RotateCw } from 'lucide-react'
+import { useSearchParams, Link } from 'react-router-dom'
+import { ArrowUp, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
   onVideoChange?: (video: VideoItemData) => void
   isMuted: boolean
+}
+
+function getMediaStackViewport(): HTMLElement | null {
+  return document.querySelector('.media-stack-viewport') as HTMLElement | null
+}
+
+function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
+  const vp = getMediaStackViewport()
+  if (!vp) return
+  const height = vp.clientHeight
+  vp.scrollTo({ top: index * height, behavior })
 }
 
 export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoChange, isMuted }) => {
@@ -40,9 +46,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
   const [uiHidden, setUiHidden] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [isRefreshing, setIsRefreshing] = useState(false)
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const [refreshKey] = useState(0)
 
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
@@ -50,23 +54,6 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const settingsRef = useRef(loadSettings())
   useEffect(() => {
     settingsRef.current = loadSettings()
-  }, [])
-
-  const swiperRef = useRef<SwiperType | null>(null)
-  const lastDirection = useRef<'down' | 'up'>('down')
-  const prevActiveIndex = useRef(activeIndex)
-  const isAutoScrolling = useRef(false)
-
-  // Destroy Swiper synchronously before React removes DOM nodes on unmount,
-  // preventing "removeChild" errors caused by Swiper's virtual module
-  // moving DOM nodes that React later tries to remove from their original parent.
-  useLayoutEffect(() => {
-    return () => {
-      const swiper = swiperRef.current
-      if (swiper && !swiper.destroyed) {
-        swiper.destroy()
-      }
-    }
   }, [])
 
   // Reactively query the user's kind:3 contact list from Dexie cache
@@ -97,20 +84,16 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     refreshKey,
   })
 
-  // Feed position: deep link, sessionStorage, Swiper position restoration
-  // Must be called before activeVideoId computation below since it provides activeVideoIdRef.
+  // Feed position: deep link, sessionStorage, initial scroll position
   const {
-    swiperInitialSlide,
     deeplinkFailed,
     deeplinkPending,
     activeVideoIdRef,
-    prevVideosLengthRef,
   } = useFeedPosition({
     initialVideoId,
     feedType,
     filterTag,
     videos,
-    swiperRef,
     activeIndex,
     setActiveIndex,
   })
@@ -143,6 +126,21 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     oldestCreatedAt,
     refreshKey,
   })
+
+  // Subscribe for the deeplink video if not already in the feed — needed because
+  // the general feed subscription only covers the last 30 days, missing older events.
+  useEffect(() => {
+    if (!initialVideoId) return
+    if (videos.some(v => v.id === initialVideoId)) return
+    if (relayUrls.length === 0) return
+
+    const unsub = subscribeToRelays(relayUrls, {
+      kinds: [1, 21, 22, 34236],
+      ids: [initialVideoId],
+    })
+    return () => unsub()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialVideoId, relayUrls, feedKey])
 
   // Progressive comments & zaps subscription for videos near the viewport
   const lastSubscribedVideoIdsRef = useRef<string[]>([])
@@ -200,44 +198,53 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const scrollToNewest = useCallback(() => {
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    swiperRef.current?.slideTo(0, 300)
+    scrollToIndex(0, 'smooth')
     setActiveIndex(0)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
   }, [videosRef])
 
-  const handleSlideChange = useCallback((swiper: SwiperType) => {
-    const idx = swiper.activeIndex
-    if (!isAutoScrolling.current) {
-      if (idx > prevActiveIndex.current) lastDirection.current = 'down'
-      else if (idx < prevActiveIndex.current) lastDirection.current = 'up'
-    }
-    prevActiveIndex.current = idx
-    setActiveIndex(idx)
-    const video = videosRef.current[idx]
+  const handleActiveIndexChange = useCallback((index: number) => {
+    setActiveIndex(index)
+    const video = videosRef.current[index]
     if (onVideoChange && video) {
       onVideoChange(video)
     }
   }, [onVideoChange, videosRef])
 
-  const onVideoEnded = useCallback(() => {
-    if (!settingsRef.current.autoScroll) return
-    const swiper = swiperRef.current
-    if (!swiper) return
+  // Fetch profile for active video — triggers kind:0 relay subscription which
+  // updates videoShapes with authorName/authorPicture, flowing into mediaItems.
+  const activeVideo = videos[activeIndex]
+  useProfile(activeVideo?.creator.pubkey || '')
 
-    isAutoScrolling.current = true
-    if (lastDirection.current === 'down' && !swiper.isEnd) {
-      swiper.slideNext(400)
-    } else if (lastDirection.current === 'up' && !swiper.isBeginning) {
-      swiper.slidePrev(400)
-    }
-    setTimeout(() => { isAutoScrolling.current = false }, 100)
-  }, [])
+  // Derive active video for error overlay
+  const activeVideoError = useMemo(() => {
+    if (!activeVideo) return null
+    const s = activeVideo.mediaStatus
+    if (s === 'failed') return { title: 'Failed to load', message: 'This video could not be loaded from the server.' }
+    if (s === 'too_large') return { title: 'Video too large', message: 'This video exceeds the maximum file size.' }
+    if (s === 'unsupported') return { title: 'Unsupported format', message: 'Your browser does not support this video format.' }
+    return null
+  }, [activeVideo])
 
-  const handleActionClick = useCallback((action: string, videoId: string, videoKind?: number) => {
-    const video = videosRef.current.find((v: VideoItemData) => v.id === videoId)
-    onActionTrigger(action, videoId, video?.creator.pubkey, videoKind)
-  }, [onActionTrigger, videosRef])
+  // Map videos to MediaItemData
+  const mediaItems: MediaItemData[] = useMemo(
+    () => videos.map(v => ({
+      id: v.id,
+      type: 'video' as const,
+      src: v.url,
+      poster: v.poster,
+      title: v.title,
+      description: v.description,
+      badge: v.contentWarning,
+      authorName: v.creator.name,
+      authorAvatarUrl: v.creator.picture,
+      authorVerified: v.creator.isVerified,
+      nsfw: !!(settingsRef.current.nsfwBlur && (v.contentWarning || settingsRef.current.nsfwPubkeys?.includes(v.creator.pubkey))),
+      customData: v,
+    })),
+    [videos, settingsRef.current.nsfwBlur, settingsRef.current.nsfwPubkeys]
+  )
 
   if (videos.length === 0) {
     return (
@@ -276,40 +283,114 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   return (
     <div className="w-full h-full relative overflow-hidden">
-      <Swiper
-        modules={[Virtual, Keyboard, Mousewheel]}
+      {/* Feed type toggles — positioned inline with MediaStack overlay */}
+      <div className="absolute top-0 left-0 right-0 z-40 pointer-events-auto">
+        <div className="flex gap-1.5 pt-3 px-4">
+          <Link
+            to="/?feed=following"
+            className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+              feedType === 'following'
+                ? 'bg-purple-500 text-white'
+                : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
+            }`}
+          >
+            Following
+          </Link>
+          <Link
+            to="/?feed=explore"
+            className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+              feedType === 'explore'
+                ? 'bg-purple-500 text-white'
+                : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
+            }`}
+          >
+            Explore
+          </Link>
+        </div>
+      </div>
+
+      <MediaStack
+        items={mediaItems}
         direction="vertical"
-        slidesPerView={1}
-        virtual
-        keyboard={{ enabled: true, onlyInViewport: false }}
-        mousewheel
-        speed={400}
-        initialSlide={swiperInitialSlide}
-        onSwiper={(s) => { swiperRef.current = s }}
-        onSlideChange={handleSlideChange}
-        observer
-        observeParents
-        observeSlideChildren
-        className="h-full w-full"
-      >
-        {videos.map((video, index) => (
-          <SwiperSlide key={video.id} virtualIndex={index}>
-            <VideoFeedItem
-              video={video}
-              isActive={video.id === activeVideoId}
-              isNearActive={activeIdxForNear >= 0 && Math.abs(index - activeIdxForNear) <= (isMobile ? 1 : 2)}
-              isMuted={isMuted}
-              onActionClick={handleActionClick}
-              uiHidden={uiHidden}
-              onUiHiddenChange={setUiHidden}
-              autoScroll={settingsRef.current.autoScroll}
-              nsfwBlur={settingsRef.current.nsfwBlur}
-              nsfwPubkeys={settingsRef.current.nsfwPubkeys}
-              onVideoEnded={onVideoEnded}
-            />
-          </SwiperSlide>
-        ))}
-      </Swiper>
+        autoPlay
+        muted={isMuted}
+        loop={!settingsRef.current.autoScroll}
+        hideScrollbar
+        showNavArrows={false}
+        showProgressBar
+        showMuteButton={false}
+        showSidebarActions
+        showMetaInfo
+        showDevHud={false}
+        onActiveIndexChange={handleActiveIndexChange}
+        onLikeClick={(item) => {
+          const v = item.customData as VideoItemData
+          onActionTrigger('like', v.id, v.creator.pubkey, v.kind)
+        }}
+        onCommentClick={(item) => {
+          const v = item.customData as VideoItemData
+          onActionTrigger('comment', v.id, v.creator.pubkey, v.kind)
+        }}
+        onShareClick={(item) => {
+          const v = item.customData as VideoItemData
+          onActionTrigger('share', v.id)
+        }}
+
+        renderExtraActions={(item, index) => {
+          const v = item.customData as VideoItemData
+          return (
+            <>
+              <div className="media-stack-action-item">
+                <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label="Boost"
+                  onClick={(e) => { e.stopPropagation(); onActionTrigger('boost', v.id, v.creator.pubkey, v.kind) }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill={v.hasBoosted ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
+                    <path d="M17 1l4 4-4 4M7 23l-4-4 4-4M7 5l10 14"/>
+                  </svg>
+                </button>
+                {v.boostsCount > 0 && <span className="media-stack-action-count">{v.boostsCount >= 1000 ? `${(v.boostsCount / 1000).toFixed(v.boostsCount % 1000 === 0 ? 0 : 1)}k` : v.boostsCount}</span>}
+              </div>
+              <div className="media-stack-action-item">
+                <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label="Zap"
+                  onClick={(e) => { e.stopPropagation(); onActionTrigger('zap', v.id, v.creator.pubkey, v.kind) }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f5b942" strokeWidth="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                  </svg>
+                </button>
+                {v.zapsCount > 0 && <span className="media-stack-action-count">{v.zapsCount >= 1000 ? `${(v.zapsCount / 1000).toFixed(v.zapsCount % 1000 === 0 ? 0 : 1)}k` : v.zapsCount}</span>}
+              </div>
+              <div className="media-stack-action-item">
+                <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  onClick={(e) => { e.stopPropagation(); onActionTrigger('mute', v.id) }}>
+                  {isMuted ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                      <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </>
+          )
+        }}
+      />
+
+      {/* Error overlay for active video */}
+      {activeVideoError && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-black/80 pointer-events-none">
+          <AlertTriangle className="w-10 h-10 text-[#a1a1aa]" />
+          <span className="text-[15px] font-semibold text-[#f7f7f8]">{activeVideoError.title}</span>
+          <span className="text-[12px] text-[#a1a1aa] text-center px-8">{activeVideoError.message}</span>
+          <span className="flex items-center gap-1 mt-1 text-[11px] text-[#71717a]">
+            <SkipForward className="w-3 h-3" />
+            Scroll past to continue
+          </span>
+        </div>
+      )}
 
       {newEventsCount > 0 && activeIndex > 0 && !uiHidden && (
         <button
@@ -323,85 +404,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         </button>
       )}
 
-      {/* Desktop navigation */}
-      <div className={`hidden md:flex flex-col gap-2 absolute right-6 top-1/2 -translate-y-1/2 z-30 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
-        <button
-          onClick={() => {
-            setRefreshKey(k => k + 1)
-            setIsRefreshing(true)
-            clearTimeout(refreshTimerRef.current)
-            refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
-          }}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Check for new content"
-        >
-          <RotateCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slideTo(0, 300)}
-          disabled={activeIndex === 0}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to newest"
-        >
-          <ChevronsUp className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slidePrev(300)}
-          disabled={activeIndex === 0}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Previous Video"
-        >
-          <ChevronUp className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slideNext(300)}
-          disabled={activeIndex === videos.length - 1 || videos.length === 0}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Next Video"
-        >
-          <ChevronDown className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slideTo(videos.length - 1, 300)}
-          disabled={activeIndex === videos.length - 1 || videos.length === 0}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to oldest"
-        >
-          <ChevronsDown className="w-5 h-5" />
-        </button>
-      </div>
 
-      {/* Mobile navigation */}
-      <div className={`md:hidden flex flex-col gap-2 absolute left-3 top-1/2 -translate-y-1/2 z-40 transition-opacity duration-300 ${uiHidden ? 'opacity-0 pointer-events-none' : ''}`}>
-        <button
-          onClick={() => {
-            setRefreshKey(k => k + 1)
-            setIsRefreshing(true)
-            clearTimeout(refreshTimerRef.current)
-            refreshTimerRef.current = setTimeout(() => setIsRefreshing(false), 1500)
-          }}
-          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Check for new content"
-        >
-          <RotateCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slideTo(0, 300)}
-          disabled={activeIndex === 0}
-          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to newest"
-        >
-          <ChevronsUp className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => swiperRef.current?.slideTo(videos.length - 1, 300)}
-          disabled={activeIndex === videos.length - 1 || videos.length === 0}
-          className="flex items-center justify-center w-9 h-9 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 disabled:opacity-30 disabled:pointer-events-none transition-all duration-200 active:scale-95 shadow-lg cursor-pointer"
-          title="Jump to oldest"
-        >
-          <ChevronsDown className="w-4 h-4" />
-        </button>
-      </div>
     </div>
   )
 })

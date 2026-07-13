@@ -34,8 +34,6 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
   const { isInstallable, installApp } = usePWAInstall()
   const { needRefresh, update, dismiss } = usePWAUpdate()
 
-  const [showFeedToggles, setShowFeedToggles] = useState(true)
-
   const isActive = useCallback((path: string) => {
     if (path === '/') {
       return pathname === '/'
@@ -47,56 +45,12 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     <>
       {immersive ? (
         <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
-        <div className="md:hidden h-dvh overflow-hidden bg-[#1b1327] relative pb-16">
-          {/* Top Feed Toggle Bar */}
-          <div
-            className={`absolute top-0 left-0 right-0 z-30 transition-all duration-300 ${
-              showFeedToggles ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
-            }`}
-          >
-            <div className="bg-gradient-to-b from-[#09090b]/90 via-[#09090b]/60 to-transparent pt-12 pb-4 px-4">
-              <div className="flex gap-1">
-                <Link
-                  to="/?feed=following"
-                  className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
-                    feedType === 'following'
-                      ? 'bg-purple-500 text-white'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
-                  }`}
-                >
-                  Following
-                </Link>
-                <Link
-                  to="/?feed=explore"
-                  className={`rounded-[16px] px-3 py-2 text-[10px] font-semibold transition-colors whitespace-nowrap ${
-                    feedType === 'explore'
-                      ? 'bg-purple-500 text-white'
-                      : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
-                  }`}
-                >
-                  Explore
-                </Link>
-              </div>
-            </div>
-          </div>
-          {/* Toggle handle to show/hide feed toggles */}
-          <button
-            type="button"
-            onClick={() => setShowFeedToggles(prev => !prev)}
-            className={`absolute top-14 left-1/2 z-30 -translate-x-1/2 transition-all duration-300 ${
-              showFeedToggles ? 'opacity-0 pointer-events-none' : 'opacity-100'
-            }`}
-            aria-label="Show feed filters"
-          >
-            <div className="flex size-7 items-center justify-center rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 shadow-lg backdrop-blur-sm">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-          </button>
-          <div className="h-full">
+        <div className="md:hidden h-dvh flex flex-col bg-[#1b1327] relative">
+          <div className="flex-1 min-h-0 overflow-hidden">
             {children}
           </div>
           {/* Mobile Navigation (Bottom) */}
-          <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
+          <nav className="shrink-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
             {mobileNavItems.map((item) => {
               const Icon = item.icon
               const active = isActive(item.path)
@@ -121,8 +75,8 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
             <aside className="flex w-[248px] shrink-0 flex-col justify-between border-r border-[#111115] bg-[#111115] p-6">
               <div className="space-y-8">
                 <div className="space-y-2">
-                  <div className="text-[18px] font-bold">NOSTR CLIPS</div>
-                  <div className="text-[11px] text-[#a1a1aa]">Vertical video on the open web</div>
+                  <div className="text-xl font-bold tracking-wide">NOSTR CLIPS</div>
+                  <div className="text-xs text-[#a1a1aa]">Vertical video on the open web</div>
                 </div>
                 <nav className="space-y-1">
                   {navItems.map((item) => {
@@ -133,11 +87,11 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
                         key={item.path}
                         to={item.path}
                         className={[
-                          'flex items-center gap-3 rounded-[12px] px-3 py-3 text-[15px] transition-colors',
+                          'flex items-center gap-4 rounded-xl px-4 py-3.5 text-base font-medium transition-colors',
                           active ? 'bg-[#222228] font-semibold text-[#f7f7f8]' : 'text-[#a1a1aa]',
                         ].join(' ')}
                       >
-                        <Icon className="h-4 w-4 shrink-0" />
+                        <Icon className="h-5 w-5 shrink-0" />
                         <span>{item.label}</span>
                       </Link>
                     )
@@ -149,54 +103,29 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
                 {isInstallable && (
                   <button
                     onClick={installApp}
-                    className="flex w-full items-center gap-3 px-3 py-3 rounded-[12px] text-purple-400 hover:bg-[#222228] hover:text-purple-300 transition-colors text-left border border-purple-500/20"
+                    className="flex w-full items-center gap-4 px-4 py-3.5 rounded-xl text-purple-400 hover:bg-[#222228] hover:text-purple-300 transition-colors text-left border border-purple-500/20 text-base"
                   >
-                    <Download className="h-4 w-4" />
-                    <span className="text-[15px]">Install App</span>
+                    <Download className="h-5 w-5" />
+                    <span>Install App</span>
                   </button>
                 )}
-                <Link to="/profile/me" className="flex items-center gap-3 px-3 py-3 rounded-[12px] text-[#a1a1aa] hover:bg-[#222228] hover:text-[#f7f7f8] transition-colors">
-                  <User className="h-4 w-4" />
-                  <span className="text-[15px]">{session ? 'My Profile' : 'Profile'}</span>
+                <Link to="/profile/me" className="flex items-center gap-4 px-4 py-3.5 rounded-xl text-[#a1a1aa] hover:bg-[#222228] hover:text-[#f7f7f8] transition-colors text-base">
+                  <User className="h-5 w-5" />
+                  <span>{session ? 'My Profile' : 'Profile'}</span>
                 </Link>
                 {session && (
                   <button
                     onClick={logout}
-                    className="flex w-full items-center gap-3 px-3 py-3 rounded-[12px] text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left"
+                    className="flex w-full items-center gap-4 px-4 py-3.5 rounded-xl text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left text-base"
                   >
-                    <LogOut className="h-4 w-4" />
-                    <span className="text-[15px]">Logout</span>
+                    <LogOut className="h-5 w-5" />
+                    <span>Logout</span>
                   </button>
                 )}
               </div>
             </aside>
 
             <main className="flex h-screen w-[720px] shrink-0 flex-col overflow-hidden bg-[#09090b]">
-              <div className="flex h-[68px] items-center justify-center">
-                <div className="flex gap-2">
-                  <Link
-                    to="/?feed=following"
-                    className={`rounded-[18px] px-[14px] py-[8px] text-[12px] font-semibold transition-colors ${
-                      feedType === 'following'
-                        ? 'bg-[#f7f7f8] text-[#09090b]'
-                        : 'bg-[#18181d] text-[#f7f7f8] hover:bg-[#222228]'
-                    }`}
-                  >
-                    Following
-                  </Link>
-                  <Link
-                    to="/?feed=explore"
-                    className={`rounded-[18px] px-[14px] py-[8px] text-[12px] font-semibold transition-colors ${
-                      feedType === 'explore'
-                        ? 'bg-[#f7f7f8] text-[#09090b]'
-                        : 'bg-[#18181d] text-[#f7f7f8] hover:bg-[#222228]'
-                    }`}
-                  >
-                    Explore
-                  </Link>
-                </div>
-              </div>
-
               <div className="relative flex flex-1 justify-center overflow-hidden">
                 {children}
               </div>
@@ -238,96 +167,97 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
         </div>
       </div>
     ) : (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex justify-center selection:bg-purple-600 selection:text-white">
-      {/* Container */}
-      <div className="w-full max-w-[1250px] flex">
-        
-        {/* Desktop Sidebar (Left) */}
-        <aside className="hidden md:flex flex-col justify-between w-64 p-6 border-r border-neutral-800 shrink-0 sticky top-0 h-screen">
-          <div className="space-y-8">
-            <div className="flex items-center gap-2 px-2">
-              <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-                Nostr Clips
-              </span>
+      <div className="min-h-dvh bg-neutral-950 text-neutral-100 flex flex-col selection:bg-purple-600 selection:text-white">
+      {/* Mobile content area (takes remaining space, scrolls) */}
+      <div className="flex-1 min-h-0 overflow-y-auto md:flex md:justify-center">
+        {/* Container */}
+        <div className="w-full max-w-[1250px] md:flex">
+          
+          {/* Desktop Sidebar (Left) */}
+          <aside className="hidden md:flex flex-col justify-between w-64 p-6 border-r border-neutral-800 shrink-0 sticky top-0 h-screen">
+            <div className="space-y-8">
+              <div className="flex items-center gap-2 px-2">
+                <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                  Nostr Clips
+                </span>
+              </div>
+
+              <nav className="space-y-1">
+                {navItems.map((item) => {
+                  const Icon = item.icon
+                  const active = isActive(item.path)
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`flex items-center gap-4 px-4 py-3.5 rounded-xl text-base font-medium transition-all duration-200 ${
+                        active
+                          ? 'bg-purple-600/10 text-purple-400 font-semibold'
+                          : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                      <span>{item.label}</span>
+                    </Link>
+                  )
+                })}
+              </nav>
             </div>
 
-            <nav className="space-y-1">
-              {navItems.map((item) => {
-                const Icon = item.icon
-                const active = isActive(item.path)
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-all duration-200 ${
-                      active
-                        ? 'bg-purple-600/10 text-purple-400 font-medium'
-                        : 'text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100'
-                    }`}
-                  >
-                    <Icon className="w-5 h-5" />
-                    <span>{item.label}</span>
-                  </Link>
-                )
-              })}
-            </nav>
-          </div>
-
-          {/* Quick Profile/Status in Sidebar */}
-          <div className="pt-4 border-t border-neutral-800 space-y-2">
-            {isInstallable && (
-              <button
-                onClick={installApp}
-                className="flex w-full items-center gap-3 px-4 py-2 rounded-xl text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 transition-all duration-200 text-left font-medium border border-purple-500/20"
+            {/* Quick Profile/Status in Sidebar */}
+            <div className="pt-4 border-t border-neutral-800 space-y-2">
+              {isInstallable && (
+                <button
+                  onClick={installApp}
+                  className="flex w-full items-center gap-4 px-4 py-3.5 rounded-xl text-purple-400 hover:bg-purple-500/10 hover:text-purple-300 transition-all duration-200 text-left font-medium border border-purple-500/20 text-base"
+                >
+                  <Download className="h-5 w-5" />
+                  <span>Install App</span>
+                </button>
+              )}
+              <Link
+                to="/profile/me"
+                className={`flex items-center gap-4 px-4 py-3.5 rounded-xl text-neutral-400 hover:text-neutral-100 transition-colors text-base font-medium ${
+                  isActive('/profile/me') ? 'text-purple-400' : ''
+                }`}
               >
-                <Download className="w-5 h-5" />
-                <span className="text-sm">Install App</span>
-              </button>
-            )}
-            <Link
-              to="/profile/me"
-              className={`flex items-center gap-3 px-4 py-2 rounded-xl text-neutral-400 hover:text-neutral-100 transition-colors ${
-                isActive('/profile/me') ? 'text-purple-400' : ''
-              }`}
-            >
-              <User className="w-5 h-5" />
-              <span className="text-sm font-medium">{session ? 'My Profile' : 'Profile'}</span>
-            </Link>
-            {session && (
-              <button
-                onClick={logout}
-                className="flex w-full items-center gap-3 px-4 py-2 rounded-xl text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left"
-              >
-                <LogOut className="w-5 h-5" />
-                <span className="text-sm font-medium">Logout</span>
-              </button>
-            )}
-          </div>
-        </aside>
-
-        {/* Main Content Area */}
-        <main className="flex-1 flex justify-center h-screen overflow-hidden relative">
-          {/* Centered 9:16 Video player container or generic page container */}
-          <div className="w-full max-w-[480px] bg-black border-x border-neutral-900 flex flex-col h-full relative">
-            <div className="flex-1 overflow-y-auto scrollbar-none pb-16 md:pb-0">
-              {children}
+                <User className="h-5 w-5" />
+                <span>{session ? 'My Profile' : 'Profile'}</span>
+              </Link>
+              {session && (
+                <button
+                  onClick={logout}
+                  className="flex w-full items-center gap-4 px-4 py-3.5 rounded-xl text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors text-left text-base font-medium"
+                >
+                  <LogOut className="h-5 w-5" />
+                  <span>Logout</span>
+                </button>
+              )}
             </div>
-          </div>
-        </main>
+          </aside>
 
-        {/* Desktop Sidebar (Right) - e.g. Comments / Info */}
-        <aside className="hidden lg:block w-80 p-6 border-l border-neutral-800 shrink-0 sticky top-0 h-screen overflow-y-auto bg-neutral-950/50">
-          {rightPanel || (
-            <div className="flex flex-col items-center justify-center h-full text-neutral-500 text-center">
-              <span className="text-sm">Select a video to see comments and creator details</span>
+          {/* Main Content Area */}
+          <main className="flex-1 flex justify-center overflow-hidden">
+            <div className="w-full max-w-[480px] bg-black border-x border-neutral-900 flex flex-col min-h-0">
+              <div className="flex-1 min-h-0">
+                {children}
+              </div>
             </div>
-          )}
-        </aside>
+          </main>
+
+          {/* Desktop Sidebar (Right) */}
+          <aside className="hidden lg:block w-80 p-6 border-l border-neutral-800 shrink-0 sticky top-0 h-screen overflow-y-auto bg-neutral-950/50">
+            {rightPanel || (
+              <div className="flex flex-col items-center justify-center h-full text-neutral-500 text-center">
+                <span className="text-sm">Select a video to see comments and creator details</span>
+              </div>
+            )}
+          </aside>
+        </div>
       </div>
 
-      {/* Mobile Navigation (Bottom) */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
-        {/* Navigation Items */}
+      {/* Mobile Navigation (Bottom) - in flex flow, not fixed */}
+      <nav className="md:hidden shrink-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
         {mobileNavItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.path)

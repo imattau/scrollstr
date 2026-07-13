@@ -84,6 +84,9 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  optimizeDeps: {
+    include: ['react-media-stack'],
+  },
   build: {
     rollupOptions: {
       output: {
@@ -94,10 +97,10 @@ export default defineConfig({
           if (id.includes('node_modules/nostr-tools') || id.includes('node_modules/applesauce') || id.includes('node_modules/nostr-passkey') || id.includes('node_modules/nostr-passkey')) {
             return 'vendor-nostr'
           }
-          if (id.includes('node_modules/swiper') || id.includes('node_modules/vaul') || id.includes('node_modules/lucide-react')) {
+          if (id.includes('node_modules/vaul') || id.includes('node_modules/lucide-react')) {
             return 'vendor-ui'
           }
-          if (id.includes('node_modules/@vidstack') || id.includes('node_modules/hls.js')) {
+          if (id.includes('node_modules/hls.js')) {
             return 'vendor-video'
           }
           if (id.includes('node_modules/@ffmpeg')) {

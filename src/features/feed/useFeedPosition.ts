@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VideoItemData } from './VideoFeedItem'
 
 interface UseFeedPositionInput {
@@ -6,26 +6,34 @@ interface UseFeedPositionInput {
   feedType: string
   filterTag: string | null
   videos: VideoItemData[]
-  swiperRef: React.MutableRefObject<any>
   activeIndex: number
   setActiveIndex: (index: number) => void
 }
 
 interface UseFeedPositionOutput {
-  swiperInitialSlide: number
   deeplinkFailed: boolean
   deeplinkPending: boolean
   activeVideoIdRef: React.MutableRefObject<string | null>
-  prevVideosLengthRef: React.MutableRefObject<number>
+}
+
+function getMediaStackViewport(): HTMLElement | null {
+  return document.querySelector('.media-stack-viewport') as HTMLElement | null
+}
+
+function scrollToIndex(index: number) {
+  const vp = getMediaStackViewport()
+  if (!vp) return
+  const height = vp.clientHeight
+  vp.scrollTo({ top: index * height, behavior: 'instant' })
 }
 
 export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOutput {
-  const { initialVideoId, feedType, filterTag, videos, swiperRef, activeIndex, setActiveIndex } = input
+  const { initialVideoId, feedType, filterTag, videos, activeIndex, setActiveIndex } = input
 
   const [deeplinkFailed, setDeeplinkFailed] = useState(false)
   const deeplinkFoundRef = useRef(false)
   const activeVideoIdRef = useRef<string | null>(null)
-  const prevVideosLengthRef = useRef(0)
+  const initialScrollDoneRef = useRef(false)
 
   // Track the active video ID so we can restore position when new events arrive
   useEffect(() => {
@@ -59,28 +67,6 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     }
   }, [initialVideoId, videos])
 
-  // Restore saved feed position from sessionStorage
-  const savedFeedState = useMemo(() => {
-    try {
-      const raw = sessionStorage.getItem('scrollstr-feed-state')
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
-    }
-  }, [])
-
-  const swiperInitialSlide = useMemo(() => {
-    if (initialVideoId) {
-      const idx = videos.findIndex(v => v.id === initialVideoId)
-      return idx >= 0 ? idx : 0
-    }
-    if (savedFeedState?.videoId) {
-      const idx = videos.findIndex(v => v.id === savedFeedState.videoId)
-      if (idx >= 0) return idx
-    }
-    return 0
-  }, [initialVideoId, videos, savedFeedState])
-
   // Save feed position to sessionStorage on slide change (skip when deep link is active)
   const currentVideoId = videos[activeIndex]?.id
   const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -97,61 +83,68 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
 
-  // Restore Swiper position synchronously when new videos are inserted at the front
-  const videosRef = useRef(videos)
-  useEffect(() => { videosRef.current = videos }, [videos])
-  useLayoutEffect(() => {
-    const swiper = swiperRef.current
-    if (!swiper) return
+  // Compute initial scroll target and scroll on mount
+  const initialTargetIndex = useMemo(() => {
+    if (initialVideoId) {
+      const idx = videos.findIndex(v => v.id === initialVideoId)
+      return idx >= 0 ? idx : null
+    }
+    const saved = (() => {
+      try {
+        const raw = sessionStorage.getItem('scrollstr-feed-state')
+        return raw ? JSON.parse(raw) : null
+      } catch { return null }
+    })()
+    if (saved?.videoId && saved.feedType === feedType && saved.filterTag === filterTag) {
+      const idx = videos.findIndex(v => v.id === saved.videoId)
+      return idx >= 0 ? idx : null
+    }
+    return null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos.length, initialVideoId, feedType, filterTag])
 
+  // Scroll to initial target on mount (deep link or session restore)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (videos.length === 0) return
+    if (initialTargetIndex === null) return
+
+    initialScrollDoneRef.current = true
+    scrollToIndex(initialTargetIndex)
+    setActiveIndex(initialTargetIndex)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos.length, initialTargetIndex])
+
+  // Restore position when new videos are inserted at the front
+  const prevVideosLengthRef = useRef(0)
+  useEffect(() => {
     const prevLength = prevVideosLengthRef.current
     prevVideosLengthRef.current = videos.length
 
     if (videos.length <= prevLength) return
     if (initialVideoId) return
+    if (prevLength === 0) return // Skip initial render
 
     const activeId = activeVideoIdRef.current
     if (!activeId) return
 
-    const currentSlideVideo = videos[swiper.activeIndex]
-    if (currentSlideVideo?.id === activeId) return
+    const currentIdx = videos.findIndex(v => v.id === activeId)
+    if (currentIdx < 0) return
 
-    const newIndex = videos.findIndex(v => v.id === activeId)
-    if (newIndex >= 0 && !swiper.destroyed) {
-      swiper.slideTo(newIndex, 0)
-    }
+    // Check if we're still viewing the same video (by checking DOM scroll position)
+    const vp = getMediaStackViewport()
+    if (!vp) return
+    const visibleIndex = Math.round(vp.scrollTop / vp.clientHeight)
+    const visibleVideo = videos[visibleIndex]
+    if (visibleVideo?.id === activeId) return
+
+    scrollToIndex(currentIdx)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, initialVideoId])
 
-  // Scroll to deep-linked video on load
-  useEffect(() => {
-    if (!initialVideoId || videos.length === 0 || !swiperRef.current) return
-    const idx = videos.findIndex(v => v.id === initialVideoId)
-    if (idx < 0) return
-    swiperRef.current.slideTo(idx, 0)
-    setActiveIndex(idx)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialVideoId, videos.length])
-
-  // Restore saved feed position on load (when no deep link)
-  useEffect(() => {
-    if (initialVideoId || videos.length === 0 || !swiperRef.current) return
-    const saved = savedFeedState
-    if (!saved?.videoId) return
-    if (saved.feedType !== feedType) return
-    if (saved.filterTag !== filterTag) return
-    const idx = videos.findIndex(v => v.id === saved.videoId)
-    if (idx < 0) return
-    swiperRef.current.slideTo(idx, 0)
-    setActiveIndex(idx)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videos.length, savedFeedState, initialVideoId, feedType, filterTag])
-
   return {
-    swiperInitialSlide,
     deeplinkFailed,
     deeplinkPending,
     activeVideoIdRef,
-    prevVideosLengthRef,
   }
 }
