@@ -101,7 +101,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     }
     return null
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videos.length, initialVideoId, feedType, filterTag])
+  }, [videos, initialVideoId, feedType, filterTag])
 
   // Scroll to initial target on mount (deep link or session restore)
   useEffect(() => {

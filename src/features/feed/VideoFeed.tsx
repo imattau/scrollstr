@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react'
 import { MediaStack } from 'react-media-stack'
-import type { MediaItemData } from 'react-media-stack'
+import type { MediaItemData, MediaStackRef } from 'react-media-stack'
 import { VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { useUserRelayUrls } from '../../nostr/relays'
@@ -24,20 +24,6 @@ interface VideoFeedProps {
   isMuted: boolean
 }
 
-function getMediaStackViewport(): HTMLElement | null {
-  return document.querySelector('.media-stack-viewport') as HTMLElement | null
-}
-
-function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
-  const vp = getMediaStackViewport()
-  if (!vp) return
-  const height = vp.clientHeight
-  vp.scrollTo({ top: index * height, behavior })
-  // Programmatic scrollTo doesn't fire the scroll event, so dispatch it
-  // so MediaStack's internal handleScroll updates its active index.
-  vp.dispatchEvent(new Event('scroll'))
-}
-
 export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoChange, isMuted }) => {
   const { session } = useNostr()
   const [searchParams] = useSearchParams()
@@ -46,6 +32,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const feedType = searchParams.get('feed') || 'explore'
 
   const [activeIndex, setActiveIndex] = useState(0)
+  const mediaStackRef = useRef<MediaStackRef>(null)
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
   const [uiHidden, setUiHidden] = useState(false)
@@ -143,7 +130,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     })
     return () => unsub()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialVideoId, relayUrls, feedKey])
+  }, [initialVideoId, relayUrls])
 
   // Progressive comments & zaps subscription for videos near the viewport
   const lastSubscribedVideoIdsRef = useRef<string[]>([])
@@ -201,7 +188,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const scrollToNewest = useCallback(() => {
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    scrollToIndex(0, 'instant')
+    mediaStackRef.current?.scrollTo('start')
     setActiveIndex(0)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
@@ -313,6 +300,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       </div>
 
       <MediaStack
+        ref={mediaStackRef}
         items={mediaItems}
         direction="vertical"
         autoPlay
