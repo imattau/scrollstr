@@ -97,7 +97,7 @@ export default defineConfig({
           if (id.includes('node_modules/swiper') || id.includes('node_modules/vaul') || id.includes('node_modules/lucide-react')) {
             return 'vendor-ui'
           }
-          if (id.includes('node_modules/media-chrome') || id.includes('node_modules/hls.js')) {
+          if (id.includes('node_modules/@vidstack') || id.includes('node_modules/hls.js')) {
             return 'vendor-video'
           }
           if (id.includes('node_modules/@ffmpeg')) {

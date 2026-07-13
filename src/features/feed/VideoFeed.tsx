@@ -124,6 +124,13 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos, activeIndex])
 
+  // Derive the effective active index from activeVideoId so isNearActive stays
+  // consistent with isActive even when indices shift due to prepended videos.
+  const activeIdxForNear = useMemo(
+    () => videos.findIndex(v => v.id === activeVideoId),
+    [videos, activeVideoId]
+  )
+
   // Subscriptions: relays, backfills, load-more
   const oldestCreatedAt = videos[videos.length - 1]?.createdAt
   useFeedSubscriptions({
@@ -290,7 +297,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
             <VideoFeedItem
               video={video}
               isActive={video.id === activeVideoId}
-              isNearActive={Math.abs(index - activeIndex) <= (isMobile ? 1 : 2)}
+              isNearActive={activeIdxForNear >= 0 && Math.abs(index - activeIdxForNear) <= (isMobile ? 1 : 2)}
               isMuted={isMuted}
               onActionClick={handleActionClick}
               uiHidden={uiHidden}
