@@ -18,6 +18,8 @@ import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
 import { loadSettings } from '../../db/local-preferences'
 
+const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+
 import { useSearchParams } from 'react-router-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, ArrowUp, Sparkles, RotateCw } from 'lucide-react'
 
@@ -282,7 +284,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
             <VideoFeedItem
               video={video}
               isActive={video.id === activeVideoId}
-              isNearActive={Math.abs(index - activeIndex) <= 2}
+              isNearActive={Math.abs(index - activeIndex) <= (isMobile ? 1 : 2)}
               isMuted={isMuted}
               onActionClick={handleActionClick}
               uiHidden={uiHidden}

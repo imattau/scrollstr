@@ -5,6 +5,8 @@ import { useMuteList } from '../../nostr/useMuteList'
 import { sortByInsertOrder } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
+const FEED_QUERY_LIMIT = 200
+
 // Debounced version of useLiveQuery — batches rapid IndexedDB changes into a
 // single state update, preventing feed flicker when many events arrive at once.
 function useDebouncedLiveQuery<T>(
@@ -106,8 +108,13 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const _allShapes = useDebouncedLiveQuery(async () => {
     try {
-      const shapes = await db.videoShapes.where('mediaStatus').notEqual('failed').toArray()
-      return await mergeCountersIntoShapes(shapes)
+      const shapes = await db.videoShapes
+        .orderBy('insertOrder')
+        .reverse()
+        .limit(FEED_QUERY_LIMIT)
+        .toArray()
+      const nonFailed = shapes.filter(s => s.mediaStatus !== 'failed')
+      return await mergeCountersIntoShapes(nonFailed)
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
@@ -121,9 +128,12 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     try {
       const shapes = await db.videoShapes
         .where('pubkey').anyOf(followingPubkeys)
-        .filter(shape => shape.mediaStatus !== 'failed')
         .toArray()
-      return await mergeCountersIntoShapes(shapes)
+      const nonFailed = shapes
+        .filter(shape => shape.mediaStatus !== 'failed')
+        .sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
+        .slice(0, FEED_QUERY_LIMIT)
+      return await mergeCountersIntoShapes(nonFailed)
     } catch (err) {
       console.error('[VideoFeed] Error in following video query:', err)
       return []

@@ -4,6 +4,7 @@ import { MediaController, MediaControlBar, MediaPlayButton, MediaMuteButton, Med
 import { RotateCw } from 'lucide-react'
 import { updateMediaStatus } from '../../nostr/cache'
 import { isInternalUrl, isSafeVideoUrl } from '../../lib/crypto'
+import { markVideoLoadStart, markVideoLoaded, markPlaybackEvent } from '../../lib/performance'
 
 let hlsModule: typeof import('hls.js').default | null = null
 async function getHls() {
@@ -14,6 +15,14 @@ async function getHls() {
 }
 
 const probedUrls = new Set<string>()
+const MAX_PROBED_URLS = 500
+function trackProbedUrl(url: string): void {
+  if (probedUrls.size >= MAX_PROBED_URLS) {
+    const first = probedUrls.values().next().value
+    if (first !== undefined) probedUrls.delete(first)
+  }
+  probedUrls.add(url)
+}
 
 interface VideoPlayerProps {
   url: string
@@ -126,7 +135,7 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
     const abortController = new AbortController()
     
     if (!isInternalUrl(url) && !probedUrls.has(url)) {
-      probedUrls.add(url)
+      trackProbedUrl(url)
       fetch(url, { method: 'HEAD', signal: abortController.signal })
         .then(async (res) => {
           if (isAborted) return
@@ -143,6 +152,7 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
     }
 
     setIsSourceLoading(true)
+    markVideoLoadStart(url)
 
     // Load source immediately, in parallel with the HEAD request
     if (isHls) {
@@ -151,6 +161,17 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
         if (Hls.isSupported()) {
           const hls = new Hls({
             maxMaxBufferLength: 10, // Optimize memory for vertical feed
+          })
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            markVideoLoaded(url)
+          })
+          hls.on(Hls.Events.ERROR, (_event, data) => {
+            if (data.fatal) {
+              markPlaybackEvent(url, 'hls_fatal_error', { type: data.type, details: data.details })
+            }
+          })
+          hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+            markPlaybackEvent(url, 'level_switched', { level: data.level })
           })
           hls.loadSource(url)
           hls.attachMedia(video)
@@ -176,14 +197,27 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
       await updateMediaStatus(url, 'failed')
     }
 
+    const handleWaiting = () => markPlaybackEvent(url, 'rebuffer')
+    const handlePlaying = () => markPlaybackEvent(url, 'resume')
+    const handlePlay = () => markPlaybackEvent(url, 'play')
+    const handlePause = () => markPlaybackEvent(url, 'pause')
+
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('error', handleLoadError)
+    video.addEventListener('waiting', handleWaiting)
+    video.addEventListener('playing', handlePlaying)
+    video.addEventListener('play', handlePlay)
+    video.addEventListener('pause', handlePause)
 
     return () => {
       isAborted = true
       abortController.abort()
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('error', handleLoadError)
+      video.removeEventListener('waiting', handleWaiting)
+      video.removeEventListener('playing', handlePlaying)
+      video.removeEventListener('play', handlePlay)
+      video.removeEventListener('pause', handlePause)
       if (hlsInstanceRef.current) {
         hlsInstanceRef.current.destroy()
         hlsInstanceRef.current = null

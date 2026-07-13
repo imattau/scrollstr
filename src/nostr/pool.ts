@@ -60,6 +60,37 @@ async function processBackfillEvents(events: any[]) {
   }
 }
 
+// Batch accumulator for real-time subscription events — collects events and
+// flushes them via bulkSaveEventsToCache, avoiding per-event IDB transactions.
+const SUBSCRIPTION_FLUSH_INTERVAL = 500
+const SUBSCRIPTION_FLUSH_MAX = 50
+let subscriptionBatch: any[] = []
+let subscriptionFlushTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushSubscriptionBatch(): void {
+  subscriptionFlushTimer = null
+  const batch = subscriptionBatch
+  subscriptionBatch = []
+  if (batch.length > 0) {
+    void bulkSaveEventsToCache(batch).catch((err) =>
+      console.warn(`[pool] Failed to cache subscription batch (${batch.length} events):`, err)
+    )
+  }
+}
+
+function pushSubscriptionEvent(event: any): void {
+  subscriptionBatch.push(event)
+  if (subscriptionBatch.length >= SUBSCRIPTION_FLUSH_MAX) {
+    if (subscriptionFlushTimer) {
+      clearTimeout(subscriptionFlushTimer)
+      subscriptionFlushTimer = null
+    }
+    flushSubscriptionBatch()
+  } else if (!subscriptionFlushTimer) {
+    subscriptionFlushTimer = setTimeout(flushSubscriptionBatch, SUBSCRIPTION_FLUSH_INTERVAL)
+  }
+}
+
 worker.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
@@ -69,9 +100,7 @@ worker.onmessage = (e: MessageEvent) => {
     }
     case 'subscriptionEvent': {
       const event = (msg as any).event
-      saveEventToCache(event, true).catch((err) =>
-        console.warn(`[pool] Failed to cache event ${event.id}:`, err)
-      )
+      pushSubscriptionEvent(event)
       break
     }
     case 'backfillComplete':

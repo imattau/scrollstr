@@ -199,7 +199,7 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
           aria-label="Creator"
         >
           {profile.picture ? (
-            <img src={profile.picture} alt={profile.name} className="h-full w-full object-cover" />
+            <img src={profile.picture} alt={profile.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             profile.displayName?.slice(0, 1).toUpperCase() || 'N'
           )}
