@@ -476,24 +476,116 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
   }
 }
 
-export async function saveEventToCache(event: any): Promise<void> {
+const BULK_INSERT_CHUNK = 50
+
+export async function bulkSaveEventsToCache(events: any[]): Promise<void> {
+  if (events.length === 0) return
+
+  const videoShapes: VideoShape[] = []
+  const reactionEvents: Array<{ eTag: string; event: any }> = []
+  const profileEvents: any[] = []
+
+  for (const event of events) {
+    if (!event || !event.id || typeof event.kind !== 'number') continue
+    if (!event.sig) continue
+    if (event.sig !== 'local-preview-sig' && !event.sig.startsWith('mock-')) {
+      try {
+        if (!verifyEvent(event as any)) continue
+      } catch {
+        continue
+      }
+    }
+
+    const { id, kind, pubkey, created_at } = event
+    const isVideo = kind === 1 || kind === 21 || kind === 22 || kind === 34236
+    const isReaction = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
+
+    const eTags = (event.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
+    const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+
+    // Only enqueue for further processing if not already cached
+    if (await db.cachedEvents.get(id)) continue
+
+    await db.cachedEvents.put({ id, kind, pubkey, created_at, event, eTags, pTags })
+
+    if (isVideo) {
+      const shape = await buildOrUpdateVideoShape(event)
+      if (shape) videoShapes.push(shape)
+    } else if (isReaction) {
+      for (const eId of eTags) {
+        reactionEvents.push({ eTag: eId, event })
+      }
+    } else if (kind === 0) {
+      profileEvents.push(event)
+    }
+  }
+
+  // Bulk-apply reaction counts
+  if (reactionEvents.length > 0) {
+    const counterMap = new Map<string, VideoCountersRecord>()
+    for (const { eTag, event } of reactionEvents) {
+      let entry = counterMap.get(eTag)
+      if (!entry) {
+        const existing = await db.videoCounters.get(eTag)
+        entry = existing ?? { id: eTag, reactionCount: 0, repostCount: 0, replyCount: 0, zapCount: 0, zapTotalSats: 0 }
+        counterMap.set(eTag, entry)
+      }
+      const kind = event.kind
+      if (kind === 7) entry.reactionCount += 1
+      else if (kind === 6 || kind === 16) entry.repostCount += 1
+      else if (kind === 1111) entry.replyCount += 1
+      else if (kind === 9735) {
+        entry.zapCount += 1
+        const descriptionTag = event.tags.find((t: any) => t[0] === 'description')?.[1]
+        if (descriptionTag) {
+          try {
+            const parsedDesc = JSON.parse(descriptionTag)
+            const amount = parsedDesc.tags.find((t: any) => t[0] === 'amount')?.[1]
+            if (amount) {
+              entry.zapTotalSats += Math.floor(parseInt(amount, 10) / 1000)
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    const counterRecords = Array.from(counterMap.values())
+    for (let i = 0; i < counterRecords.length; i += BULK_INSERT_CHUNK) {
+      await db.videoCounters.bulkPut(counterRecords.slice(i, i + BULK_INSERT_CHUNK))
+    }
+  }
+
+  if (profileEvents.length > 0) {
+    for (const ev of profileEvents) {
+      await buildOrUpdateAuthorProfile(ev).catch(() => {})
+    }
+  }
+
+  if (++_saveCounter % PRUNE_INTERVAL === 0) {
+    void pruneCache()
+  }
+}
+
+export async function saveEventToCache(event: any, trusted = false): Promise<void> {
   if (!event || !event.id || typeof event.kind !== 'number') return
 
-  // Reject events with invalid signatures — prevents relay injection attacks
-  if (!event.sig) {
-    console.warn(`[Cache] Rejected event ${event.id} — missing signature`)
-    return
-  }
-  // Allow mock/development signatures (only present in dev builds)
-  if (event.sig !== 'local-preview-sig' && !event.sig.startsWith('mock-')) {
-    try {
-      if (!verifyEvent(event as any)) {
-        console.warn(`[Cache] Rejected event ${event.id} — invalid signature`)
+  // Reject events with invalid signatures — prevents relay injection attacks.
+  // Events from the web worker (trusted=true) are already verified in the worker;
+  // locally-published events (trusted=false) are verified here.
+  if (!trusted) {
+    if (!event.sig) {
+      console.warn(`[Cache] Rejected event ${event.id} — missing signature`)
+      return
+    }
+    if (event.sig !== 'local-preview-sig' && !event.sig.startsWith('mock-')) {
+      try {
+        if (!verifyEvent(event as any)) {
+          console.warn(`[Cache] Rejected event ${event.id} — invalid signature`)
+          return
+        }
+      } catch {
+        console.warn(`[Cache] Signature verification error for event ${event.id}`)
         return
       }
-    } catch {
-      console.warn(`[Cache] Signature verification error for event ${event.id}`)
-      return
     }
   }
 

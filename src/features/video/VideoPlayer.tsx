@@ -13,6 +13,8 @@ async function getHls() {
   return hlsModule
 }
 
+const probedUrls = new Set<string>()
+
 interface VideoPlayerProps {
   url: string
   poster?: string
@@ -118,12 +120,13 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
       return
     }
 
-    // Fire-and-forget HEAD probe to update media status; don't block source loading
+    // Fire-and-forget HEAD probe to update media status; don't block source loading.
+    // Skip already-probed URLs to avoid duplicate HEAD requests on rapid scroll-back.
     let isAborted = false
     const abortController = new AbortController()
     
-    // Skip HEAD probe for internal URLs (SSRF protection); still allow playback
-    if (!isInternalUrl(url)) {
+    if (!isInternalUrl(url) && !probedUrls.has(url)) {
+      probedUrls.add(url)
       fetch(url, { method: 'HEAD', signal: abortController.signal })
         .then(async (res) => {
           if (isAborted) return
@@ -324,25 +327,6 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
             <span>Rotate for full view</span>
           </div>
         )}
-        {isNearActive && (
-          <div className="absolute bottom-0 left-0 right-0 z-30 flex flex-col justify-end">
-            <MediaTimeRange
-              className="w-full hover:opacity-100"
-              style={{
-                '--media-range-track-height': '3px',
-                '--media-range-track-background': 'rgba(255,255,255,0.15)',
-                '--media-range-bar-color': '#ffffff',
-                '--media-range-thumb-width': '10px',
-                '--media-range-thumb-height': '10px',
-                '--media-range-thumb-background': '#ffffff',
-                '--media-range-thumb-border-radius': '9999px',
-                '--media-range-padding': '0px',
-                '--media-range-track-border-radius': '2px',
-                '--media-control-height': '3px',
-              } as React.CSSProperties}
-            />
-          </div>
-        )}
         {showControls && (
           <MediaControlBar className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex gap-4 items-center">
             <MediaPlayButton className="text-white hover:text-purple-400 bg-transparent border-0" />
@@ -351,6 +335,87 @@ export const VideoPlayer = React.memo<VideoPlayerProps>(({ url, poster, isActive
           </MediaControlBar>
         )}
       </MediaController>
+      {isNearActive && (
+        <ScrubberBar videoRef={videoRef} />
+      )}
     </div>
   )
 })
+
+const ScrubberBar: React.FC<{ videoRef: React.RefObject<HTMLVideoElement | null> }> = ({ videoRef }) => {
+  const [progress, setProgress] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const [showThumb, setShowThumb] = useState(false)
+  const barRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    let lastUpdate = 0
+    const update = () => {
+      if (!isDragging && video.duration > 0) {
+        const now = performance.now()
+        if (now - lastUpdate < 200) return
+        lastUpdate = now
+        setProgress(video.currentTime / video.duration)
+      }
+    }
+    video.addEventListener('timeupdate', update)
+    return () => video.removeEventListener('timeupdate', update)
+  }, [isDragging, videoRef])
+
+  const seekFromClientX = useCallback((clientX: number) => {
+    const bar = barRef.current
+    const video = videoRef.current
+    if (!bar || !video || !video.duration) return
+    const rect = bar.getBoundingClientRect()
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    video.currentTime = fraction * video.duration
+    setProgress(fraction)
+  }, [videoRef])
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    barRef.current?.setPointerCapture(e.pointerId)
+    setIsDragging(true)
+    setShowThumb(true)
+    seekFromClientX(e.clientX)
+  }, [seekFromClientX])
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging) return
+    seekFromClientX(e.clientX)
+  }, [isDragging, seekFromClientX])
+
+  const handlePointerUp = useCallback(() => {
+    setIsDragging(false)
+  }, [])
+
+  return (
+    <div
+      ref={barRef}
+      className="absolute bottom-0 left-0 right-0 z-50 h-8 flex items-end cursor-pointer"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onMouseEnter={() => setShowThumb(true)}
+      onMouseLeave={() => !isDragging && setShowThumb(false)}
+      style={{ touchAction: 'none' }}
+    >
+      <div className="relative w-full h-1 bg-white/15">
+        <div
+          className="absolute inset-y-0 left-0 bg-white transition-[width] duration-75"
+          style={{ width: `${Math.max(progress * 100, 0.5)}%` }}
+        />
+      </div>
+      {(showThumb || isDragging) && (
+        <div
+          className="absolute w-4 h-4 rounded-full bg-white shadow-md -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ left: `${progress * 100}%`, bottom: '4px' }}
+        />
+      )}
+    </div>
+  )
+}

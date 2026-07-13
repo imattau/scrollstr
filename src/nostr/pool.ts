@@ -1,7 +1,7 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
-import { saveEventToCache } from './cache'
+import { saveEventToCache, bulkSaveEventsToCache } from './cache'
 import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory } from './search-relays'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
@@ -48,12 +48,8 @@ const BACKFILL_BATCH = 10
 async function processBackfillEvents(events: any[]) {
   for (let i = 0; i < events.length; i += BACKFILL_BATCH) {
     const batch = events.slice(i, i + BACKFILL_BATCH)
-    await Promise.all(
-      batch.map((ev) =>
-        saveEventToCache(ev).catch((err) =>
-          console.warn(`[pool] Failed to cache event ${ev.id}:`, err)
-        )
-      )
+    await bulkSaveEventsToCache(batch).catch((err) =>
+      console.warn(`[pool] Failed to cache backfill batch:`, err)
     )
     if (i + BACKFILL_BATCH < events.length) {
       await new Promise((r) => setTimeout(r, 0))
@@ -70,7 +66,7 @@ worker.onmessage = (e: MessageEvent) => {
     }
     case 'subscriptionEvent': {
       const event = (msg as any).event
-      saveEventToCache(event).catch((err) =>
+      saveEventToCache(event, true).catch((err) =>
         console.warn(`[pool] Failed to cache event ${event.id}:`, err)
       )
       break
@@ -225,7 +221,18 @@ function processQueue() {
 // ── Subscriptions (proxied to worker with concurrency limit) ────────────
 
 let subIdCounter = 0
-const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void }>()
+const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
+// Periodically purge search callbacks older than 30s to prevent leaks
+const SEARCH_CALLBACK_TTL = 30000
+setInterval(() => {
+  const now = Date.now()
+  for (const [id, cb] of searchCallbacks) {
+    if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
+      cb.reject(new Error('Search timed out'))
+      searchCallbacks.delete(id)
+    }
+  }
+}, SEARCH_CALLBACK_TTL)
 
 export function subscribeToRelays(
   relays: string[],
@@ -316,7 +323,7 @@ export async function searchRelays(
   }
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
-    searchCallbacks.set(id, { resolve, reject })
+    searchCallbacks.set(id, { resolve, reject, createdAt: Date.now() })
     worker.postMessage({
       type: 'search',
       id,

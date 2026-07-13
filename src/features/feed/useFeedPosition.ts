@@ -33,6 +33,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (video) {
       activeVideoIdRef.current = video.id
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex])
 
   const deeplinkPending = !!initialVideoId && !videos.some(v => v.id === initialVideoId)
@@ -119,6 +120,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (newIndex >= 0 && !swiper.destroyed) {
       swiper.slideTo(newIndex, 0)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, initialVideoId])
 
   // Scroll to deep-linked video on load
@@ -128,6 +130,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (idx < 0) return
     swiperRef.current.slideTo(idx, 0)
     setActiveIndex(idx)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialVideoId, videos.length])
 
   // Restore saved feed position on load (when no deep link)
@@ -141,6 +144,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (idx < 0) return
     swiperRef.current.slideTo(idx, 0)
     setActiveIndex(idx)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, savedFeedState, initialVideoId, feedType, filterTag])
 
   return {

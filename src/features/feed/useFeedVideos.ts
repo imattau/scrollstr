@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { liveQuery } from 'dexie'
 import { db, VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
@@ -132,7 +132,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
-  const filterVideos = (source: VideoShape[]) => {
+  const filterVideos = useCallback((source: VideoShape[]) => {
     let list = source.map(mapShapeToVideoItem)
 
     if (mutedPubkeys.size > 0) {
@@ -152,10 +152,10 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     }
 
     return [...list].sort(sortByInsertOrder)
-  }
+  }, [mutedPubkeys, filterTag, mutedHashtags])
 
-  const exploreVideos = useMemo(() => filterVideos(allShapes), [allShapes, filterTag, mutedPubkeys, mutedHashtags])
-  const followingVideos = useMemo(() => filterVideos(followedShapes), [followedShapes, filterTag, mutedPubkeys, mutedHashtags])
+  const exploreVideos = useMemo(() => filterVideos(allShapes), [allShapes, filterVideos])
+  const followingVideos = useMemo(() => filterVideos(followedShapes), [followedShapes, filterVideos])
   const videos = feedType === 'following' && sessionPubkey ? followingVideos : exploreVideos
 
   const videosRef = useRef(videos)

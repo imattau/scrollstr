@@ -26,7 +26,12 @@ async function fetchBatch(relayUrls: string[], until: number): Promise<any[]> {
       limit: BACKFILL_BATCH_SIZE,
       until,
     })
-    return events
+    return events.filter((ev: any) => {
+      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+        try { return verifyEvent(ev as any) } catch { return false }
+      }
+      return true
+    })
   } catch (err) {
     console.warn('[Worker] Relay error during batch fetch:', err)
     return []
@@ -39,7 +44,12 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
       kinds: [0, 10002],
       authors: pubkeys,
     })
-    return events
+    return events.filter((ev: any) => {
+      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+        try { return verifyEvent(ev as any) } catch { return false }
+      }
+      return true
+    })
   } catch (err) {
     console.warn('[Worker] Relay error during profile batch fetch:', err)
     return []
@@ -83,7 +93,12 @@ async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], u
       limit: BACKFILL_BATCH_SIZE,
       until,
     })
-    return events
+    return events.filter((ev: any) => {
+      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+        try { return verifyEvent(ev as any) } catch { return false }
+      }
+      return true
+    })
   } catch (err) {
     console.warn('[Worker] Relay error during followed video batch fetch:', err)
     return []
@@ -220,10 +235,16 @@ async function handleStartFollowBackfill(relayUrls: string[], pubkeys: string[])
   console.log(`[Worker] Starting follow backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
 
   try {
-    const events = await pool.querySync(effective, {
+    const raw = await pool.querySync(effective, {
       kinds: [3],
       authors: pubkeys,
       limit: 50,
+    })
+    const events = raw.filter((ev: any) => {
+      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+        try { return verifyEvent(ev as any) } catch { return false }
+      }
+      return true
     })
     if (events.length > 0) {
       console.log(`[Worker] Follow backfill received ${events.length} kind:3 events from relays.`)
@@ -244,10 +265,16 @@ async function handleStartUserVideoBackfill(relayUrls: string[], pubkeys: string
   console.log(`[Worker] Starting user-video backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
 
   try {
-    const events = await pool.querySync(effective, {
+    const raw = await pool.querySync(effective, {
       kinds: [1, 21, 22, 34236],
       authors: pubkeys,
       limit: 100,
+    })
+    const events = raw.filter((ev: any) => {
+      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+        try { return verifyEvent(ev as any) } catch { return false }
+      }
+      return true
     })
     if (events.length > 0) {
       console.log(`[Worker] User-video backfill received ${events.length} events from relays.`)

@@ -2,7 +2,6 @@ import React, { useMemo, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { VideoPlayer } from '../video/VideoPlayer'
 import { useProfile } from '../../nostr/profile'
-import { loadSettings } from '../../db/local-preferences'
 import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff, AlertTriangle, SkipForward } from 'lucide-react'
 
 export interface CreatorProfile {
@@ -55,6 +54,8 @@ interface VideoFeedItemProps {
   onUiHiddenChange: (hidden: boolean) => void
   autoScroll?: boolean
   onVideoEnded?: () => void
+  nsfwBlur?: boolean
+  nsfwPubkeys?: string[]
 }
 
 function ActionPill({
@@ -90,19 +91,18 @@ function ActionPill({
   )
 }
 
-const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange, autoScroll, onVideoEnded }) => {
+const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive, isNearActive, isMuted, onActionClick, uiHidden, onUiHiddenChange, autoScroll, onVideoEnded, nsfwBlur, nsfwPubkeys }) => {
   const navigate = useNavigate()
   const profile = useProfile(video.creator.pubkey)
   const creatorLabel = useMemo(() => `@${profile.displayName || profile.name}`, [profile.displayName, profile.name])
   const [showInfo, setShowInfo] = useState(false)
   const [nsfwRevealed, setNsfwRevealed] = useState(false)
   const isNsfwBlurred = useMemo(() => {
-    const s = loadSettings()
-    if (!s.nsfwBlur) return false
+    if (!nsfwBlur) return false
     const hasContentWarning = !!video.contentWarning
-    const isCreatorNsfw = s.nsfwPubkeys?.includes(video.creator.pubkey) ?? false
+    const isCreatorNsfw = nsfwPubkeys?.includes(video.creator.pubkey) ?? false
     return (hasContentWarning || isCreatorNsfw) && !nsfwRevealed
-  }, [nsfwRevealed, video.contentWarning, video.creator.pubkey])
+  }, [nsfwRevealed, video.contentWarning, video.creator.pubkey, nsfwBlur, nsfwPubkeys])
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isLongPress = useRef(false)

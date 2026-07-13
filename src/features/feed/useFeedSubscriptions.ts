@@ -72,7 +72,6 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
 
     void bootstrapMetadata()
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionPubkey])
 
   // Backfill: follow + user-video + general cache (once per session)
@@ -90,7 +89,6 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     }, 500)
 
     return () => clearTimeout(generalTimer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionPubkey, relayUrls, refreshKey])
 
   // Profile + followed-video backfills when followingPubkeys resolves
@@ -142,5 +140,6 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
       unsub()
       clearTimeout(doneTimer)
     }
-  }, [activeIndex, isFetchingOlder, videosLength, oldestCreatedAt, relayUrls])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, videosLength, oldestCreatedAt, relayUrls])
 }

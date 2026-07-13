@@ -88,6 +88,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     trySync().catch((err) => console.warn('[settings] Failed to sync from Nostr:', err))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.pubkey, session?.method])
 
   const loginWithNip07 = useCallback(async (): Promise<string> => {
@@ -240,7 +241,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     registerPasskey,
     logout,
     signEvent,
-  }), [pool, isConnected, session, loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, logout, signEvent])
+  }), [isConnected, session, loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, logout, signEvent])
 
   return (
     <NostrContext.Provider value={contextValue}>

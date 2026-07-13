@@ -44,6 +44,12 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
 
   const relayUrls = useUserRelayUrls(session?.pubkey)
 
+  // Load settings once (not on every render) to avoid blocking on localStorage reads
+  const settingsRef = useRef(loadSettings())
+  useEffect(() => {
+    settingsRef.current = loadSettings()
+  }, [])
+
   const swiperRef = useRef<SwiperType | null>(null)
   const lastDirection = useRef<'down' | 'up'>('down')
   const prevActiveIndex = useRef(activeIndex)
@@ -79,7 +85,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
   // Feed data: videos, filtering, sorting
-  const { videos: rawVideos, feedKey, videosRef } = useFeedVideos({
+  const { videos, feedKey, videosRef } = useFeedVideos({
     sessionPubkey: session?.pubkey,
     feedType,
     followingPubkeys,
@@ -88,9 +94,6 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     filterTag,
     refreshKey,
   })
-
-  // Stabilize videos array reference to prevent React/Swiper DOM conflicts
-  const videos = useMemo(() => rawVideos, [rawVideos])
 
   // Track active video by ID instead of index so the playing video stays active
   // when new videos are prepended and indices shift.
@@ -203,8 +206,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [onVideoChange, videosRef])
 
   const onVideoEnded = useCallback(() => {
-    const settings = loadSettings()
-    if (!settings.autoScroll) return
+    if (!settingsRef.current.autoScroll) return
     const swiper = swiperRef.current
     if (!swiper) return
 
@@ -285,7 +287,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
               onActionClick={handleActionClick}
               uiHidden={uiHidden}
               onUiHiddenChange={setUiHidden}
-              autoScroll={loadSettings().autoScroll}
+              autoScroll={settingsRef.current.autoScroll}
+              nsfwBlur={settingsRef.current.nsfwBlur}
+              nsfwPubkeys={settingsRef.current.nsfwPubkeys}
               onVideoEnded={onVideoEnded}
             />
           </SwiperSlide>
