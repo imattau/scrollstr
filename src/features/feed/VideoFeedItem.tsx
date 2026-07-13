@@ -110,20 +110,18 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
     isLongPress.current = false
     longPressTimer.current = setTimeout(() => {
       isLongPress.current = true
-      onUiHiddenChange(true)
+      const next = !uiHidden
+      onUiHiddenChange(next)
+      setShowInfo(!next)
     }, 400)
-  }, [onUiHiddenChange])
+  }, [onUiHiddenChange, uiHidden])
 
   const handleTouchEnd = useCallback(() => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current)
       longPressTimer.current = null
     }
-    if (!isLongPress.current && uiHidden) {
-      onUiHiddenChange(false)
-      setShowInfo(true)
-    }
-  }, [uiHidden, onUiHiddenChange])
+  }, [])
 
   const handleTouchMove = useCallback(() => {
     if (longPressTimer.current) {

@@ -14,14 +14,24 @@ interface UseFeedSubscriptionsInput {
   activeIndex: number
   videosLength: number
   oldestCreatedAt: number | undefined
+  refreshKey: number
 }
 
 export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
-  const { relayUrls, sessionPubkey, followingPubkeys, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt } = input
+  const { relayUrls, sessionPubkey, followingPubkeys, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
 
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const lastOlderFetchAtRef = useRef(0)
   const initialBackfillsFiredRef = useRef(false)
+  const prevRefreshKeyRef = useRef(refreshKey)
+
+  // Reset backfill + subscription guards when refreshKey changes (manual refresh)
+  useEffect(() => {
+    if (refreshKey !== prevRefreshKeyRef.current) {
+      prevRefreshKeyRef.current = refreshKey
+      initialBackfillsFiredRef.current = false
+    }
+  }, [refreshKey])
 
   // Update pool relays when relayUrls resolves (only once per mount)
   useEffect(() => {
@@ -81,7 +91,7 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
 
     return () => clearTimeout(generalTimer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionPubkey, relayUrls])
+  }, [sessionPubkey, relayUrls, refreshKey])
 
   // Profile + followed-video backfills when followingPubkeys resolves
   useEffect(() => {
@@ -94,7 +104,7 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
 
     return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followingPubkeys, relayUrls])
+  }, [followingPubkeys, relayUrls, refreshKey])
 
   // Feed subscription: fetch recent videos from all relays into the cache.
   useEffect(() => {
@@ -105,7 +115,7 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
       since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
     }, 'high')
     return () => { unsub() }
-  }, [relayUrls])
+  }, [relayUrls, refreshKey])
 
   // Load more older content when approaching the end of the feed
   useEffect(() => {

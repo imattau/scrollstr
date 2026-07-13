@@ -119,6 +119,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     activeIndex,
     videosLength: videos.length,
     oldestCreatedAt,
+    refreshKey,
   })
 
   // Progressive comments & zaps subscription for videos near the viewport
