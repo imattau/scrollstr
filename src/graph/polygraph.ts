@@ -23,7 +23,8 @@ export class PolyGraph {
   readonly persistence = new PolyPersistence()
   readonly changes = new Subject<GraphChangeEvent>()
 
-  private hotCacheOrder: string[] = []
+  /** LRU hot-cache order: insertion-ordered Map used as an ordered set */
+  private hotCacheOrder = new Map<string, true>()
   private nodeToEdgeMap = new Map<string, Set<string>>()
 
   // ── Dirty tracking for auto-persist ──
@@ -155,32 +156,33 @@ export class PolyGraph {
     const node = this.nodes.get(id)
     if (!node) return
 
-    this.nodes.delete(id)
-    this.edges.delete(id)
-    this.nodeToEdgeMap.delete(id)
-    this.vectors.remove(id)
-
     this.cleanupNodeEdges(id)
+    this.nodes.delete(id)
+    this.vectors.remove(id)
     const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
     if (rawId !== id) this.vectors.remove(rawId)
 
     this.dirtyNodes.delete(id)
     this.removedNodeIds.add(id)
     this.schedulePersist()
-    const idx = this.hotCacheOrder.indexOf(id)
-    if (idx >= 0) this.hotCacheOrder.splice(idx, 1)
+    this.hotCacheOrder.delete(id)
     this.changes.next({ type: 'node_removed', nodeId: id, nodeType: node.type })
   }
 
   private cleanupNodeEdges(id: string): void {
     const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
-    const sourceEdges = this.edges.get(rawId)
-    if (sourceEdges) {
-      for (const e of sourceEdges) {
-        this.nodeToEdgeMap.get(e.target)?.delete(rawId)
+    const idsToCheck = id === rawId ? [id] : [id, rawId]
+
+    for (const lookupId of idsToCheck) {
+      const sourceEdges = this.edges.get(lookupId)
+      if (sourceEdges) {
+        for (const e of sourceEdges) {
+          this.nodeToEdgeMap.get(e.target)?.delete(lookupId)
+        }
+        this.edges.delete(lookupId)
       }
+      this.nodeToEdgeMap.delete(lookupId)
     }
-    this.edges.delete(rawId)
   }
 
   // ── Edge CRUD ──
@@ -246,15 +248,14 @@ export class PolyGraph {
   // ── Hot Cache ──
 
   private touchHotCache(id: string): void {
-    const idx = this.hotCacheOrder.indexOf(id)
-    if (idx >= 0) this.hotCacheOrder.splice(idx, 1)
-    this.hotCacheOrder.push(id)
-    if (this.hotCacheOrder.length > HOT_CACHE_MAX) {
-      const evict = this.hotCacheOrder.shift()
-      if (evict) {
-        this.nodes.delete(evict)
+    this.hotCacheOrder.delete(id)
+    this.hotCacheOrder.set(id, true)
+    if (this.hotCacheOrder.size > HOT_CACHE_MAX) {
+      const evict = this.hotCacheOrder.keys().next().value
+      if (evict !== undefined) {
+        this.hotCacheOrder.delete(evict)
         this.cleanupNodeEdges(evict)
-        this.nodeToEdgeMap.delete(evict)
+        this.nodes.delete(evict)
         this.vectors.remove(evict)
         const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
         if (evictRaw !== evict) this.vectors.remove(evictRaw)
@@ -398,7 +399,7 @@ export class PolyGraph {
     this.edges.clear()
     this.allTypes.clear()
     this.vectors.clear()
-    this.hotCacheOrder = []
+    this.hotCacheOrder.clear()
     this.nodeToEdgeMap.clear()
   }
 
