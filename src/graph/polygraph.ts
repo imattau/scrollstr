@@ -374,6 +374,8 @@ export class PolyGraph {
     }
 
     await this.rebuildEdgeIndex()
+
+    this.changes.next({ type: 'node_added' })
   }
 
   // ── Pruning ──
