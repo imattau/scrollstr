@@ -2,7 +2,7 @@ import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
-import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
+import { getSearchRelays, getSearchOnlyRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -34,6 +34,47 @@ export const pool = new SimplePool()
 
 export let activeRelays: string[] = [...DEFAULT_RELAYS]
 
+// ── Deferred index writes ───────────────────────────────────────────────
+// When the user is scrolling or a video is paused, events accumulate in
+// pending batches instead of being written to IndexedDB. This prevents
+// feed flicker from liveQuery re-renders during active viewing. Batches
+// are flushed when the user settles on a video for SCROLL_SETTLE_MS.
+let indexWritesDeferred = false
+let pendingSubscriptionBatch: any[] = []
+let pendingBackfillBatch: any[] = []
+
+export function setIndexWritesDeferred(deferred: boolean): void {
+  if (indexWritesDeferred === deferred) return
+  indexWritesDeferred = deferred
+  if (!deferred) {
+    void flushPendingIndexWrites()
+  }
+}
+
+export function flushIndexWrites(): void {
+  if (pendingSubscriptionBatch.length > 0 || pendingBackfillBatch.length > 0) {
+    void flushPendingIndexWrites()
+  }
+}
+
+async function flushPendingIndexWrites(): Promise<void> {
+  const subBatch = pendingSubscriptionBatch
+  pendingSubscriptionBatch = []
+  if (subBatch.length > 0) {
+    await bulkSaveEventsToCache(subBatch).catch((err) =>
+      console.warn(`[pool] Failed to cache deferred subscription batch (${subBatch.length} events):`, err)
+    )
+  }
+
+  const backBatch = pendingBackfillBatch
+  pendingBackfillBatch = []
+  if (backBatch.length > 0) {
+    await processBackfillEvents(backBatch).catch((err) =>
+      console.warn(`[pool] Failed to cache deferred backfill batch (${backBatch.length} events):`, err)
+    )
+  }
+}
+
 // ── Web Worker ───────────────────────────────────────────────────────────
 
 const worker = new Worker(
@@ -58,11 +99,16 @@ function flushBackfillBuffer(): void {
   backfillFlushTimer = null
   const batch = backfillBuffer
   backfillBuffer = []
-  if (batch.length > 0) {
-    void processBackfillEvents(batch).catch((err) =>
-      console.warn(`[pool] Failed to cache backfill buffer (${batch.length} events):`, err)
-    )
+  if (batch.length === 0) return
+
+  if (indexWritesDeferred) {
+    pendingBackfillBatch.push(...batch)
+    return
   }
+
+  void processBackfillEvents(batch).catch((err) =>
+    console.warn(`[pool] Failed to cache backfill buffer (${batch.length} events):`, err)
+  )
 }
 
 function pushBackfillEvents(events: any[]): void {
@@ -95,11 +141,16 @@ function flushSubscriptionBatch(): void {
   subscriptionFlushTimer = null
   const batch = subscriptionBatch
   subscriptionBatch = []
-  if (batch.length > 0) {
-    void bulkSaveEventsToCache(batch).catch((err) =>
-      console.warn(`[pool] Failed to cache subscription batch (${batch.length} events):`, err)
-    )
+  if (batch.length === 0) return
+
+  if (indexWritesDeferred) {
+    pendingSubscriptionBatch.push(...batch)
+    return
   }
+
+  void bulkSaveEventsToCache(batch).catch((err) =>
+    console.warn(`[pool] Failed to cache subscription batch (${batch.length} events):`, err)
+  )
 }
 
 function pushSubscriptionEvent(event: any): void {
@@ -377,13 +428,14 @@ export async function fetchFromRelays(relays: string[], filters: any | any[]): P
 }
 
 export async function searchRelays(
-  relays: string[],
+  _relays: string[],
   query: string,
   options?: { kinds?: number[]; limit?: number; until?: number; signal?: AbortSignal }
 ): Promise<any[]> {
-  const expandedRelays = getSearchRelays(relays)
-  if (expandedRelays.length > relays.length) {
-    console.log(`[Pool] Expanded search relays: ${relays.length} → ${expandedRelays.length} relays`)
+  const expandedRelays = getSearchOnlyRelays()
+  if (expandedRelays.length === 0) {
+    console.warn('[Pool] No search-capable relays available for query')
+    return []
   }
   const safeQuery = sanitizeSearchQuery(query)
   if (!safeQuery) return Promise.resolve([])

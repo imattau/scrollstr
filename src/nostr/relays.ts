@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { loadSettings } from '../db/local-preferences'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../graph'
 import { db } from './cache'
 
 const DEFAULT_RELAYS = [

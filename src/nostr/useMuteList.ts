@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../graph'
 import { db, pruneBlockedContent } from './cache'
 import { subscribeToRelays } from './pool'
 import { useUserRelayUrls } from './relays'

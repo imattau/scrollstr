@@ -1,5 +1,36 @@
 import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
-import { getCacheVideoCount, getCacheOldestVideoTimestamp, MAX_VIDEOS } from './cache'
+import { PolyPersistence } from '../graph/persistence'
+
+const persistence = new PolyPersistence()
+const MAX_VIDEOS = 10000
+const VIDEO_KINDS = new Set([1, 21, 22, 34236])
+
+/**
+ * Count persisted video events by scanning all event nodes from IndexedDB.
+ * The main thread's in-memory graph is not accessible from this worker, so
+ * we read directly from the shared IndexedDB persistence layer instead.
+ */
+async function getCacheVideoCount(): Promise<number> {
+  const ids = await persistence.allNodeIds()
+  const nodes = await persistence.getNodes(ids)
+  let count = 0
+  for (const n of nodes) {
+    const kind = n.data.kind as number | undefined
+    if (kind && VIDEO_KINDS.has(kind)) count++
+  }
+  return count
+}
+
+async function getCacheOldestVideoTimestamp(): Promise<number | null> {
+  const ids = await persistence.allNodeIds()
+  const nodes = await persistence.getNodes(ids)
+  let oldest: number | null = null
+  for (const n of nodes) {
+    const ts = n.data.created_at as number | undefined
+    if (ts && (oldest === null || ts < oldest)) oldest = ts
+  }
+  return oldest
+}
 
 type SubCloser = { close: (reason?: string) => void }
 
@@ -59,28 +90,47 @@ async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promis
 
 function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Promise<any[]> {
   return new Promise((resolve) => {
+    const seen = new Set<string>()
+    const allEvents: any[] = []
+    let settled = 0
     let finished = false
-    const events: any[] = []
-    let remaining = relays.length
 
-    const sub = pool.subscribeMany(relays, filter as Filter, {
-      onevent: (event) => {
-        if (!finished) events.push(event)
-      },
-      oneose: () => {
-        remaining--
-        if (remaining === 0 && !finished) {
-          finished = true
-          resolve(events)
-        }
-      },
+    const subs = relays.map((relay) => {
+      const sub = pool.subscribe([relay], filter as Filter, {
+        onevent: (event) => {
+          if (finished) return
+          if (seen.has(event.id)) return
+          seen.add(event.id)
+          allEvents.push(event)
+        },
+        oneose: () => {
+          settled++
+          if (settled === relays.length && !finished) {
+            finished = true
+            resolve(allEvents)
+          }
+        },
+      })
+      return sub
     })
 
+    // First-result window: resolve as soon as one relay has answered and we
+    // have at least some results, giving stragglers a short grace period.
+    const graceTimer = setTimeout(() => {
+      if (!finished && allEvents.length > 0) {
+        finished = true
+        subs.forEach((s) => s.close())
+        resolve(allEvents)
+      }
+    }, Math.min(timeoutMs, 2000))
+
+    // Hard timeout: resolve with whatever we have
     setTimeout(() => {
       if (!finished) {
         finished = true
-        sub.close()
-        resolve(events)
+        subs.forEach((s) => s.close())
+        clearTimeout(graceTimer)
+        resolve(allEvents)
       }
     }, timeoutMs)
   })

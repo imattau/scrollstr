@@ -15,7 +15,13 @@ const MAX_DISCOVERED = 25
 
 let directoryCache: string[] = []
 let lastDirectoryFetch = 0
+let lastDirectoryFetchAttempt = 0
 const DIRECTORY_CACHE_TTL = 60 * 60 * 1000
+const FAILURE_RETRY_INTERVAL = 5 * 60 * 1000
+
+// Persist last fetch attempt across page refreshes so a broken API doesn't
+// log on every mount cycle.
+try { lastDirectoryFetchAttempt = Number(localStorage.getItem('scrollstr_last_relay_fetch') ?? 0) } catch {}
 
 // ── NIP-50 capability cache ──────────────────────────────────────────────
 
@@ -73,6 +79,12 @@ export async function fetchRelayDirectory(): Promise<string[]> {
   if (lastDirectoryFetch > 0 && now - lastDirectoryFetch < DIRECTORY_CACHE_TTL) {
     return directoryCache
   }
+  // Rate-limit retry on failure so repeated mount cycles don't spam failed requests
+  if (now - lastDirectoryFetchAttempt < FAILURE_RETRY_INTERVAL) {
+    return directoryCache
+  }
+  lastDirectoryFetchAttempt = now
+  try { localStorage.setItem('scrollstr_last_relay_fetch', String(now)) } catch {}
   try {
     const res = await fetch('https://api.nostr.watch/v1/online')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -84,8 +96,7 @@ export async function fetchRelayDirectory(): Promise<string[]> {
     lastDirectoryFetch = now
     addDiscoveredRelays(urls)
     return urls
-  } catch (err) {
-    console.warn('[SearchRelays] Failed to fetch relay directory:', err)
+  } catch {
     return directoryCache
   }
 }
@@ -98,7 +109,7 @@ export function sanitizeSearchQuery(query: string): string {
   return query
     .trim()
     .slice(0, MAX_QUERY_LENGTH)
-    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/\p{C}/gu, '')
     .replace(/\s+/g, ' ')
 }
 
@@ -107,14 +118,39 @@ export function getSearchRelays(userRelays: string[]): string[] {
   const result: string[] = []
 
   for (const url of userRelays) {
-    if (!seen.has(url)) { seen.add(url); result.push(url) }
+    if (seen.has(url)) continue
+    seen.add(url)
+    if (nip50Capable.has(url) || KNOWN_SEARCH_RELAYS.includes(url)) {
+      result.push(url)
+    } else if (!nip50Checked.has(url)) {
+      checkNip50Support(url).catch(() => {})
+    }
   }
   for (const url of KNOWN_SEARCH_RELAYS) {
     if (!seen.has(url)) { seen.add(url); result.push(url) }
   }
   for (const url of discoveredRelays) {
     if (seen.has(url)) continue
-    // Only include discovered relays confirmed NIP-50 capable
+    if (nip50Capable.has(url)) {
+      seen.add(url); result.push(url)
+    }
+  }
+
+  return result
+}
+
+/** Search-only relay list — omits user personal relays entirely so searches
+ *  only go to known search relays and confirmed NIP-50 capable relays.
+ *  Use this for NIP-50 search queries instead of getSearchRelays(userRelays). */
+export function getSearchOnlyRelays(): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const url of KNOWN_SEARCH_RELAYS) {
+    if (!seen.has(url)) { seen.add(url); result.push(url) }
+  }
+  for (const url of discoveredRelays) {
+    if (seen.has(url)) continue
     if (nip50Capable.has(url)) {
       seen.add(url); result.push(url)
     }

@@ -4,10 +4,10 @@ import type { MediaItemData, MediaStackRef } from 'react-media-stack'
 import { VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../../graph'
 import { db } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
-import { subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays, setIndexWritesDeferred, flushIndexWrites } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
 import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
@@ -35,6 +35,32 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const mediaStackRef = useRef<MediaStackRef>(null)
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
+
+  // Defer index writes while scrolling — when activeIndex changes frequently,
+  // events accumulate in a pending batch instead of being written to IndexedDB.
+  // Once the index is stable for SCROLL_SETTLE_MS, pending events are flushed.
+  // This prevents feed flicker and video resets during rapid scrolling.
+  const prevScrollIdxRef = useRef(activeIndex)
+  useEffect(() => {
+    if (prevScrollIdxRef.current !== activeIndex) {
+      prevScrollIdxRef.current = activeIndex
+      setIndexWritesDeferred(true)
+
+      const timer = setTimeout(() => {
+        setIndexWritesDeferred(false)
+      }, 1500)
+
+      return () => clearTimeout(timer)
+    }
+  }, [activeIndex])
+
+  // Flush any pending index writes when the component unmounts
+  useEffect(() => {
+    return () => {
+      setIndexWritesDeferred(false)
+    }
+  }, [])
+
   const [uiHidden, setUiHidden] = useState(false)
   const [refreshKey] = useState(0)
 
@@ -186,6 +212,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [videos.length])
 
   const scrollToNewest = useCallback(() => {
+    flushIndexWrites()
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
     mediaStackRef.current?.scrollTo('start')

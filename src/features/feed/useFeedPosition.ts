@@ -25,6 +25,7 @@ function scrollToIndex(index: number) {
   if (!vp) return
   const height = vp.clientHeight
   vp.scrollTo({ top: index * height, behavior: 'instant' })
+  vp.dispatchEvent(new Event('scroll'))
 }
 
 export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOutput {
@@ -34,6 +35,18 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
   const deeplinkFoundRef = useRef(false)
   const activeVideoIdRef = useRef<string | null>(null)
   const initialScrollDoneRef = useRef(false)
+  const prevInitialVideoIdRef = useRef(initialVideoId)
+
+  // Reset scroll guard when the deep link target changes mid-session
+  // (e.g. user navigates from /?v=ID1 to /?v=ID2 without remounting VideoFeed).
+  useEffect(() => {
+    if (initialVideoId !== prevInitialVideoIdRef.current) {
+      prevInitialVideoIdRef.current = initialVideoId
+      initialScrollDoneRef.current = false
+      deeplinkFoundRef.current = false
+      setDeeplinkFailed(false)
+    }
+  }, [initialVideoId])
 
   // Track the active video ID so we can restore position when new events arrive
   useEffect(() => {
@@ -100,7 +113,6 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
       return idx >= 0 ? idx : null
     }
     return null
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos, initialVideoId, feedType, filterTag])
 
   // Scroll to initial target on mount (deep link or session restore)

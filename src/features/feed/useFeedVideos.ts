@@ -1,55 +1,11 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { liveQuery } from 'dexie'
+import { useGraphQuery } from '../../graph'
 import { db, VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
 import { sortByInsertOrder } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
 const FEED_QUERY_LIMIT = 200
-
-// Debounced version of useLiveQuery — batches rapid IndexedDB changes into a
-// single state update, preventing feed flicker when many events arrive at once.
-function useDebouncedLiveQuery<T>(
-  querier: () => Promise<T>,
-  deps: any[],
-  delay = 200
-): T | undefined {
-  const [result, setResult] = useState<T>()
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const mountedRef = useRef(true)
-  const isFirstRef = useRef(true)
-
-  useEffect(() => {
-    mountedRef.current = true
-
-    const subscription = liveQuery(querier).subscribe({
-      next: (value) => {
-        if (isFirstRef.current) {
-          isFirstRef.current = false
-          if (mountedRef.current) setResult(value as T)
-        } else {
-          clearTimeout(timerRef.current)
-          timerRef.current = setTimeout(() => {
-            if (mountedRef.current) setResult(value as T)
-          }, delay)
-        }
-      },
-      error: (err) => {
-        console.error('[Feed] Live query error:', err)
-        if (mountedRef.current) setResult(undefined)
-      },
-    })
-
-    return () => {
-      mountedRef.current = false
-      clearTimeout(timerRef.current)
-      subscription.unsubscribe()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps)
-
-  return result
-}
 
 const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
   id: shape.id,
@@ -59,7 +15,7 @@ const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
   insertOrder: shape.insertOrder,
   title: shape.title ?? '',
   description: shape.summary ?? '',
-  url: shape.videoUrl,
+  url: shape.videoUrl ?? '',
   poster: shape.thumbnailUrl,
   creator: {
     pubkey: shape.pubkey,
@@ -106,39 +62,53 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
-  const _allShapes = useDebouncedLiveQuery(async () => {
+  const _allShapes = useGraphQuery(async () => {
     try {
-      const shapes = await db.videoShapes
-        .orderBy('insertOrder')
-        .reverse()
-        .limit(FEED_QUERY_LIMIT)
-        .toArray()
-      const nonFailed = shapes.filter(s => s.mediaStatus !== 'failed')
-      return await mergeCountersIntoShapes(nonFailed)
+      let shapes: VideoShape[]
+      if (filterTag) {
+        shapes = await db.videoShapes
+          .where('hashtags')
+          .equals(filterTag.toLowerCase())
+          .toArray()
+        shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
+        shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      } else {
+        shapes = await db.videoShapes
+          .orderBy('insertOrder')
+          .reverse()
+          .limit(FEED_QUERY_LIMIT)
+          .toArray()
+      }
+      const valid = shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed')
+      return await mergeCountersIntoShapes(valid)
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey], 200)
+  }, [refreshKey, filterTag], 200)
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
-  const _followedShapes = useDebouncedLiveQuery(async () => {
+  const _followedShapes = useGraphQuery(async () => {
     if (!sessionPubkey || followingPubkeys.length === 0) return []
     try {
       const shapes = await db.videoShapes
         .where('pubkey').anyOf(followingPubkeys)
         .toArray()
-      const nonFailed = shapes
-        .filter(shape => shape.mediaStatus !== 'failed')
-        .sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
-        .slice(0, FEED_QUERY_LIMIT)
-      return await mergeCountersIntoShapes(nonFailed)
+      let filtered = shapes.filter(shape => shape.videoUrl && shape.mediaStatus !== 'failed')
+      if (filterTag) {
+        filtered = filtered.filter(shape =>
+          shape.hashtags?.some(t => t.toLowerCase() === filterTag.toLowerCase())
+        )
+      }
+      filtered.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
+      filtered = filtered.slice(0, FEED_QUERY_LIMIT)
+      return await mergeCountersIntoShapes(filtered)
     } catch (err) {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey], 200)
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 200)
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
@@ -149,12 +119,6 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       list = list.filter((v: VideoItemData) => !mutedPubkeys.has(v.creator.pubkey))
     }
 
-    if (filterTag) {
-      list = list.filter((v: VideoItemData) =>
-        v.hashtags?.some((t: string) => t.toLowerCase() === filterTag.toLowerCase())
-      )
-    }
-
     if (mutedHashtags.size > 0) {
       list = list.filter((v: VideoItemData) =>
         !v.hashtags?.some((t: string) => mutedHashtags.has(t.toLowerCase()))
@@ -162,7 +126,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     }
 
     return [...list].sort(sortByInsertOrder)
-  }, [mutedPubkeys, filterTag, mutedHashtags])
+  }, [mutedPubkeys, mutedHashtags])
 
   const exploreVideos = useMemo(() => filterVideos(allShapes), [allShapes, filterVideos])
   const followingVideos = useMemo(() => filterVideos(followedShapes), [followedShapes, filterVideos])

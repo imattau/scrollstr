@@ -8,7 +8,7 @@ import { useToast } from '../../components/feedback/Toast'
 import { uploadMedia, calculateSha256 } from '../../nostr/blossom/upload'
 import { publishVideoEvent } from '../../nostr/events'
 import { db } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../../graph'
 import { isSupportedVideo, convertToWebM } from './convertVideo'
 
 const postSchema = z.object({

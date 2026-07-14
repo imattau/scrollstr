@@ -6,13 +6,14 @@ import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
 import { useNavigate } from 'react-router-dom'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { useMuteList } from '../../nostr/useMuteList'
+import { useSimilarVideos } from './useSimilarVideos'
 
 const EMPTY_VIDEOS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
@@ -178,8 +179,15 @@ export const DiscoverPage: React.FC = () => {
   // Watch for kind:10002 relay-list events arriving in the Dexie cache
   // (from backfill, profile subscriptions, bootstrap, etc.) and feed them
   // into the search relay pool for future queries.
+  // Use created_at index with a hard limit so we don't load every cached
+  // event into memory on every liveQuery re-fire.
   const rawRelayListEvents = useLiveQuery(
-    () => db.cachedEvents.where({ kind: 10002 }).toArray(),
+    () => db.cachedEvents
+      .orderBy('created_at')
+      .reverse()
+      .limit(500)
+      .toArray()
+      .then(events => events.filter(e => e.kind === 10002).slice(0, 200)),
     []
   )
   const relayListEvents = useMemo(() => rawRelayListEvents ?? [], [rawRelayListEvents])
@@ -222,21 +230,27 @@ export const DiscoverPage: React.FC = () => {
     return () => unsub()
   }, [accumulatedResults, relayUrls])
 
-  // Query all video shapes from the full Dexie cache (no time limit)
+  // Query video shapes from the Dexie cache — bounded to avoid loading
+  // thousands of cached shapes into memory on every liveQuery re-fire.
   const rawVideoShapes = useLiveQuery(
     () => db.videoShapes
-      .filter(shape => shape.mediaStatus !== 'failed')
-      .toArray(),
+      .orderBy('insertOrder')
+      .reverse()
+      .limit(1000)
+      .toArray()
+      .then(shapes => shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed')),
     []
   ) ?? EMPTY_VIDEOS
 
-  // Query recent video shapes (last 48 hours) — for trending creators
+  // Query recent video shapes (last 48 hours) — for trending creators.
+  // Use created_at index with a hard limit so it stays memory-bounded.
   const rawRecentVideoShapes = useLiveQuery(
     () => db.videoShapes
       .where('created_at')
       .above(Math.floor(Date.now() / 1000) - 48 * 3600)
-      .filter(shape => shape.mediaStatus !== 'failed')
-      .toArray(),
+      .limit(1000)
+      .toArray()
+      .then(shapes => shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed').slice(0, 500)),
     []
   ) ?? EMPTY_VIDEOS
 
@@ -246,7 +260,7 @@ export const DiscoverPage: React.FC = () => {
     createdAt: shape.created_at,
     title: shape.title ?? '',
     description: shape.summary ?? '',
-    url: shape.videoUrl,
+    url: shape.videoUrl ?? '',
     poster: shape.thumbnailUrl,
     creator: {
       pubkey: shape.pubkey,
@@ -290,6 +304,10 @@ export const DiscoverPage: React.FC = () => {
     const sorted = mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return sorted.slice(0, 300)
   }, [rawRecentVideoShapes, mutedPubkeys])
+
+  // Vector-similar videos based on the top cached video
+  const referenceVideo = (videos as VideoItemData[])?.[0]
+  const similarVideos = useSimilarVideos(referenceVideo?.id, 8, 0.35)
 
   // Extract unique hashtags/topics dynamically from all videos
   const topics = useMemo(() => {
@@ -730,6 +748,36 @@ export const DiscoverPage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {similarVideos.length > 0 && (
+              <div className="space-y-4 pb-8">
+                <h3 className="text-[18px] font-semibold">Similar to top video</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {similarVideos.map((video) => (
+                    <div
+                      key={video.id}
+                      onClick={() => navigate(`/?v=${video.id}`)}
+                      className="group relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[16px] bg-[#18181d] transition-all duration-200 hover:scale-[1.02]"
+                    >
+                      {video.poster ? (
+                        <img src={video.poster} alt={video.title || 'Video'} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[24px]">
+                          ▶
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-[#09090b]/20 to-transparent opacity-90" />
+                      <div className="absolute bottom-3 left-3 right-3 space-y-1">
+                        <p className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#f7f7f8]">
+                          {video.description || video.title}
+                        </p>
+                        <p className="text-[9px] text-[#a78bfa] font-medium">@{video.creator.name}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

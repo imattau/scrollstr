@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { useUserRelayUrls } from './relays'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../graph'
 import { db } from './cache'
 import type { CreatorProfile } from '../features/feed/VideoFeedItem'
 
