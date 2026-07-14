@@ -40,7 +40,7 @@ const CreatorList: React.FC<{
   }
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto max-h-[400px] pr-1" style={{ contain: 'strict' }}>
+    <div ref={scrollRef} className="flex-1 overflow-y-auto max-h-[400px] pr-1">
       <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const pk = pubkeys[virtualItem.index]
