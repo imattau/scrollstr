@@ -435,5 +435,11 @@ self.onmessage = (e: MessageEvent) => {
     case 'abortSearch':
       searchedIdsAborted.add(msg.id)
       break
+    case 'cleanup':
+      for (const [, sub] of subs) sub.close()
+      subs.clear()
+      searchedIdsAborted.clear()
+      pool.close([])
+      break
   }
 }

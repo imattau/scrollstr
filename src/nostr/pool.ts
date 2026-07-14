@@ -339,7 +339,7 @@ let subIdCounter = 0
 const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
 // Periodically purge search callbacks older than 30s to prevent leaks
 const SEARCH_CALLBACK_TTL = 30000
-setInterval(() => {
+const searchPurgeInterval = setInterval(() => {
   const now = Date.now()
   for (const [id, cb] of searchCallbacks) {
     if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
@@ -469,6 +469,26 @@ export async function searchRelays(
       }, { once: true })
     }
   })
+}
+
+/** Clean up all pool resources — call on logout / unmount */
+export function cleanupPool(): void {
+  clearInterval(searchPurgeInterval)
+  worker.postMessage({ type: 'cleanup' })
+  searchCallbacks.clear()
+  pendingSubscriptionBatch = []
+  pendingBackfillBatch = []
+  backfillBuffer = []
+  if (backfillFlushTimer) {
+    clearTimeout(backfillFlushTimer)
+    backfillFlushTimer = null
+  }
+  if (subscriptionFlushTimer) {
+    clearTimeout(subscriptionFlushTimer)
+    subscriptionFlushTimer = null
+  }
+  subMetadata.clear()
+  subQueue.length = 0
 }
 
 export { addDiscoveredRelays, fetchRelayDirectory }

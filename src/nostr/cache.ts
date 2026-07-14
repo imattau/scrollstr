@@ -393,6 +393,7 @@ export const db = new CacheDB()
 // ── Helpers (unchanged logic, graph-backed) ──
 
 export const MAX_VIDEOS = 10000
+const MAX_EVENT_NODES = 30000
 const PRUNE_INTERVAL = 30
 let _saveCounter = 0
 
@@ -450,6 +451,40 @@ export async function pruneCache(): Promise<void> {
   for (const [, node] of graph['nodes']) {
     if (node.type === 'profile' && !remainingPubkeySet.has(node.id)) {
       graph.removeNode(node.id)
+    }
+  }
+
+  // Prune orphan reaction events (kinds 7, 16, 9735, 1111) whose
+  // referenced video shapes were already removed.
+  const remainingShapeIds = new Set<string>()
+  for (const [, node] of graph['nodes']) {
+    if (node.type === 'video_shape') remainingShapeIds.add(node.id)
+  }
+  for (const [, node] of graph['nodes']) {
+    if (node.type !== 'event') continue
+    const data = node.data as Record<string, unknown>
+    const kind = data.kind as number | undefined
+    if (kind && [7, 16, 9735, 1111].includes(kind)) {
+      const eTags = data.eTags as string[] | undefined
+      if (eTags?.length && !eTags.some(eid => remainingShapeIds.has(eid))) {
+        graph.removeNode(node.id)
+      }
+    }
+  }
+
+  // Cap total event nodes — remove oldest events when above threshold
+  let eventCount = 0
+  for (const [, node] of graph['nodes']) {
+    if (node.type === 'event') eventCount++
+  }
+  if (eventCount > MAX_EVENT_NODES) {
+    const excess = eventCount - MAX_EVENT_NODES
+    const events = [...graph['nodes'].entries()]
+      .filter(([, n]) => n.type === 'event')
+      .sort(([, a], [, b]) => a.updatedAt - b.updatedAt)
+      .slice(0, excess)
+    for (const [id] of events) {
+      graph.removeNode(id)
     }
   }
 }

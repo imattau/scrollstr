@@ -1,7 +1,8 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { pool } from '../nostr/pool'
+import { pool, cleanupPool } from '../nostr/pool'
 import { startCacheBackfill } from '../nostr/cacheBackfill'
+import { graph } from '../graph/polygraph'
 import {
   readStoredPasskeyIdentity,
   unlockPasskeyIdentity,
@@ -188,6 +189,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearPasskeyIdentity()
     setSession(null)
     localStorage.removeItem('scrollstr_session')
+    graph.clear()
+    cleanupPool()
   }, [])
 
   const signEvent = useCallback(async (eventTemplate: any): Promise<any> => {

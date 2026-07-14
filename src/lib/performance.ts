@@ -51,6 +51,9 @@ export function markVideoLoaded(videoId: string): void {
   if (isDev && duration) {
     console.log(`[Perf] Video ${videoId.slice(0, 8)} loaded in ${duration.toFixed(2)}ms`)
   }
+  performance.clearMarks(`video-load-start:${videoId}`)
+  performance.clearMarks(`video-loaded:${videoId}`)
+  performance.clearMeasures(`video-load:${videoId}`)
 }
 
 export function markPlaybackEvent(videoId: string, event: string, detail?: Record<string, unknown>): void {

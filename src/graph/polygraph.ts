@@ -154,16 +154,33 @@ export class PolyGraph {
   removeNode(id: string): void {
     const node = this.nodes.get(id)
     if (!node) return
+
     this.nodes.delete(id)
     this.edges.delete(id)
     this.nodeToEdgeMap.delete(id)
     this.vectors.remove(id)
+
+    this.cleanupNodeEdges(id)
+    const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
+    if (rawId !== id) this.vectors.remove(rawId)
+
     this.dirtyNodes.delete(id)
     this.removedNodeIds.add(id)
     this.schedulePersist()
     const idx = this.hotCacheOrder.indexOf(id)
     if (idx >= 0) this.hotCacheOrder.splice(idx, 1)
     this.changes.next({ type: 'node_removed', nodeId: id, nodeType: node.type })
+  }
+
+  private cleanupNodeEdges(id: string): void {
+    const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
+    const sourceEdges = this.edges.get(rawId)
+    if (sourceEdges) {
+      for (const e of sourceEdges) {
+        this.nodeToEdgeMap.get(e.target)?.delete(rawId)
+      }
+    }
+    this.edges.delete(rawId)
   }
 
   // ── Edge CRUD ──
@@ -236,6 +253,11 @@ export class PolyGraph {
       const evict = this.hotCacheOrder.shift()
       if (evict) {
         this.nodes.delete(evict)
+        this.cleanupNodeEdges(evict)
+        this.nodeToEdgeMap.delete(evict)
+        this.vectors.remove(evict)
+        const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
+        if (evictRaw !== evict) this.vectors.remove(evictRaw)
       }
     }
   }

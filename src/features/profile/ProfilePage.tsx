@@ -2,13 +2,14 @@ import React, { useState, useEffect, useMemo, useRef } from 'react'
 import * as Tabs from '@radix-ui/react-tabs'
 import { MoreHorizontal, FileVideo, RotateCw, Info, Calendar, ArrowLeft } from 'lucide-react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useNostr } from '../../app/providers'
 import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
-import { useLiveQuery } from '../../graph'
+import { useGraphQuery, useLiveQuery } from '../../graph'
 import { parseVideoEvent, publishFollow, publishMuteList } from '../../nostr/events'
-import { VideoItemData } from '../feed/VideoFeedItem'
+import { VideoItemData, CreatorProfile } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { useMuteList } from '../../nostr/useMuteList'
@@ -19,24 +20,100 @@ const EMPTY_VIDEOS: any[] = []
 const EMPTY_EVENTS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
 
-const CreatorListItem: React.FC<{
-  pubkey: string
-  isFollowing: boolean
+const CreatorList: React.FC<{
+  pubkeys: string[]
+  isFollowingPubkeys: Set<string>
   session: any
   onFollow: (pubkey: string) => void
-}> = ({ pubkey, isFollowing, session, onFollow }) => {
-  const navigate = useNavigate()
-  const profile = useProfile(pubkey)
-  const displayName = profile.displayName || profile.name || 'Nostr User'
-  const avatarInitial = displayName.slice(0, 1).toUpperCase() || 'N'
+}> = ({ pubkeys, isFollowingPubkeys, session, onFollow }) => {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const data = useCreatorListData(pubkeys)
 
-  const rawVideoEvents: any[] = useLiveQuery(
-    () => db.cachedEvents.where('pubkey').equals(pubkey).filter(e => VIDEO_KINDS.includes(e.kind)).toArray(),
-    [pubkey]
-  ) ?? []
+  const virtualizer = useVirtualizer({
+    count: pubkeys.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 64,
+  })
 
-  const videoCount = rawVideoEvents.length
+  if (pubkeys.length === 0) {
+    return <p className="text-[13px] text-[#71717a] text-center py-8">None found.</p>
+  }
 
+  return (
+    <div ref={scrollRef} className="flex-1 overflow-y-auto max-h-[400px] pr-1" style={{ contain: 'strict' }}>
+      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const pk = pubkeys[virtualItem.index]
+          const item = data?.get(pk)
+          return (
+            <div
+              key={virtualItem.key}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: `${virtualItem.size}px`,
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <CreatorListItem
+                pubkey={pk}
+                profile={item?.profile}
+                videoCount={item?.videoCount ?? 0}
+                isFollowing={isFollowingPubkeys.has(pk)}
+                session={session}
+                onFollow={onFollow}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function useCreatorListData(pubkeys: string[]) {
+  return useGraphQuery(async () => {
+    if (pubkeys.length === 0) return new Map<string, { profile?: CreatorProfile; videoCount: number }>()
+
+    const pubkeySet = new Set(pubkeys)
+
+    const allEvents = await db.cachedEvents.toArray()
+    const videoCounts = new Map<string, number>()
+    for (const ev of allEvents) {
+      if (VIDEO_KINDS.includes(ev.kind) && pubkeySet.has(ev.pubkey)) {
+        videoCounts.set(ev.pubkey, (videoCounts.get(ev.pubkey) ?? 0) + 1)
+      }
+    }
+
+    const allProfiles = await db.authorProfiles.toArray()
+    const profileMap = new Map<string, CreatorProfile>()
+    for (const p of allProfiles) {
+      profileMap.set(p.pubkey, {
+        pubkey: p.pubkey,
+        name: p.name || p.pubkey.slice(0, 8),
+        displayName: p.displayName || p.name || p.pubkey.slice(0, 8),
+        picture: p.picture,
+        nip05: p.nip05,
+        isVerified: p.isVerified ?? false,
+        about: p.about,
+        website: p.website,
+      })
+    }
+
+    const result = new Map<string, { profile?: CreatorProfile; videoCount: number }>()
+    for (const pk of pubkeys) {
+      result.set(pk, {
+        profile: profileMap.get(pk),
+        videoCount: videoCounts.get(pk) ?? 0,
+      })
+    }
+    return result
+  }, [pubkeys], 200)
+}
+
+const CreatorAvatarColor: React.FC<{ pubkey: string; picture?: string; name: string }> = ({ pubkey, picture, name }) => {
   const color = useMemo(() => {
     const colors = ['#60a5fa', '#f05252', '#31c48d', '#a78bfa', '#f5b942']
     let hash = 0
@@ -46,24 +123,42 @@ const CreatorListItem: React.FC<{
     return colors[Math.abs(hash) % colors.length]
   }, [pubkey])
 
+  const initial = name.slice(0, 1).toUpperCase() || 'N'
+
+  return (
+    <div
+      className="flex size-[44px] overflow-hidden items-center justify-center rounded-full text-[15px] font-bold text-white shrink-0"
+      style={{ backgroundColor: color }}
+    >
+      {picture ? (
+        <img src={picture} alt={name} className="h-full w-full object-cover" />
+      ) : (
+        initial
+      )}
+    </div>
+  )
+}
+
+const CreatorListItem: React.FC<{
+  pubkey: string
+  profile?: CreatorProfile
+  videoCount: number
+  isFollowing: boolean
+  session: any
+  onFollow: (pubkey: string) => void
+}> = ({ pubkey, profile, videoCount, isFollowing, session, onFollow }) => {
+  const navigate = useNavigate()
+  const displayName = profile?.displayName || profile?.name || 'Nostr User'
+
   return (
     <div className="flex items-center justify-between py-2">
       <div
-        className="flex items-center gap-3 cursor-pointer"
+        className="flex items-center gap-3 cursor-pointer min-w-0"
         onClick={() => navigate(`/profile/${pubkey}`)}
       >
-        <div
-          className="flex size-[44px] overflow-hidden items-center justify-center rounded-full text-[15px] font-bold text-white shrink-0"
-          style={{ backgroundColor: color }}
-        >
-          {profile.picture ? (
-            <img src={profile.picture} alt={displayName} className="h-full w-full object-cover" />
-          ) : (
-            avatarInitial
-          )}
-        </div>
-        <div>
-          <p className="text-[14px] font-semibold text-[#f7f7f8]">@{displayName}</p>
+        <CreatorAvatarColor pubkey={pubkey} picture={profile?.picture} name={displayName} />
+        <div className="min-w-0">
+          <p className="text-[14px] font-semibold text-[#f7f7f8] truncate">@{displayName}</p>
           <p className="text-[11px] font-normal text-[#a1a1aa]">
             {videoCount} video{videoCount !== 1 ? 's' : ''} published
           </p>
@@ -73,7 +168,7 @@ const CreatorListItem: React.FC<{
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onFollow(pubkey) }}
-          className={`rounded-[11px] px-[16px] py-[8px] text-[13px] font-semibold transition-all duration-150 active:scale-95 ${
+          className={`shrink-0 rounded-[11px] px-[16px] py-[8px] text-[13px] font-semibold transition-all duration-150 active:scale-95 ${
             isFollowing
               ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
               : 'bg-[#18181d] text-white'
@@ -196,12 +291,12 @@ export const ProfilePage: React.FC = () => {
     return myContactListEvent.tags.some((t: any) => t[0] === 'p' && t[1] === targetPubkey)
   }, [myContactListEvent, targetPubkey])
 
-  const isFollowingPubkeys = useMemo(() => {
-    if (!myContactListEvent) return new Set<string>()
+  const isFollowingPubkeys = useMemo((): Set<string> => {
+    if (!myContactListEvent) return new Set()
     return new Set(
-      myContactListEvent.tags
-        .filter((t: any) => t[0] === 'p')
-        .map((t: any) => t[1])
+      (myContactListEvent.tags as string[][])
+        .filter((t) => t[0] === 'p')
+        .map((t) => t[1])
     )
   }, [myContactListEvent])
 
@@ -536,21 +631,12 @@ export const ProfilePage: React.FC = () => {
               {listView === 'followers' ? 'Followers' : 'Following'} ({listView === 'followers' ? followerPubkeys.length : followingPubkeys.length})
             </h3>
 
-            <div className="flex-1 space-y-1 overflow-y-auto max-h-[400px] pr-1">
-              {(listView === 'followers' ? followerPubkeys : followingPubkeys).length === 0 ? (
-                <p className="text-[13px] text-[#71717a] text-center py-8">No {listView} found.</p>
-              ) : (
-                (listView === 'followers' ? followerPubkeys : followingPubkeys).map((pk: string) => (
-                  <CreatorListItem
-                    key={pk}
-                    pubkey={pk}
-                    isFollowing={isFollowingPubkeys.has(pk)}
-                    session={session}
-                    onFollow={handleFollow}
-                  />
-                ))
-              )}
-            </div>
+            <CreatorList
+              pubkeys={listView === 'followers' ? followerPubkeys : followingPubkeys}
+              isFollowingPubkeys={isFollowingPubkeys}
+              session={session}
+              onFollow={handleFollow}
+            />
           </>
         ) : (
           <>
