@@ -9,6 +9,7 @@ export interface AppSettings {
   nsfwBlur: boolean
   nsfwPubkeys: string[]
   autoScroll: boolean
+  autoRotateLandscape: boolean
 }
 
 const STORAGE_KEY = 'nostr-clips-settings'
@@ -31,6 +32,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   nsfwBlur: true,
   nsfwPubkeys: [],
   autoScroll: true,
+  autoRotateLandscape: false,
 }
 
 const SETTINGS_CHANGED_EVENT = 'scrollstr-settings-changed'

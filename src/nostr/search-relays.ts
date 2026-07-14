@@ -90,6 +90,8 @@ export async function fetchRelayDirectory(): Promise<string[]> {
   }
 }
 
+export const DEFAULT_SEARCH_LIMIT = 50
+
 const MAX_QUERY_LENGTH = 200
 
 export function sanitizeSearchQuery(query: string): string {

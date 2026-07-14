@@ -312,6 +312,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         showMuteButton={false}
         showSidebarActions
         showMetaInfo
+        autoRotateLandscape={settingsRef.current.autoRotateLandscape}
         showDevHud={false}
         onActiveIndexChange={handleActiveIndexChange}
         onLikeClick={(item) => {

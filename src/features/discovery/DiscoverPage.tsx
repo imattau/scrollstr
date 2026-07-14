@@ -4,6 +4,7 @@ import { Search, RotateCw } from 'lucide-react'
 import { useNostr } from '../../app/providers'
 import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
+import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
 import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { VideoItemData } from '../feed/VideoFeedItem'
@@ -15,6 +16,8 @@ import { useMuteList } from '../../nostr/useMuteList'
 
 const EMPTY_VIDEOS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
+const MAX_SEARCH_RESULTS = 200
+const MAX_SEARCH_PAGES = 10
 
 function imetaValue(imetaTag: string[], key: string): string | undefined {
   for (const entry of imetaTag) {
@@ -131,6 +134,8 @@ export const DiscoverPage: React.FC = () => {
   const processedRelayListIds = useRef(new Set<string>())
   const processedSearchPubkeys = useRef(new Set<string>())
   const seenSearchIds = useRef(new Set<string>())
+  const searchPageCount = useRef(0)
+  const searchResultCache = useRef(new Map<string, { results: VideoItemData[]; cursor: number | undefined }>())
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -414,15 +419,25 @@ export const DiscoverPage: React.FC = () => {
       return
     }
 
+    const cached = searchResultCache.current.get(debouncedSearch)
+    if (cached) {
+      setAccumulatedResults(cached.results)
+      setSearchCursor(cached.cursor)
+      setIsSearchExhausted(!cached.cursor)
+      setIsSearchingRelays(false)
+      return
+    }
+
     setAccumulatedResults([])
     setSearchCursor(undefined)
     setIsSearchExhausted(false)
     seenSearchIds.current = new Set()
+    searchPageCount.current = 0
     const controller = new AbortController()
     setIsSearchingRelays(true)
 
     console.log('[Search] Dispatching relay search:', debouncedSearch, 'relays:', relayUrls)
-    searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: 50, signal: controller.signal })
+    searchRelays(relayUrls, debouncedSearch, { kinds: VIDEO_KINDS, limit: DEFAULT_SEARCH_LIMIT, signal: controller.signal })
       .then(async (events) => {
         if (controller.signal.aborted) return
         console.log('[Search] Received', events.length, 'events from relays')
@@ -437,7 +452,7 @@ export const DiscoverPage: React.FC = () => {
         console.log('[Search] Produced', items.length, 'VideoItemData items')
         if (!controller.signal.aborted) {
           setAccumulatedResults(items)
-          if (events.length >= 50) {
+          if (events.length >= DEFAULT_SEARCH_LIMIT) {
             const oldest = Math.min(...events.map((e: any) => e.created_at))
             setSearchCursor(oldest - 1)
           } else {
@@ -455,16 +470,21 @@ export const DiscoverPage: React.FC = () => {
     return () => controller.abort()
   }, [debouncedSearch, relayUrls])
 
-  // Filter videos based on the debounced search query using fuzzy search
-  const enrichedVideos = useMemo(() => videos.map(v => ({
-    ...v,
-    displayName: authorProfileMap[v.creator.pubkey]?.displayName ?? '',
-    nip05: authorProfileMap[v.creator.pubkey]?.nip05 ?? '',
-  })), [videos, authorProfileMap])
+  // Build a bounded search corpus: exclude mock events, limit to most recent
+  const searchCorpus = useMemo(() => {
+    const filtered = videos.filter(v => !v.creator.pubkey.startsWith('mock-'))
+    const sorted = filtered.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+    return sorted.slice(0, MAX_SEARCH_RESULTS).map(v => ({
+      ...v,
+      displayName: authorProfileMap[v.creator.pubkey]?.displayName ?? '',
+      nip05: authorProfileMap[v.creator.pubkey]?.nip05 ?? '',
+    }))
+  }, [videos, authorProfileMap])
 
   const filteredVideos = useMemo(() => {
     if (!debouncedSearch.trim()) return []
-    const fuse = new Fuse(enrichedVideos, {
+    if (searchCorpus.length === 0) return []
+    const fuse = new Fuse(searchCorpus, {
       keys: [
         { name: 'title', weight: 0.3 },
         { name: 'description', weight: 0.2 },
@@ -477,7 +497,7 @@ export const DiscoverPage: React.FC = () => {
       threshold: 0.4,
     })
     return fuse.search(debouncedSearch).map(r => r.item)
-  }, [debouncedSearch, enrichedVideos])
+  }, [debouncedSearch, searchCorpus])
 
   // Merge relay results (first) with local Fuse results, dedup by id
   const combinedResults = useMemo(() => {
@@ -492,15 +512,36 @@ export const DiscoverPage: React.FC = () => {
     return merged
   }, [accumulatedResults, filteredVideos])
 
+  // Cache search results so returning to a previous query is instant
+  // Evicts oldest entries when cache exceeds 50 queries
+  useEffect(() => {
+    if (!debouncedSearch.trim() || accumulatedResults.length === 0) return
+    const cache = searchResultCache.current
+    cache.set(debouncedSearch, {
+      results: accumulatedResults,
+      cursor: searchCursor,
+    })
+    if (cache.size > 50) {
+      const oldest = cache.keys().next().value
+      if (oldest !== undefined) cache.delete(oldest)
+    }
+  }, [debouncedSearch, accumulatedResults, searchCursor])
+
   const handleLoadMore = useCallback(async () => {
     if (!debouncedSearch.trim() || !relayUrls.length || isLoadingMore || isSearchExhausted || !searchCursor) return
+
+    if (searchPageCount.current >= MAX_SEARCH_PAGES) {
+      setIsSearchExhausted(true)
+      return
+    }
+
     setIsLoadingMore(true)
 
     try {
       console.log('[Search] Loading more before ts', searchCursor)
       const events = await searchRelays(relayUrls, debouncedSearch, {
         kinds: VIDEO_KINDS,
-        limit: 50,
+        limit: DEFAULT_SEARCH_LIMIT,
         until: searchCursor,
       })
 
@@ -513,22 +554,23 @@ export const DiscoverPage: React.FC = () => {
         if (item) items.push(item)
       }
 
-      let newItemsAdded = false
+      searchPageCount.current += 1
+      const reachedPageLimit = searchPageCount.current >= MAX_SEARCH_PAGES
+
       setAccumulatedResults(prev => {
+        if (reachedPageLimit || prev.length + items.length >= MAX_SEARCH_RESULTS) {
+          setIsSearchExhausted(true)
+        }
         const seen = new Set(prev.map(i => i.id))
         const newItems = items.filter(i => !seen.has(i.id))
-        if (newItems.length > 0) newItemsAdded = true
-        return [...prev, ...newItems]
+        return [...prev, ...newItems].slice(0, MAX_SEARCH_RESULTS)
       })
 
-      if (events.length < 50) {
+      if (events.length < DEFAULT_SEARCH_LIMIT || reachedPageLimit) {
         setIsSearchExhausted(true)
-      } else if (newItemsAdded && events.length > 0) {
+      } else if (events.length > 0) {
         const oldest = Math.min(...events.map((e: any) => e.created_at))
         setSearchCursor(oldest - 1)
-      } else if (!newItemsAdded) {
-        // All returned events were already seen — cursor didn't advance
-        setIsSearchExhausted(true)
       }
     } catch (err) {
       console.error('[Search] Load more failed:', err)

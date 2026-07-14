@@ -5,7 +5,7 @@ import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
 import { db, saveEventToCache } from '../../nostr/cache'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff, Play } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, Key, Wallet, Copy, LogOut, UploadCloud, Download, EyeOff, Play, RotateCw } from 'lucide-react'
 import { publishRelayList, publishBlossomList, publishMuteList, publishNip96List } from '../../nostr/events'
 import { loadSettings, saveSettings, loadWalletString, saveWalletString } from '../../db/local-preferences'
 import { forceRestartBackfill } from '../../nostr/cacheBackfill'
@@ -31,6 +31,7 @@ export const SettingsPage: React.FC = () => {
   const [localWalletString, setLocalWalletString] = useState('')
   const [localNsfwBlur, setLocalNsfwBlur] = useState(true)
   const [localAutoScroll, setLocalAutoScroll] = useState(true)
+  const [localAutoRotateLandscape, setLocalAutoRotateLandscape] = useState(false)
 
   // Input states for adding new entries
   const [newRelayUrl, setNewRelayUrl] = useState('')
@@ -79,6 +80,7 @@ export const SettingsPage: React.FC = () => {
     const s = loadSettings()
     setLocalNsfwBlur(s.nsfwBlur)
     setLocalAutoScroll(s.autoScroll)
+    setLocalAutoRotateLandscape(s.autoRotateLandscape)
     loadWalletString().then(setLocalWalletString)
   }, [activeSubView])
 
@@ -784,6 +786,31 @@ export const SettingsPage: React.FC = () => {
               setLocalAutoScroll(checked)
               const s = loadSettings()
               s.autoScroll = checked
+              saveSettings(s)
+            }}
+            className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors data-[state=checked]:bg-[#8b5cf6] data-[state=unchecked]:bg-[#27272a]"
+          >
+            <Switch.Thumb className="inline-block h-4 w-4 transform rounded-full bg-white transition-transform data-[state=checked]:translate-x-6 data-[state=unchecked]:translate-x-1" />
+          </Switch.Root>
+        </div>
+
+        {/* Auto-rotate landscape */}
+        <div className="flex items-center justify-between py-[18px] px-2">
+          <div className="flex items-center gap-3">
+            <RotateCw className="w-4 h-4 text-[#a78bfa] shrink-0" />
+            <div>
+              <p className="text-[14px] font-medium text-[#f7f7f8]">Auto-rotate landscape</p>
+              <p className="text-[11px] font-normal text-[#a1a1aa]">
+                {localAutoRotateLandscape ? 'Landscape videos rotate automatically' : 'Landscape videos fit to screen'}
+              </p>
+            </div>
+          </div>
+          <Switch.Root
+            checked={localAutoRotateLandscape}
+            onCheckedChange={(checked) => {
+              setLocalAutoRotateLandscape(checked)
+              const s = loadSettings()
+              s.autoRotateLandscape = checked
               saveSettings(s)
             }}
             className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors data-[state=checked]:bg-[#8b5cf6] data-[state=unchecked]:bg-[#27272a]"
