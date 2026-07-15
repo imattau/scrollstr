@@ -5,8 +5,8 @@ import { useNostr } from '../../app/providers'
 import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
-import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
-import { useLiveQuery } from '../../graph'
+import { VideoShape, saveEventToCache } from '../../nostr/cache'
+import { graph, useGraphQuery, useLiveQuery } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
@@ -160,13 +160,8 @@ export const DiscoverPage: React.FC = () => {
   useEffect(() => {
     if (!relayUrls.length) return
     let current = true
-    db.videoShapes
-      .where('created_at')
-      .above(Math.floor(Date.now() / 1000) - 3600)
-      .count()
-      .then((count) => {
-        if (current && count < 20) setCacheSeemsStale(true)
-      })
+    const count = graph.countByFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 3600 }, 'video_shape')
+    if (current && count < 20) setCacheSeemsStale(true)
     return () => {
       current = false
     }
@@ -193,15 +188,20 @@ export const DiscoverPage: React.FC = () => {
   // Use created_at index with a hard limit so we don't load every cached
   // event into memory on every liveQuery re-fire.
   const rawRelayListEvents = useLiveQuery(
-    () => db.cachedEvents
-      .orderBy('created_at')
-      .reverse()
-      .limit(500)
-      .toArray()
-      .then(events => events.filter(e => e.kind === 10002).slice(0, 200)),
+    () => {
+      if (!graph) return []
+      return graph.whereType('event')
+        .filter(n => (n.data.kind as number) === 10002)
+        .sort((a, b) => ((b.data.created_at as number) ?? 0) - ((a.data.created_at as number) ?? 0))
+        .slice(0, 200)
+        .map(n => n.data)
+    },
     []
   )
-  const relayListEvents = useMemo(() => rawRelayListEvents ?? [], [rawRelayListEvents])
+  const relayListEvents = useMemo(() => {
+    if (!rawRelayListEvents) return []
+    return rawRelayListEvents
+  }, [rawRelayListEvents])
 
   useEffect(() => {
     const events = relayListEvents as any[]
@@ -244,24 +244,26 @@ export const DiscoverPage: React.FC = () => {
   // Query video shapes from the Dexie cache — bounded to avoid loading
   // thousands of cached shapes into memory on every liveQuery re-fire.
   const rawVideoShapes = useLiveQuery(
-    () => db.videoShapes
-      .orderBy('insertOrder')
-      .reverse()
-      .limit(1000)
-      .toArray()
-      .then(shapes => shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed')),
+    () => {
+      if (!graph) return []
+      return graph.recentBy('insertOrder', 1000, 'video_shape')
+        .map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
+    },
     []
   ) ?? EMPTY_VIDEOS
 
   // Query recent video shapes (last 48 hours) — for trending creators.
   // Use created_at index with a hard limit so it stays memory-bounded.
   const rawRecentVideoShapes = useLiveQuery(
-    () => db.videoShapes
-      .where('created_at')
-      .above(Math.floor(Date.now() / 1000) - 48 * 3600)
-      .limit(1000)
-      .toArray()
-      .then(shapes => shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed').slice(0, 500)),
+    () => {
+      if (!graph) return []
+      return graph.whereFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 48 * 3600 }, 'video_shape')
+        .slice(0, 1000)
+        .map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
+        .slice(0, 500)
+    },
     []
   ) ?? EMPTY_VIDEOS
 
@@ -295,13 +297,16 @@ export const DiscoverPage: React.FC = () => {
 
   // Load author profiles into a lookup map for richer search
   const _authorProfileMap = useLiveQuery(
-    () => db.authorProfiles.toArray().then(profiles => {
+    () => {
+      if (!graph) return {}
       const map: Record<string, { name: string; displayName?: string; nip05?: string }> = {}
-      for (const p of profiles) {
-        map[p.pubkey] = { name: p.name, displayName: p.displayName, nip05: p.nip05 }
+      for (const node of graph.whereType('profile')) {
+        const p = node.data as Record<string, unknown>
+        const pubkey = (p.pubkey as string) || node.id.replace('pro:', '')
+        map[pubkey] = { name: p.name as string, displayName: p.displayName as string | undefined, nip05: p.nip05 as string | undefined }
       }
       return map
-    }),
+    },
     []
   )
   const authorProfileMap = useMemo(() => _authorProfileMap ?? {}, [_authorProfileMap])
@@ -393,20 +398,14 @@ export const DiscoverPage: React.FC = () => {
     const unsubRef: { current: (() => void) | undefined } = { current: undefined }
     let current = true
 
-    db.authorProfiles
-      .where('pubkey')
-      .anyOf(realCreators)
-      .primaryKeys()
-      .then((cachedPubkeys) => {
-        if (!current) return
-        const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
-        if (uncached.length === 0) return
-        unsubRef.current = subscribeToRelays(relayUrls, {
-          kinds: [0, 10002],
-          authors: uncached,
-          limit: 2,
-        })
-      })
+    const cachedPubkeys = realCreators.filter(pk => !!graph.getNode(`pro:${pk}`))
+    const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
+    if (uncached.length === 0) return
+    unsubRef.current = subscribeToRelays(relayUrls, {
+      kinds: [0, 10002],
+      authors: uncached,
+      limit: 2,
+    })
 
     return () => {
       current = false
@@ -415,13 +414,16 @@ export const DiscoverPage: React.FC = () => {
   }, [creators, relayUrls])
 
   // Get logged-in user's contact list to determine follow state
-  const myContactListEvents = useLiveQuery(
-    () => session?.pubkey
-      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
-      : [],
-    [session?.pubkey]
-  ) ?? []
-  const myContactListEvent = (myContactListEvents as any[]).toSorted((a: any, b: any) => b.created_at - a.created_at)[0]
+  const myContactListNode = useGraphQuery(
+    () => {
+      if (!session?.pubkey) return undefined
+      return graph.byKindPubkey(3, session.pubkey)
+    },
+    [session?.pubkey],
+    200,
+    ['event'],
+  )
+  const myContactListEvent = (myContactListNode?.data as any) as { event?: { tags: string[][] } } | undefined
 
   const isFollowingPubkeys = useMemo(() => {
     if (!myContactListEvent?.event) return new Set<string>()

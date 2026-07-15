@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { loadSettings } from '../db/local-preferences'
-import { useLiveQuery } from '../graph'
-import { db } from './cache'
+import { graph, useGraphQuery } from '../graph'
 
 const DEFAULT_RELAYS = [
   'wss://nos.lol',
@@ -37,23 +36,25 @@ export const getFallbackRelayUrls = (): string[] => {
  * Falls back to user-configured or default relays when no kind:10002 is in store.
  */
 export const useUserRelayUrls = (pubkey?: string | null): string[] => {
-  const relayListEvents = useLiveQuery(
-    () => (pubkey
-      ? db.cachedEvents.where({ kind: 10002, pubkey }).toArray()
-      : Promise.resolve([] as any[])),
-    [pubkey ?? '']
-  ) ?? []
+  const rawRelayEvent = useGraphQuery(
+    () => {
+      if (!pubkey) return undefined
+      const node = graph.byKindPubkey(10002, pubkey)
+      return (node?.data as { event?: { tags: string[][] } } | undefined)?.event
+    },
+    [pubkey],
+    200,
+    ['event'] as any,
+  )
 
-  const relayListEvent = relayListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]
-
-  const rawTagsKey = relayListEvent?.event?.tags ? JSON.stringify(relayListEvent.event.tags) : ''
+  const rawTagsKey = rawRelayEvent?.tags ? JSON.stringify(rawRelayEvent.tags) : ''
 
   return useMemo(() => {
     if (!pubkey) {
       return getFallbackRelayUrls()
     }
 
-    const relayUrls = relayListEvent?.event?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
+    const relayUrls = rawRelayEvent?.tags?.filter(isRelayTag).map((tag: string[]) => tag[1]) ?? []
     const normalized = normalizeRelayUrls(relayUrls)
     return normalized.length > 0 ? normalized : getFallbackRelayUrls()
   // eslint-disable-next-line react-hooks/exhaustive-deps

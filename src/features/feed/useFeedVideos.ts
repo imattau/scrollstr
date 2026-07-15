@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
-import { useGraphQuery } from '../../graph'
-import { db, VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
+import { graph, useGraphQuery } from '../../graph'
+import type { NodeType, PolyNode } from '../../graph'
+import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
 import { sortByInsertOrder } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
@@ -66,49 +67,50 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     try {
       let shapes: VideoShape[]
       if (filterTag) {
-        shapes = await db.videoShapes
-          .where('hashtags')
-          .equals(filterTag.toLowerCase())
-          .toArray()
-        shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
-        shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+        const nodes = graph.whereType('video_shape')
+          .filter(n => {
+            const tags = (n.data.hashtags as string[]) ?? []
+            return tags.some(t => t.toLowerCase() === filterTag.toLowerCase())
+          })
+          .sort((a, b) => ((b.data.insertOrder as number) ?? 0) - ((a.data.insertOrder as number) ?? 0))
+          .slice(0, FEED_QUERY_LIMIT)
+        shapes = nodes.map(n => n.data as unknown as VideoShape)
       } else {
-        shapes = await db.videoShapes
-          .orderBy('insertOrder')
-          .reverse()
-          .limit(FEED_QUERY_LIMIT)
-          .toArray()
+        const nodes = graph.recentBy('insertOrder', FEED_QUERY_LIMIT, 'video_shape')
+        shapes = nodes.map(n => n.data as unknown as VideoShape)
       }
-      const valid = shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed')
+      const valid = shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
       return await mergeCountersIntoShapes(valid)
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag], 200)
+  }, [refreshKey, filterTag], 200, ['video_shape', 'counter'])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
   const _followedShapes = useGraphQuery(async () => {
     if (!sessionPubkey || followingPubkeys.length === 0) return []
     try {
-      const shapes = await db.videoShapes
-        .where('pubkey').anyOf(followingPubkeys)
-        .toArray()
-      let filtered = shapes.filter(shape => shape.videoUrl && shape.mediaStatus !== 'failed')
+      const allNodes: PolyNode[] = []
+      for (const pk of followingPubkeys) {
+        for (const n of graph.byPubkey(pk, 'video_shape')) allNodes.push(n)
+      }
+      let shapes = allNodes.map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
       if (filterTag) {
-        filtered = filtered.filter(shape =>
-          shape.hashtags?.some(t => t.toLowerCase() === filterTag.toLowerCase())
+        shapes = shapes.filter(s =>
+          s.hashtags?.some(t => t.toLowerCase() === filterTag.toLowerCase())
         )
       }
-      filtered.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
-      filtered = filtered.slice(0, FEED_QUERY_LIMIT)
-      return await mergeCountersIntoShapes(filtered)
+      shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
+      shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      return await mergeCountersIntoShapes(shapes)
     } catch (err) {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 200)
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 200, ['video_shape', 'counter'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 

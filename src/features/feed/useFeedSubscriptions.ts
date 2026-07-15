@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { graph } from '../../graph'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
-import { db } from '../../nostr/cache'
 import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill, maybeResumeFollowBackfill, maybeResumeUserVideoBackfill } from '../../nostr/cacheBackfill'
 
 const PAGE_SIZE = 50
@@ -50,11 +50,11 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     let timer: ReturnType<typeof setTimeout> | undefined
 
     async function bootstrapMetadata() {
-      const cached = await Promise.all([
-        db.cachedEvents.where({ kind: 0, pubkey: sessionPubkey }).first(),
-        db.cachedEvents.where({ kind: 3, pubkey: sessionPubkey }).first(),
-        db.cachedEvents.where({ kind: 10002, pubkey: sessionPubkey }).first(),
-      ])
+      const cached = sessionPubkey ? [
+        graph.byKindPubkey(0, sessionPubkey)?.data,
+        graph.byKindPubkey(3, sessionPubkey)?.data,
+        graph.byKindPubkey(10002, sessionPubkey)?.data,
+      ] : [null, null, null]
       if (cancelled) return
       if (cached[0] && cached[1] && cached[2]) return
 

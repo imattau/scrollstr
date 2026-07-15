@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { useLiveQuery } from '../graph'
-import { db, pruneBlockedContent } from './cache'
+import { graph, useGraphQuery } from '../graph'
+import { pruneBlockedContent } from './cache'
 import { subscribeToRelays } from './pool'
 import { useUserRelayUrls } from './relays'
 
@@ -10,14 +10,16 @@ export function useMuteList(sessionPubkey?: string | null): {
 } {
   const relayUrls = useUserRelayUrls(sessionPubkey)
 
-  const muteListEvents = useLiveQuery(
-    () => sessionPubkey
-      ? db.cachedEvents.where({ kind: 10000, pubkey: sessionPubkey }).toArray()
-      : Promise.resolve([] as any[]),
-    [sessionPubkey]
-  ) ?? []
-
-  const muteListEvent = muteListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const muteListEvent = useGraphQuery(
+    () => {
+      if (!sessionPubkey) return undefined
+      const node = graph.byKindPubkey(10000, sessionPubkey)
+      return (node?.data as any)?.event as { tags: string[][] } | undefined
+    },
+    [sessionPubkey],
+    200,
+    ['event'],
+  )
 
   const mutedPubkeys = useMemo(
     () => new Set<string>(

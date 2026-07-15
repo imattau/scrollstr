@@ -1,3 +1,5 @@
+export type EdgeOwnership = 'owned' | 'shared' | 'derived' | 'reference'
+
 export type NodeType =
   | 'event'
   | 'video_shape'
@@ -7,6 +9,7 @@ export type NodeType =
   | 'counter'
   | 'rejection'
   | 'user_state'
+  | 'relay'
 
 export interface PolyNode {
   id: string
@@ -26,6 +29,23 @@ export type EdgeType =
   | 'HAS_COUNTER'
   | 'HAS_STATE'
   | 'HAS_REJECTION'
+  | 'OBSERVED_ON'
+  | 'AUTHORED_ON'
+
+/** Default ownership class per EdgeType. Most edges of a given type share the
+ *  same semantics — individual edges can override via `data.__ownership`. */
+export const EDGE_OWNERSHIP: Record<EdgeType, EdgeOwnership> = {
+  AUTHORED_BY: 'reference',
+  REFERENCES: 'reference',
+  MENTIONS: 'reference',
+  TAGGED_WITH: 'reference',
+  HAS_MEDIA: 'shared',
+  HAS_COUNTER: 'owned',
+  HAS_STATE: 'owned',
+  HAS_REJECTION: 'owned',
+  OBSERVED_ON: 'reference',
+  AUTHORED_ON: 'derived',
+}
 
 export interface PolyEdge {
   id: string
@@ -71,6 +91,10 @@ export interface SerializedNode {
   vector: number[] | null
   insertedAt: number
   updatedAt: number
+  /** For replaceable Nostr events (kind 0, 3, 10002, and NIP-33 range):
+   *  `${kind}:${pubkey}[:${dTag}]`. Used by the `by_replaceable` IDB index
+   *  so putReplaceable can find and overwrite older versions. */
+  replaceableKey?: string
 }
 
 export interface SerializedEdge {

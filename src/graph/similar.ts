@@ -55,7 +55,7 @@ export async function findSimilarVideos(
     const shapeNode = graph.getNode(`shp:${id}`)
     if (shapeNode) {
       const data = shapeNode.data as unknown as VideoShape
-      if (data.videoUrl) shapes.push(data)
+      if (data.videoUrl && !data.hidden) shapes.push(data)
     }
   }
 
@@ -73,11 +73,11 @@ export async function findVideosSimilarToAuthor(
 ): Promise<VideoShape[]> {
   // Collect all vectors for this author's videos
   const authorVectors: number[][] = []
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'video_shape') continue
+  for (const node of graph.byPubkey(pubkey, 'video_shape')) {
     const data = node.data as Record<string, unknown>
-    if (data.pubkey === pubkey && data.videoUrl) {
-      const vec = graph.vectors.get(node.id)
+    if (data.videoUrl) {
+      const rawId = node.id.includes(':') ? node.id.slice(node.id.indexOf(':') + 1) : node.id
+      const vec = graph.vectors.get(rawId)
       if (vec) authorVectors.push(vec)
     }
   }
@@ -100,7 +100,7 @@ export async function findVideosSimilarToAuthor(
     const shapeNode = graph.getNode(`shp:${id}`)
     if (shapeNode) {
       const data = shapeNode.data as unknown as VideoShape
-      if (data.videoUrl && data.pubkey !== pubkey) shapes.push(data)
+      if (data.videoUrl && data.pubkey !== pubkey && !data.hidden) shapes.push(data)
     }
   }
   return shapes

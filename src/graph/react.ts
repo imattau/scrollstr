@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { graph } from './polygraph'
+import type { NodeType } from './types'
 
 /** Drop-in replacement for dexie-react-hooks' useLiveQuery */
 export function useLiveQuery<T>(
@@ -11,15 +12,25 @@ export function useLiveQuery<T>(
   return result ?? defaultResult
 }
 
+/**
+ * React hook that subscribes to graph.changes and re-runs `queryFn` on every
+ * emission. When `nodeTypes` is provided, only re-runs for change events whose
+ * `nodeType` matches (or for the bulk warm event which has no nodeType).
+ * This reduces cascading re-renders when a graph change affects unrelated
+ * node types.
+ */
 export function useGraphQuery<T>(
   queryFn: () => T | Promise<T>,
   deps: unknown[],
-  delay = 200
+  delay = 200,
+  nodeTypes?: NodeType[],
 ): T | undefined {
   const [result, setResult] = useState<T | undefined>(undefined)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
   const isFirstRef = useRef(true)
+  const nodeTypesRef = useRef(nodeTypes)
+  nodeTypesRef.current = nodeTypes
 
   const runQuery = useCallback(() => {
     try {
@@ -55,7 +66,12 @@ export function useGraphQuery<T>(
 
     runQuery()
 
-    const subscription = graph.changes.subscribe(() => {
+    const types = nodeTypesRef.current
+
+    const subscription = graph.changes.subscribe((event) => {
+      if (types && event.nodeType && !types.includes(event.nodeType)) {
+        return
+      }
       runQuery()
     })
 

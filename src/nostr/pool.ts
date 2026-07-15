@@ -61,9 +61,27 @@ async function flushPendingIndexWrites(): Promise<void> {
   const subBatch = pendingSubscriptionBatch
   pendingSubscriptionBatch = []
   if (subBatch.length > 0) {
-    await bulkSaveEventsToCache(subBatch).catch((err) =>
-      console.warn(`[pool] Failed to cache deferred subscription batch (${subBatch.length} events):`, err)
-    )
+    const noRelay: any[] = []
+    const byRelay = new Map<string, any[]>()
+    for (const item of subBatch) {
+      if (item.relay) {
+        const relay = item.relay as string
+        if (!byRelay.has(relay)) byRelay.set(relay, [])
+        byRelay.get(relay)!.push(item.event ?? item)
+      } else {
+        noRelay.push(item.event ?? item)
+      }
+    }
+    if (noRelay.length > 0) {
+      await bulkSaveEventsToCache(noRelay).catch((err) =>
+        console.warn(`[pool] Failed to cache deferred subscription batch (${noRelay.length} events):`, err)
+      )
+    }
+    for (const [relay, events] of byRelay) {
+      await bulkSaveEventsToCache(events, relay).catch((err) =>
+        console.warn(`[pool] Failed to cache deferred subscription batch for ${relay} (${events.length} events):`, err)
+      )
+    }
   }
 
   const backBatch = pendingBackfillBatch
@@ -88,7 +106,8 @@ function handleWorkerMessage(e: MessageEvent): void {
     }
     case 'subscriptionEvent': {
       const event = (msg as any).event
-      pushSubscriptionEvent(event)
+      const relay = (msg as any).relay as string | undefined
+      pushSubscriptionEvent(event, relay)
       break
     }
     case 'backfillComplete':
@@ -204,13 +223,32 @@ function flushSubscriptionBatch(): void {
     return
   }
 
-  void bulkSaveEventsToCache(batch).catch((err) =>
-    console.warn(`[pool] Failed to cache subscription batch (${batch.length} events):`, err)
-  )
+  // Group events by relay for bulkSaveEventsToCache, or batch without relay.
+  const noRelay: any[] = []
+  const byRelay = new Map<string, any[]>()
+  for (const item of batch) {
+    if (item.relay) {
+      const relay = item.relay as string
+      if (!byRelay.has(relay)) byRelay.set(relay, [])
+      byRelay.get(relay)!.push(item.event)
+    } else {
+      noRelay.push(item.event ?? item)
+    }
+  }
+  if (noRelay.length > 0) {
+    void bulkSaveEventsToCache(noRelay).catch((err) =>
+      console.warn(`[pool] Failed to cache subscription batch (${noRelay.length} events):`, err)
+    )
+  }
+  for (const [relay, events] of byRelay) {
+    void bulkSaveEventsToCache(events, relay).catch((err) =>
+      console.warn(`[pool] Failed to cache subscription batch for ${relay} (${events.length} events):`, err)
+    )
+  }
 }
 
-function pushSubscriptionEvent(event: any): void {
-  subscriptionBatch.push(event)
+function pushSubscriptionEvent(event: any, relay?: string): void {
+  subscriptionBatch.push(relay ? { event, relay } : event)
   if (subscriptionBatch.length >= SUBSCRIPTION_FLUSH_MAX) {
     if (subscriptionFlushTimer) {
       clearTimeout(subscriptionFlushTimer)

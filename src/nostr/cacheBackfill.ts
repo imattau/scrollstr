@@ -1,5 +1,5 @@
 import { getBackfillWorker } from './pool'
-import { db } from './cache'
+import { graph } from '../graph'
 
 type BackfillCompleteEvent =
   | 'backfillComplete'
@@ -129,7 +129,7 @@ export async function startProfileBackfill(relayUrls: string[], knownPubkeys: st
   if (knownPubkeys.length === 0) return
 
   const cached = new Set(
-    (await db.authorProfiles.where('pubkey').anyOf(knownPubkeys).primaryKeys())
+    knownPubkeys.filter(pk => graph.getNode(`pro:${pk}`))
   )
   const uncached = knownPubkeys.filter((pk) => !cached.has(pk))
   if (uncached.length === 0) {
@@ -155,14 +155,12 @@ export async function startFollowedVideoBackfill(relayUrls: string[], followedPu
 
   if (targetPubkeys.length === 0) return
 
-  const allCached = await db.videoShapes
-    .where('pubkey')
-    .anyOf(targetPubkeys)
-    .filter(s => s.mediaStatus !== 'failed')
-    .toArray()
   const counts = new Map<string, number>()
-  for (const s of allCached) {
-    counts.set(s.pubkey, (counts.get(s.pubkey) ?? 0) + 1)
+  for (const pk of targetPubkeys) {
+    const shapes = graph.byPubkey(pk, 'video_shape')
+    const validCount = shapes.filter(n => (n.data as Record<string, unknown>).mediaStatus !== 'failed').length
+    if (validCount >= 3) continue
+    counts.set(pk, validCount)
   }
   const uncached = targetPubkeys.filter(pk => (counts.get(pk) ?? 0) < 3)
 

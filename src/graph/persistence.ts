@@ -1,13 +1,15 @@
 import type { SerializedNode, SerializedEdge, NodeType, EdgeType } from './types'
 
 const DB_NAME = 'scrollstr-polygraph'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
     req.onupgradeneeded = () => {
       const db = req.result
+
+      // ── V1: initial schema ──
       if (!db.objectStoreNames.contains('nodes')) {
         const store = db.createObjectStore('nodes', { keyPath: 'id' })
         store.createIndex('type', 'type', { unique: false })
@@ -20,6 +22,15 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('vectors')) {
         db.createObjectStore('vectors', { keyPath: 'id' })
+      }
+
+      // ── V2: replaceable-key index (added after V1 stores exist) ──
+      if (db.objectStoreNames.contains('nodes')) {
+        const tx = req.transaction
+        const store = tx?.objectStore('nodes')
+        if (store && !store.indexNames.contains('by_replaceable')) {
+          store.createIndex('by_replaceable', 'replaceableKey', { unique: false })
+        }
       }
     }
     req.onsuccess = () => resolve(req.result)
@@ -135,6 +146,54 @@ export class PolyPersistence {
       }
       source.onerror = () => reject(source.error)
     })
+  }
+
+  /** Return serialized nodes whose `replaceableKey` matches, via the
+   *  `by_replaceable` index. */
+  async getNodesByReplaceableKey(key: string): Promise<SerializedNode[]> {
+    const database = await this.db()
+    const tx = database.transaction('nodes')
+    const store = tx.objectStore('nodes')
+    const index = store.index('by_replaceable')
+    const nodes: SerializedNode[] = []
+    return new Promise((resolve, reject) => {
+      const req = index.openCursor(IDBKeyRange.only(key))
+      req.onsuccess = () => {
+        const cursor = req.result
+        if (cursor) {
+          nodes.push(cursor.value as SerializedNode)
+          cursor.continue()
+        } else {
+          resolve(nodes)
+        }
+      }
+      req.onerror = () => reject(req.error)
+    })
+  }
+
+  /** Persist a replaceable event node. If an older version with the same
+   *  `replaceableKey` exists in IDB and its `data.created_at` is older,
+   *  the old row is deleted first. Then the new node is written. */
+  async putReplaceable(node: SerializedNode): Promise<void> {
+    if (!node.replaceableKey) {
+      // Not actually replaceable — write normally.
+      await this.putNode(node)
+      return
+    }
+    const existing = await this.getNodesByReplaceableKey(node.replaceableKey)
+    const nodeCreatedAt = (node.data.created_at as number) ?? 0
+    for (const old of existing) {
+      if (old.id === node.id) continue
+      const oldCreatedAt = (old.data.created_at as number) ?? 0
+      if (oldCreatedAt <= nodeCreatedAt) {
+        // New event is newer or equal — delete the stale row (tie → existing wins).
+        await this.deleteNode(old.id)
+      } else {
+        // Stored version is newer — skip the insert entirely.
+        return
+      }
+    }
+    await this.putNode(node)
   }
 
   // ── Edge Operations ──

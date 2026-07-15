@@ -1,5 +1,7 @@
 import { Subject } from 'rxjs'
 import type { PolyNode, PolyEdge, NodeType, EdgeType, GraphChangeEvent, SerializedNode, SerializedEdge } from './types'
+import { EDGE_OWNERSHIP } from './types'
+import type { EdgeOwnership } from './types'
 import { VectorIndex, computeEventVector } from './vector-index'
 import { PolyPersistence } from './persistence'
 import { GraphQuery } from './query'
@@ -26,6 +28,20 @@ export class PolyGraph {
   /** LRU hot-cache order: insertion-ordered Map used as an ordered set */
   private hotCacheOrder = new Map<string, true>()
   private nodeToEdgeMap = new Map<string, Set<string>>()
+
+  // ── In-memory secondary indexes (maintained on addNode / removeNode / eviction) ──
+
+  /** pubkey → Set<nodeId> for O(1) lookups of all nodes owned by a pubkey. */
+  private _byPubkey = new Map<string, Set<string>>()
+  /** Composite key `${kind}:${pubkey}` → node id. Uses most-recent-wins for
+   *  replaceable events (kept current by putReplaceable); for non-replaceable
+   *  events the first stored entry wins. */
+  private _byKindPubkey = new Map<string, string>()
+  /** tag (lowercase) → Set<nodeId> for O(1) hashtag → shape lookups. */
+  private byHashtag = new Map<string, Set<string>>()
+  /** Target event id → Set<source event id> for #e tag lookups (maintained
+   *  from REFERENCES edges rather than the node data). */
+  private _byETag = new Map<string, Set<string>>()
 
   // ── Dirty tracking for auto-persist ──
 
@@ -57,6 +73,10 @@ export class PolyGraph {
           vector: node.vector ? [...node.vector] : null,
           insertedAt: node.insertedAt,
           updatedAt: node.updatedAt,
+          // The replaceable key lives in node.data.replaceableKey when the
+          // event is a replaceable kind; it is copied here so the IDB index
+          // can be queried by putReplaceable.
+          replaceableKey: (node.data.replaceableKey as string) ?? undefined,
         })
       }
     }
@@ -105,7 +125,108 @@ export class PolyGraph {
     this.allTypes.add(node.type)
     this.touchHotCache(node.id)
     this.markDirty(node.id)
+    this.indexNode(node)
     this.changes.next({ type: 'node_added', nodeId: node.id, nodeType: node.type })
+  }
+
+  private indexNode(node: PolyNode): void {
+    const data = node.data as Record<string, unknown>
+    const kind = data.kind as number | undefined
+    const pubkey = data.pubkey as string | undefined
+    const id = node.id
+
+    if (pubkey) {
+      if (!this._byPubkey.has(pubkey)) this._byPubkey.set(pubkey, new Set())
+      this._byPubkey.get(pubkey)!.add(id)
+      if (kind !== undefined) {
+        const key = `${kind}:${pubkey}`
+        // For replaceable events, use most-recent-wins; for others the first
+        // stored entry wins. Compare by data.created_at when overwriting.
+        const existingId = this._byKindPubkey.get(key)
+        if (!existingId || ((data.created_at as number) ?? 0) > ((this.nodes.get(existingId)?.data.created_at as number) ?? 0)) {
+          this._byKindPubkey.set(key, id)
+        }
+      }
+    }
+  }
+
+  private unindexNode(id: string): void {
+    const node = this.nodes.get(id)
+    if (!node) return
+    const data = node.data as Record<string, unknown>
+    const kind = data.kind as number | undefined
+    const pubkey = data.pubkey as string | undefined
+
+    if (pubkey) {
+      const set = this._byPubkey.get(pubkey)
+      if (set) {
+        set.delete(id)
+        if (set.size === 0) this._byPubkey.delete(pubkey)
+      }
+      if (kind !== undefined) {
+        const key = `${kind}:${pubkey}`
+        if (this._byKindPubkey.get(key) === id) this._byKindPubkey.delete(key)
+      }
+    }
+  }
+
+  /**
+   * Add or replace a replaceable Nostr event node (kinds 0, 3, 10002, and
+   * NIP-33 addressable range). Compares `data.created_at` with any existing
+   * in-memory or persisted node that shares the same `replaceableKey`
+   * (`${kind}:${pubkey}[:${dTag}]`). If an older version is found it is
+   * removed; if the existing is newer the insert is skipped.
+   */
+  async putReplaceable(node: PolyNode): Promise<boolean> {
+    const replaceableKey = node.data.replaceableKey as string
+    if (!replaceableKey) {
+      this.addNode(node)
+      return true
+    }
+
+    // 1. Check in-memory hot cache for an older version with the same key.
+    const nodeCreatedAt = (node.data.created_at as number) ?? 0
+    const existingByKey = [...this.nodes.values()].filter(
+      n => (n.data.replaceableKey as string) === replaceableKey,
+    )
+    for (const existing of existingByKey) {
+      if (existing.id === node.id) continue
+      const existingCreatedAt = (existing.data.created_at as number) ?? 0
+      if (existingCreatedAt <= nodeCreatedAt) {
+        // New event supersedes or matches old — remove stale in-memory node.
+        this.removeNode(existing.id)
+      } else {
+        // Stored version is newer — skip inserting this one.
+        return false
+      }
+    }
+
+    // 2. Check IDB for older versions (may have been evicted from hot cache).
+    const persisted = await this.persistence.getNodesByReplaceableKey(replaceableKey)
+    for (const old of persisted) {
+      if (old.id === node.id) continue
+      const oldCreatedAt = (old.data.created_at as number) ?? 0
+      if (oldCreatedAt <= nodeCreatedAt) {
+        // Stale row in IDB — queue for deletion and flush will clean it up.
+        await this.persistence.deleteNode(old.id)
+      } else {
+        return false
+      }
+    }
+
+    // 3. Insert or replace the in-memory node.
+    const existing = this.nodes.get(node.id)
+    if (existing) {
+      Object.assign(existing.data, node.data)
+      existing.updatedAt = node.updatedAt
+      existing.vector = node.vector
+      this.touchHotCache(node.id)
+      this.markDirty(node.id)
+      this.changes.next({ type: 'node_updated', nodeId: node.id, nodeType: node.type })
+    } else {
+      this.addNode(node)
+    }
+    return true
   }
 
   getNode(id: string): PolyNode | undefined {
@@ -157,6 +278,7 @@ export class PolyGraph {
     if (!node) return
 
     this.cleanupNodeEdges(id)
+    this.unindexNode(id)
     this.nodes.delete(id)
     this.vectors.remove(id)
     const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
@@ -194,7 +316,11 @@ export class PolyGraph {
     const existing = edges.find(e => e.type === type && e.target === target)
     if (existing) return
 
-    edges.push({ target, type, data })
+    // Tag the edge with its default ownership class unless the caller
+    // overrides via data.__ownership.
+    const fullData = { ...data, __ownership: data?.__ownership ?? EDGE_OWNERSHIP[type] }
+
+    edges.push({ target, type, data: fullData })
     if (!this.nodeToEdgeMap.has(target)) this.nodeToEdgeMap.set(target, new Set())
     this.nodeToEdgeMap.get(target)!.add(source)
     this.schedulePersist()
@@ -242,7 +368,7 @@ export class PolyGraph {
   // ── Query ──
 
   query(): GraphQuery {
-    return new GraphQuery(this.nodes, this.edges, this.allTypes)
+    return new GraphQuery(this.nodes, this.edges, this.allTypes, this.nodeToEdgeMap)
   }
 
   // ── Hot Cache ──
@@ -262,6 +388,7 @@ export class PolyGraph {
       if (evict === undefined) break
       this.hotCacheOrder.delete(evict)
       this.cleanupNodeEdges(evict)
+      this.unindexNode(evict)
       this.nodes.delete(evict)
       this.vectors.remove(evict)
       const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
@@ -279,6 +406,7 @@ export class PolyGraph {
       vector: node.vector ? [...node.vector] : null,
       insertedAt: node.insertedAt,
       updatedAt: node.updatedAt,
+      replaceableKey: (node.data.replaceableKey as string) ?? undefined,
     }
     await this.persistence.putNode(serialized)
   }
@@ -313,6 +441,7 @@ export class PolyGraph {
         vector: node.vector ? [...node.vector] : null,
         insertedAt: node.insertedAt,
         updatedAt: node.updatedAt,
+        replaceableKey: (node.data.replaceableKey as string) ?? undefined,
       })
     }
 
@@ -418,6 +547,10 @@ export class PolyGraph {
     this.vectors.clear()
     this.hotCacheOrder.clear()
     this.nodeToEdgeMap.clear()
+    this._byPubkey.clear()
+    this._byKindPubkey.clear()
+    this.byHashtag.clear()
+    this._byETag.clear()
   }
 
   /** Tear down long-lived resources: close the IndexedDB connection and
@@ -430,6 +563,98 @@ export class PolyGraph {
     }
     this.clear()
     await this.persistence.close()
+  }
+
+  // ── Public Query API ────────────────────────────────────────────
+
+  /** Return all nodes of the given type (linear scan, O(n)). */
+  whereType(type: NodeType): PolyNode[] {
+    const results: PolyNode[] = []
+    for (const node of this.nodes.values()) {
+      if (node.type === type) results.push(node)
+    }
+    return results
+  }
+
+  /** Return all nodes whose data field is in the given range. Falls back to
+   *  linear scan filtered by `type` when provided. */
+  whereFieldRange(field: string, range: { above?: number; below?: number }, type?: NodeType): PolyNode[] {
+    const results: PolyNode[] = []
+    for (const node of this.nodes.values()) {
+      if (type && node.type !== type) continue
+      const val = (node.data as Record<string, unknown>)[field] as number | undefined
+      if (val === undefined) continue
+      if (range.above !== undefined && val <= range.above) continue
+      if (range.below !== undefined && val >= range.below) continue
+      results.push(node)
+    }
+    return results
+  }
+
+  /** Count nodes matching a field range, optionally filtered by type. */
+  countByFieldRange(field: string, range: { above?: number; below?: number }, type?: NodeType): number {
+    let count = 0
+    for (const node of this.nodes.values()) {
+      if (type && node.type !== type) continue
+      const val = (node.data as Record<string, unknown>)[field] as number | undefined
+      if (val === undefined) continue
+      if (range.above !== undefined && val <= range.above) continue
+      if (range.below !== undefined && val >= range.below) continue
+      count++
+    }
+    return count
+  }
+
+  /** Return the N most-recently-inserted nodes, optionally filtered by type.
+   *  Sorts by `insertOrder` or `created_at` descending. */
+  recentBy(field: 'insertOrder' | 'created_at', limit: number, type?: NodeType): PolyNode[] {
+    const candidates: PolyNode[] = []
+    for (const node of this.nodes.values()) {
+      if (type && node.type !== type) continue
+      if ((node.data[field] as number | undefined) !== undefined) {
+        candidates.push(node)
+      }
+    }
+    return candidates
+      .sort((a, b) => ((b.data[field] as number) ?? 0) - ((a.data[field] as number) ?? 0))
+      .slice(0, limit)
+  }
+
+  /** Index-backed: O(1) lookup of all nodes by pubkey, optionally filtered by type. */
+  byPubkey(pubkey: string, type?: NodeType): PolyNode[] {
+    const ids = this._byPubkey.get(pubkey)
+    if (!ids) return []
+    const results: PolyNode[] = []
+    for (const id of ids) {
+      const node = this.nodes.get(id)
+      if (node && (!type || node.type === type)) results.push(node)
+    }
+    return results
+  }
+
+  /** Index-backed: O(1) lookup of a single node by (kind, pubkey) composite key. */
+  byKindPubkey(kind: number, pubkey: string): PolyNode | undefined {
+    const id = this._byKindPubkey.get(`${kind}:${pubkey}`)
+    if (!id) return undefined
+    return this.nodes.get(id)
+  }
+
+  /** Edge-derived: O(degree) lookup of all source event IDs that have a
+   *  REFERENCES edge targeting `eventId`. Built on nodeToEdgeMap. */
+  byETag(targetId: string): PolyNode[] {
+    const sources = this.nodeToEdgeMap.get(targetId)
+    if (!sources) return []
+    const results: PolyNode[] = []
+    for (const src of sources) {
+      // Verify the edge is REFERENCES (nodeToEdgeMap key is raw target;
+      // src is raw source; check via edges map).
+      const srcEdges = this.edges.get(src)
+      if (srcEdges && srcEdges.some(e => e.type === 'REFERENCES' && e.target === targetId)) {
+        const node = this.nodes.get(src)
+        if (node) results.push(node)
+      }
+    }
+    return results
   }
 
   get size(): number {

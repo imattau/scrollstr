@@ -23,6 +23,9 @@ export interface CachedEvent {
   event: any
   eTags?: string[]
   pTags?: string[]
+  /** Origin relay URL, when known. Populated from per-relay subscriptions
+   *  (e.g. NIP-50 search). Used to build relay→event OBSERVED_ON edges. */
+  relay?: string
 }
 
 export interface VideoShape {
@@ -55,6 +58,8 @@ export interface VideoShape {
   mediaStatus?: "unknown" | "available" | "failed" | "too_large" | "unsupported";
   isFailed?: boolean;
   contentWarning?: string;
+  hidden?: boolean;
+  hiddenAt?: number;
   userState?: {
     watched?: boolean;
     skipped?: boolean;
@@ -139,6 +144,20 @@ function prefixed(tableName: string, id: string): string {
 function unPrefixed(prefixedId: string): string {
   const colon = prefixedId.indexOf(':')
   return colon >= 0 ? prefixedId.slice(colon + 1) : prefixedId
+}
+
+/** Compute a NIP-01/NIP-33 replaceable key for the given event.
+ *  Returns `${kind}:${pubkey}` for kinds 0 and 3,
+ *  `${kind}:${pubkey}:${dTag}` for addressable events (NIP-33 range),
+ *  or null when the event kind is not replaceable. */
+function replaceableKeyFromEvent(event: any): string | null {
+  const kind = event.kind as number
+  if (kind === 0 || kind === 3) return `${kind}:${event.pubkey}`
+  if ((kind >= 10000 && kind < 20000) || (kind >= 30000 && kind < 40000)) {
+    const dTag = event.tags?.find((t: any) => t[0] === 'd')?.[1] ?? ''
+    return `${kind}:${event.pubkey}:${dTag}`
+  }
+  return null
 }
 
 class Collection<T> {
@@ -234,8 +253,7 @@ class WhereClause<T> {
   anyOf(values: (string | number)[]): Collection<T> {
     const valueSet = new Set(values)
     const results: PolyNode[] = []
-    for (const [, node] of graph['nodes']) {
-      if (node.type !== this.type) continue
+    for (const node of graph.whereType(this.type)) {
       const fieldVal = (node.data as Record<string, unknown>)[this.indexField]
       if (fieldVal !== undefined && valueSet.has(fieldVal as string | number)) {
         results.push(node)
@@ -246,8 +264,7 @@ class WhereClause<T> {
 
   above(value: number): Collection<T> {
     const results: PolyNode[] = []
-    for (const [, node] of graph['nodes']) {
-      if (node.type !== this.type) continue
+    for (const node of graph.whereType(this.type)) {
       const fieldVal = (node.data as Record<string, unknown>)[this.indexField]
       if (typeof fieldVal === 'number' && fieldVal > value) results.push(node)
     }
@@ -256,8 +273,7 @@ class WhereClause<T> {
 
   below(value: number): Collection<T> {
     const results: PolyNode[] = []
-    for (const [, node] of graph['nodes']) {
-      if (node.type !== this.type) continue
+    for (const node of graph.whereType(this.type)) {
       const fieldVal = (node.data as Record<string, unknown>)[this.indexField]
       if (typeof fieldVal === 'number' && fieldVal < value) results.push(node)
     }
@@ -267,8 +283,7 @@ class WhereClause<T> {
 
 function queryIndex(type: NodeType, field: string, value: string): PolyNode[] {
   const results: PolyNode[] = []
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== type) continue
+  for (const node of graph.whereType(type)) {
     const fieldVal = (node.data as Record<string, unknown>)[field]
     if (Array.isArray(fieldVal) && fieldVal.includes(value)) {
       results.push(node)
@@ -330,9 +345,7 @@ class Table<T> {
 
   count(): Promise<number> {
     let count = 0
-    for (const [, node] of graph['nodes']) {
-      if (node.type === this.type) count++
-    }
+    for (const node of graph.whereType(this.type)) { count++ }
     return Promise.resolve(count)
   }
 
@@ -341,8 +354,7 @@ class Table<T> {
   where(index: string | Record<string, unknown>): WhereClause<T> | Collection<T> {
     if (typeof index === 'object') {
       const entries = Object.entries(index)
-      const nodes = [...graph['nodes'].values()].filter(n => {
-        if (n.type !== this.type) return false
+      const nodes = graph.whereType(this.type).filter(n => {
         return entries.every(([k, v]) => (n.data as Record<string, unknown>)[k] === v)
       })
       return new Collection<T>(nodes, this.type)
@@ -351,8 +363,7 @@ class Table<T> {
   }
 
   orderBy(field: string): Collection<T> {
-    const nodes = [...graph['nodes'].values()]
-      .filter(n => n.type === this.type)
+    const nodes = graph.whereType(this.type)
       .sort((a, b) => {
         const av = (a.data as Record<string, unknown>)[field] as number ?? 0
         const bv = (b.data as Record<string, unknown>)[field] as number ?? 0
@@ -362,15 +373,15 @@ class Table<T> {
   }
 
   filter(fn: (item: T) => boolean): Collection<T> {
-    const nodes = [...graph['nodes'].values()]
-      .filter(n => n.type === this.type && fn(n.data as unknown as T))
+    const nodes = graph.whereType(this.type)
+      .filter(n => fn(n.data as unknown as T))
     return new Collection<T>(nodes, this.type)
   }
 
   toArray(): Promise<T[]> {
     const results: T[] = []
-    for (const [, node] of graph['nodes']) {
-      if (node.type === this.type) results.push(node.data as unknown as T)
+    for (const node of graph.whereType(this.type)) {
+      results.push(node.data as unknown as T)
     }
     return Promise.resolve(results)
   }
@@ -410,8 +421,7 @@ export async function pruneCache(): Promise<void> {
   const videoUrls = oldestShapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
 
   const reactionIds: string[] = []
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'event') continue
+  for (const node of graph.whereType('event')) {
     const data = node.data as Record<string, unknown>
     const kind = data.kind as number | undefined
     if (kind && [7, 16, 9735, 1111].includes(kind)) {
@@ -422,13 +432,12 @@ export async function pruneCache(): Promise<void> {
     }
   }
 
-  for (const id of [...reactionIds, ...oldestIds]) {
+  for (const id of [...reactionIds, ...oldestIds.map(sid => `shp:${sid}`)]) {
     graph.removeNode(id)
   }
 
   const oldRejectionThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'rejection') continue
+  for (const node of graph.whereType('rejection')) {
     const checkedAt = (node.data as Record<string, unknown>).checkedAt as number | undefined
     if (checkedAt !== undefined && checkedAt < oldRejectionThreshold) {
       graph.removeNode(node.id)
@@ -436,20 +445,23 @@ export async function pruneCache(): Promise<void> {
   }
 
   for (const url of videoUrls) {
-    for (const [, node] of graph['nodes']) {
-      if (node.type === 'media' && node.id === url) graph.removeNode(node.id)
+    for (const node of graph.whereType('media')) {
+      if (node.id === url) graph.removeNode(node.id)
     }
   }
 
   const remainingPubkeySet = new Set<string>()
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'video_shape' && node.type !== 'event') continue
+  for (const node of graph.whereType('video_shape')) {
+    const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
+    if (pubkey) remainingPubkeySet.add(pubkey)
+  }
+  for (const node of graph.whereType('event')) {
     const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
     if (pubkey) remainingPubkeySet.add(pubkey)
   }
 
-  for (const [, node] of graph['nodes']) {
-    if (node.type === 'profile' && !remainingPubkeySet.has(node.id)) {
+  for (const node of graph.whereType('profile')) {
+    if (!remainingPubkeySet.has((node.data as Record<string, unknown>).pubkey as string)) {
       graph.removeNode(node.id)
     }
   }
@@ -457,11 +469,10 @@ export async function pruneCache(): Promise<void> {
   // Prune orphan reaction events (kinds 7, 16, 9735, 1111) whose
   // referenced video shapes were already removed.
   const remainingShapeIds = new Set<string>()
-  for (const [, node] of graph['nodes']) {
-    if (node.type === 'video_shape') remainingShapeIds.add(node.id)
+  for (const node of graph.whereType('video_shape')) {
+    remainingShapeIds.add(node.id)
   }
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'event') continue
+  for (const node of graph.whereType('event')) {
     const data = node.data as Record<string, unknown>
     const kind = data.kind as number | undefined
     if (kind && [7, 16, 9735, 1111].includes(kind)) {
@@ -473,18 +484,14 @@ export async function pruneCache(): Promise<void> {
   }
 
   // Cap total event nodes — remove oldest events when above threshold
-  let eventCount = 0
-  for (const [, node] of graph['nodes']) {
-    if (node.type === 'event') eventCount++
-  }
-  if (eventCount > MAX_EVENT_NODES) {
-    const excess = eventCount - MAX_EVENT_NODES
-    const events = [...graph['nodes'].entries()]
-      .filter(([, n]) => n.type === 'event')
-      .sort(([, a], [, b]) => a.updatedAt - b.updatedAt)
+  const allEvents = graph.whereType('event')
+  if (allEvents.length > MAX_EVENT_NODES) {
+    const excess = allEvents.length - MAX_EVENT_NODES
+    const toRemove = allEvents
+      .sort((a, b) => a.updatedAt - b.updatedAt)
       .slice(0, excess)
-    for (const [id] of events) {
-      graph.removeNode(id)
+    for (const node of toRemove) {
+      graph.removeNode(node.id)
     }
   }
 }
@@ -496,15 +503,18 @@ export async function pruneBlockedContent(pubkeys: string[]): Promise<void> {
   const toRemove: string[] = []
   const urlsToRemove: string[] = []
 
-  for (const [, node] of graph['nodes']) {
-    if (node.type !== 'video_shape' && node.type !== 'event') continue
+  for (const node of graph.whereType('video_shape')) {
     const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
     if (pubkey && pkSet.has(pubkey)) {
       toRemove.push(node.id)
-      if (node.type === 'video_shape') {
-        const videoUrl = (node.data as Record<string, unknown>).videoUrl as string | undefined
-        if (videoUrl) urlsToRemove.push(videoUrl)
-      }
+      const videoUrl = (node.data as Record<string, unknown>).videoUrl as string | undefined
+      if (videoUrl) urlsToRemove.push(videoUrl)
+    }
+  }
+  for (const node of graph.whereType('event')) {
+    const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
+    if (pubkey && pkSet.has(pubkey)) {
+      toRemove.push(node.id)
     }
   }
 
@@ -557,6 +567,82 @@ function ensureMediaNode(url: string): void {
   })
 }
 
+/** Ensure a HASHTAG node exists in the graph for the given tag. */
+function ensureHashtagNode(tag: string): void {
+  const id = `has:${tag.toLowerCase()}`
+  const existing = graph.getNode(id)
+  if (existing) return
+  graph.addNode({
+    id,
+    type: 'hashtag',
+    data: { tag, normalized: tag.toLowerCase() },
+    insertedAt: Date.now(),
+    updatedAt: Date.now(),
+  })
+}
+
+/** Ensure a RELAY node exists in the graph for the given relay URL. */
+function ensureRelayNode(url: string): void {
+  const id = `rly:${normalizeRelayUrl(url)}`
+  const existing = graph.getNode(id)
+  if (existing) return
+  graph.addNode({
+    id,
+    type: 'relay',
+    data: { url, normalized: normalizeRelayUrl(url) },
+    insertedAt: Date.now(),
+    updatedAt: Date.now(),
+  })
+}
+
+function normalizeRelayUrl(url: string): string {
+  return url.replace(/\/+$/, '')
+}
+
+/**
+ * Record that an event was observed on a particular relay by adding an
+ * OBSERVED_ON edge. Lazily-creates the relay node if needed.
+ */
+function recordRelayObservation(eventId: string, relayUrl: string): void {
+  const normalized = normalizeRelayUrl(relayUrl)
+  ensureRelayNode(normalized)
+  // Edge source uses the raw event id (matching the existing convention in
+  // recordMediaEdge where graph.addEdge(eventId, 'HAS_MEDIA', url) uses
+  // the raw id, not the evt:-prefixed node id).
+  graph.addEdge(eventId, 'OBSERVED_ON', `rly:${normalized}`)
+}
+
+/**
+ * Materialize graph edges from Nostr tags on an event.
+ * Called after the event has been stored as a cachedEvent node.
+ */
+function materializeEventEdges(event: any, eventId: string): void {
+  if (!event.tags) return
+
+  const prefixedId = `evt:${eventId}`
+
+  for (const tag of event.tags) {
+    if (tag[0] === 'e' && tag[1]) {
+      // e-tags: REFERENCES edges with optional marker from NIP-10.
+      const data: Record<string, unknown> = {}
+      if (tag[3]) data.marker = tag[3]
+      graph.addEdge(prefixedId, 'REFERENCES', `evt:${tag[1]}`, data)
+    } else if (tag[0] === 'p' && tag[1]) {
+      // p-tags: MENTIONS edges (pubkey → person referenced).
+      if (tag[1] !== event.pubkey) {
+        graph.addEdge(prefixedId, 'MENTIONS', tag[1])
+      }
+    } else if (tag[0] === 't' && tag[1]) {
+      // t-tags: TAGGED_WITH edges.
+      ensureHashtagNode(tag[1])
+      graph.addEdge(prefixedId, 'TAGGED_WITH', `has:${tag[1].toLowerCase()}`)
+    } else if (tag[0] === 'a' && tag[1]) {
+      // a-tags: REFERENCES with address marker.
+      graph.addEdge(prefixedId, 'REFERENCES', tag[1], { marker: 'address' })
+    }
+  }
+}
+
 /**
  * Record that an event references a video URL by adding a HAS_MEDIA edge.
  * If this URL already has a canonical shape, returns that shape's ID
@@ -581,7 +667,7 @@ async function recordMediaEdge(url: string, eventId: string, pubkey: string): Pr
     // This is a duplicate — increment sharer count
     data.sharerCount = ((data.sharerCount as number) ?? 1) + 1
     mediaNode.updatedAt = Date.now()
-    graph['markDirty'](mediaNodeId)
+    graph.updateNode(mediaNodeId, { sharerCount: data.sharerCount, updatedAt: Date.now() })
     return canonicalId
   }
 
@@ -589,7 +675,7 @@ async function recordMediaEdge(url: string, eventId: string, pubkey: string): Pr
   data.canonicalShapeId = eventId
   data.sharerCount = 1
   mediaNode.updatedAt = Date.now()
-  graph['markDirty'](mediaNodeId)
+  graph.updateNode(mediaNodeId, { canonicalShapeId: eventId, sharerCount: 1, updatedAt: Date.now() })
   return null
 }
 
@@ -611,10 +697,10 @@ export function getSharers(url: string): string[] {
  */
 export function getSharedUrls(pubkey: string): string[] {
   const urls = new Set<string>()
-  for (const [, node] of graph['nodes']) {
+  for (const node of graph.byPubkey(pubkey)) {
     if (node.type !== 'event') continue
     const data = node.data as Record<string, unknown>
-    if (data.pubkey === pubkey && data.videoUrl) {
+    if (data.videoUrl) {
       urls.add(data.videoUrl as string)
     }
   }
@@ -766,8 +852,7 @@ export async function updateMediaStatus(url: string, status: MediaStatusRecord['
   })
 
   if (status === 'failed') {
-    for (const [, node] of graph['nodes']) {
-      if (node.type !== 'video_shape') continue
+    for (const node of graph.whereType('video_shape')) {
       const data = node.data as Record<string, unknown>
       if (data.videoUrl === url) {
         graph.updateNode(node.id, {
@@ -793,6 +878,7 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
     updatedAt: Date.now()
   }
   await db.userVideoState.put(updatedRec)
+  graph.addEdge(`shp:${id}`, 'HAS_STATE', `sta:${id}`)
 
   const shape = await db.videoShapes.get(id)
   if (shape) {
@@ -830,12 +916,8 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
 
     await db.authorProfiles.put(profile)
 
-    for (const [, node] of graph['nodes']) {
-      if (node.type !== 'video_shape') continue
-      const nodeData = node.data as Record<string, unknown>
-      if (nodeData.pubkey === event.pubkey) {
-        graph.updateNode(node.id, { authorName: name, authorPicture: picture })
-      }
+    for (const node of graph.byPubkey(event.pubkey, 'video_shape')) {
+      graph.updateNode(node.id, { authorName: name, authorPicture: picture })
     }
     return profile
   } catch (err) {
@@ -846,7 +928,7 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
 
 const BULK_INSERT_CHUNK = 50
 
-export async function bulkSaveEventsToCache(events: any[]): Promise<void> {
+export async function bulkSaveEventsToCache(events: any[], relay?: string): Promise<void> {
   if (events.length === 0) return
 
   const videoShapes: VideoShape[] = []
@@ -874,18 +956,48 @@ export async function bulkSaveEventsToCache(events: any[]): Promise<void> {
     const existing = await db.cachedEvents.get(id)
     if (existing) continue
 
-    const cachedEvent: CachedEvent = { id, kind, pubkey, created_at, event, eTags, pTags }
-    await db.cachedEvents.put(cachedEvent)
+    const cachedEvent: CachedEvent = { id, kind, pubkey, created_at, event, eTags, pTags, relay }
 
-    const vec = computeEventVector({
-      kind,
-      pubkey,
-      created_at,
-      eTagsCount: eTags.length,
-      pTagsCount: pTags.length,
-      hashtags: event.tags?.filter((t: any) => t[0] === 't').map((t: any) => t[1]) ?? [],
-    })
-    graph.vectors.add(id, vec)
+    // Use putReplaceable for NIP-01/NIP-33 replaceable events.
+    const rKey = replaceableKeyFromEvent(event)
+    if (rKey) {
+      const inserted = await graph.putReplaceable({
+        id: prefixed('cachedEvents', id),
+        type: 'event',
+        data: { ...cachedEvent as any, replaceableKey: rKey },
+        vector: undefined,
+        insertedAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      if (!inserted) continue // newer version already exists
+    } else {
+      await db.cachedEvents.put(cachedEvent)
+    }
+
+    // Kind 5 (deletion): hide target shapes, zero counters, then skip
+    // materialization / vector / shaping.
+    if (kind === 5) {
+      const targetIds = eTags
+      for (const targetId of targetIds) {
+        const shapeNode = graph.getNode(`shp:${targetId}`)
+        if (!shapeNode) continue
+        // NIP-09: only the original author may delete their event.
+        const shapePubkey = (shapeNode.data as Record<string, unknown>).pubkey as string | undefined
+        if (shapePubkey && shapePubkey !== pubkey) continue
+        graph.updateNode(shapeNode.id, { hidden: true, hiddenAt: Date.now() })
+        const counterNode = graph.getNode(`cnt:${targetId}`)
+        if (counterNode) {
+          graph.updateNode(counterNode.id, {
+            reactionCount: 0, repostCount: 0, replyCount: 0,
+            zapCount: 0, zapTotalSats: 0,
+          })
+        }
+      }
+      continue
+    }
+
+    // Materialize graph edges from Nostr tags (e, p, t, a).
+    materializeEventEdges(event, id)
 
     if (isVideo) {
       const shape = await buildOrUpdateVideoShape(event)
@@ -942,7 +1054,7 @@ export async function bulkSaveEventsToCache(events: any[]): Promise<void> {
   }
 }
 
-export async function saveEventToCache(event: any, trusted = false): Promise<void> {
+export async function saveEventToCache(event: any, trusted = false, relay?: string): Promise<void> {
   if (!event || !event.id || typeof event.kind !== 'number') return
 
   if (!trusted) {
@@ -970,7 +1082,7 @@ export async function saveEventToCache(event: any, trusted = false): Promise<voi
   let wroteCachedEvent = false
   const cleanup = async () => {
     if (wroteCachedEvent) {
-      graph.removeNode(id)
+      graph.removeNode(prefixed('cachedEvents', id))
     }
   }
 
@@ -985,15 +1097,63 @@ export async function saveEventToCache(event: any, trusted = false): Promise<voi
       }
     }
 
+    const eTags = (event.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
+    const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
+    const cachedEvent: CachedEvent = { id, kind, pubkey, created_at, event, eTags, pTags, relay }
+
+    // ── Kind 5: Deletion / event deletion ─────────────────────
+    if (kind === 5) {
+      const targetIds = eTags
+      for (const targetId of targetIds) {
+        const shapeNode = graph.getNode(`shp:${targetId}`)
+        if (!shapeNode) continue
+        // NIP-09: only the original author may delete their event.
+        const shapePubkey = (shapeNode.data as Record<string, unknown>).pubkey as string | undefined
+        if (shapePubkey && shapePubkey !== pubkey) continue
+        graph.updateNode(shapeNode.id, { hidden: true, hiddenAt: Date.now() })
+        const counterNode = graph.getNode(`cnt:${targetId}`)
+        if (counterNode) {
+          Object.assign(counterNode.data, {
+            reactionCount: 0, repostCount: 0, replyCount: 0,
+            zapCount: 0, zapTotalSats: 0,
+          })
+          graph.updateNode(counterNode.id, { reactionCount: 0, repostCount: 0, replyCount: 0, zapCount: 0, zapTotalSats: 0 })
+        }
+      }
+      // Store the kind-5 event as a tombstone but skip video/reaction shaping.
+      await db.cachedEvents.put(cachedEvent)
+      wroteCachedEvent = true
+      return
+    }
+
     const alreadyCached = await db.cachedEvents.get(id)
     if (alreadyCached) return
 
-    const eTags = (event.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
-    const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
-
-    const cachedEvent: CachedEvent = { id, kind, pubkey, created_at, event, eTags, pTags }
-    await db.cachedEvents.put(cachedEvent)
+    // Use putReplaceable for NIP-01/NIP-33 replaceable events.
+    const rKey = replaceableKeyFromEvent(event)
+    if (rKey) {
+      const inserted = await graph.putReplaceable({
+        id: prefixed('cachedEvents', id),
+        type: 'event',
+        data: { ...cachedEvent as any, replaceableKey: rKey },
+        vector: undefined,
+        insertedAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      if (!inserted) {
+        // A newer version of this replaceable event already exists — skip.
+        return
+      }
+    } else {
+      await db.cachedEvents.put(cachedEvent)
+    }
     wroteCachedEvent = true
+
+    // Materialize graph edges from Nostr tags (e, p, t, a).
+    materializeEventEdges(event, id)
+
+    // Record relay observation if the origin relay is known.
+    if (relay) recordRelayObservation(id, relay)
 
     const vec = computeEventVector({
       kind, pubkey, created_at,
@@ -1044,6 +1204,7 @@ async function incrementVideoCounts(videoId: string, reactionEvent: any): Promis
   }
 
   await db.videoCounters.put(existing)
+  graph.addEdge(`shp:${videoId}`, 'HAS_COUNTER', `cnt:${videoId}`)
 }
 
 export async function mergeCountersIntoShape(shape: VideoShape): Promise<VideoShape> {

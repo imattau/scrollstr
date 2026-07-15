@@ -35,7 +35,7 @@ async function getCacheOldestVideoTimestamp(): Promise<number | null> {
 type SubCloser = { close: (reason?: string) => void }
 
 const pool = new SimplePool()
-const subs = new Map<string, SubCloser>()
+const subs = new Map<string, Array<{ close: (reason?: string) => void; relay: string }>>()
 let isBackfillRunning = false
 let isProfileBackfillRunning = false
 let isFollowedVideoBackfillRunning = false
@@ -360,26 +360,29 @@ function sanitizeFilters(filters: any[]): any[] {
 function handleSubscribe(id: string, relays: string[], rawFilters: any[]) {
   const filters = sanitizeFilters(rawFilters)
   if (filters.length === 0) return
-  const sub: SubCloser = pool.subscribe(relays, filters[0] as Filter, {
-    onevent: (event: any) => {
-      // Reject events with invalid signatures inline before forwarding
-      if (event.sig && !event.sig.startsWith('mock-') && event.sig !== 'local-preview-sig') {
-        try {
-          if (!verifyEvent(event as any)) return
-        } catch {
-          return
+  const entries: Array<{ close: (reason?: string) => void; relay: string }> = []
+  for (const relay of relays) {
+    const sub = pool.subscribe([relay], filters[0] as Filter, {
+      onevent: (event: any) => {
+        if (event.sig && !event.sig.startsWith('mock-') && event.sig !== 'local-preview-sig') {
+          try {
+            if (!verifyEvent(event as any)) return
+          } catch {
+            return
+          }
         }
-      }
-      self.postMessage({ type: 'subscriptionEvent', event })
-    },
-  })
-  subs.set(id, sub)
+        self.postMessage({ type: 'subscriptionEvent', event, relay })
+      },
+    })
+    entries.push({ close: (reason?: string) => sub.close(reason), relay })
+  }
+  subs.set(id, entries)
 }
 
 function handleUnsubscribe(id: string) {
-  const entry = subs.get(id)
-  if (entry) {
-    entry.close()
+  const entries = subs.get(id)
+  if (entries) {
+    for (const e of entries) e.close()
     subs.delete(id)
   }
 }
@@ -436,7 +439,9 @@ self.onmessage = (e: MessageEvent) => {
       searchedIdsAborted.add(msg.id)
       break
     case 'cleanup':
-      for (const [, sub] of subs) sub.close()
+      for (const [, entries] of subs) {
+        for (const e of entries) e.close()
+      }
       subs.clear()
       searchedIdsAborted.clear()
       pool.close([])

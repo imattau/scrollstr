@@ -2,20 +2,29 @@ import type { PolyNode, EdgeType, QueryOptions, NodeType } from './types'
 
 type EdgeIndex = Map<string, Array<{ target: string; type: EdgeType; data?: Record<string, unknown> }>>
 
+interface TraversalStep {
+  edgeType: EdgeType
+  depth: number
+  direction: 'out' | 'in'
+}
+
 export class GraphQuery {
-  private opts: QueryOptions = {}
+  private opts: QueryOptions & { afterSteps?: TraversalStep[] } = {}
   private nodes: Map<string, PolyNode>
   private edges: EdgeIndex
+  private nodeToEdgeMap: Map<string, Set<string>>
   private allTypes: Set<NodeType>
 
   constructor(
     nodes: Map<string, PolyNode>,
     edges: EdgeIndex,
-    allTypes: Set<NodeType>
+    allTypes: Set<NodeType>,
+    nodeToEdgeMap: Map<string, Set<string>>,
   ) {
     this.nodes = nodes
     this.edges = edges
     this.allTypes = allTypes
+    this.nodeToEdgeMap = nodeToEdgeMap
   }
 
   where(field: string, value: unknown): this {
@@ -69,6 +78,16 @@ export class GraphQuery {
 
   offset(n: number): this {
     this.opts.offset = n
+    return this
+  }
+
+  /** Multi-hop BFS along `edgeType` edges, replacing the current candidate
+   *  set with every ID reachable within `depth` hops. Out-edges = traversal
+   *  from node to its targets; in-edges = traversal from node to its sources. */
+  traverse(edgeType: EdgeType, depth: number, direction: 'out' | 'in' = 'out'): this {
+    const steps = this.opts.afterSteps ?? []
+    steps.push({ edgeType, depth, direction })
+    this.opts.afterSteps = steps
     return this
   }
 
@@ -143,8 +162,82 @@ export class GraphQuery {
     return allNodes
   }
 
+  /** Internal: BFS traversal on a set of ID strings. Returns all reachable
+   *  IDs within `depth` hops along edges matching `step`. */
+  private bfs(seeds: string[], step: TraversalStep): Set<string> {
+    const visited = new Set<string>(seeds)
+    let frontier = [...seeds]
+    for (let d = 0; d < step.depth; d++) {
+      if (frontier.length === 0) break
+      const next: string[] = []
+      for (const id of frontier) {
+        if (step.direction === 'out') {
+          const outEdges = this.edges.get(id)
+          if (outEdges) {
+            for (const e of outEdges) {
+              if (e.type === step.edgeType && !visited.has(e.target)) {
+                visited.add(e.target)
+                next.push(e.target)
+              }
+            }
+          }
+        } else {
+          const sources = this.nodeToEdgeMap.get(id)
+          if (sources) {
+            for (const src of sources) {
+              if (visited.has(src)) continue
+              // Verify the reverse edge has the matching type.
+              const srcEdges = this.edges.get(src)
+              if (srcEdges) {
+                for (const e of srcEdges) {
+                  if (e.type === step.edgeType && e.target === id && !visited.has(src)) {
+                    visited.add(src)
+                    next.push(src)
+                    break
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      frontier = next
+    }
+    return visited
+  }
+
+  /** Apply any stored traversal steps to a candidate ID set, returning the
+   *  expanded set. */
+  private applyTraversals(ids: string[]): Set<string> {
+    if (!this.opts.afterSteps || this.opts.afterSteps.length === 0) return new Set(ids)
+    let current = new Set(ids)
+    for (const step of this.opts.afterSteps) {
+      current = this.bfs([...current], step)
+    }
+    return current
+  }
+
+  /** Resolve a set of ID strings to their PolyNode objects (missing nodes
+   *  are silently dropped). */
+  private resolve(ids: Set<string>): PolyNode[] {
+    const result: PolyNode[] = []
+    for (const id of ids) {
+      const node = this.nodes.get(id)
+      if (node) result.push(node)
+    }
+    return result
+  }
+
   toArray(): PolyNode[] {
     let results = this.getSourceNodes().filter(n => this.match(n))
+    if (results.length === 0) return []
+
+    // Apply multi-hop traversal
+    if (this.opts.afterSteps && this.opts.afterSteps.length > 0) {
+      const ids = results.map(n => n.id)
+      const expanded = this.applyTraversals(ids)
+      results = this.resolve(expanded)
+    }
 
     if (this.opts.orderBy) {
       const { field, direction } = this.opts.orderBy
@@ -166,6 +259,9 @@ export class GraphQuery {
   }
 
   count(): number {
+    if (this.opts.afterSteps && this.opts.afterSteps.length > 0) {
+      return this.toArray().length
+    }
     return this.getSourceNodes().filter(n => this.match(n)).length
   }
 
@@ -180,5 +276,50 @@ export class GraphQuery {
       if (val !== undefined) keys.add(val)
     }
     return [...keys]
+  }
+
+  /** Terminal: collect all nodes reachable from the current result set via
+   *  one hop of `edgeType`, optionally filtered by `predicate`. Does NOT
+   *  replace the current candidate set — returns a separate array. */
+  collect(edgeType: EdgeType, direction: 'out' | 'in' = 'out', predicate?: (node: PolyNode) => boolean): PolyNode[] {
+    const seeds = this.toArray()
+    const collected: PolyNode[] = []
+    const seen = new Set<string>()
+
+    for (const seed of seeds) {
+      if (direction === 'out') {
+        const outEdges = this.edges.get(seed.id)
+        if (outEdges) {
+          for (const e of outEdges) {
+            if (e.type !== edgeType) continue
+            if (seen.has(e.target)) continue
+            seen.add(e.target)
+            const node = this.nodes.get(e.target)
+            if (node && (!predicate || predicate(node))) {
+              collected.push(node)
+            }
+          }
+        }
+      } else {
+        const sources = this.nodeToEdgeMap.get(seed.id)
+        if (sources) {
+          for (const src of sources) {
+            if (seen.has(src)) continue
+            // Verify edge type
+            const srcEdges = this.edges.get(src)
+            if (!srcEdges) continue
+            const matched = srcEdges.some(e => e.type === edgeType && e.target === seed.id)
+            if (!matched) continue
+            seen.add(src)
+            const node = this.nodes.get(src)
+            if (node && (!predicate || predicate(node))) {
+              collected.push(node)
+            }
+          }
+        }
+      }
+    }
+
+    return collected
   }
 }

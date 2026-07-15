@@ -4,8 +4,7 @@ import type { MediaItemData, MediaStackRef } from 'react-media-stack'
 import { VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { useLiveQuery } from '../../graph'
-import { db } from '../../nostr/cache'
+import { graph, useGraphQuery } from '../../graph'
 import { useMuteList } from '../../nostr/useMuteList'
 import { subscribeToRelays, setIndexWritesDeferred, flushIndexWrites } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
@@ -73,14 +72,16 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [])
 
   // Reactively query the user's kind:3 contact list from Dexie cache
-  const contactListEvents = useLiveQuery(
-    () => session?.pubkey
-      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
-      : Promise.resolve([] as any[]),
-    [session?.pubkey ?? '']
-  ) ?? []
-
-  const contactListEvent = contactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const contactListEvent = useGraphQuery(
+    () => {
+      if (!session?.pubkey) return undefined
+      const node = graph.byKindPubkey(3, session.pubkey)
+      return (node?.data as any)?.event
+    },
+    [session?.pubkey],
+    200,
+    ['event'],
+  )
 
   const followingPubkeys = useMemo(() => {
     if (!contactListEvent) return []
