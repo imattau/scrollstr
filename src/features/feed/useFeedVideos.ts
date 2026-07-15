@@ -85,7 +85,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag], 200, ['video_shape', 'counter'])
+  }, [refreshKey, filterTag], 500, ['video_shape'])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
@@ -110,7 +110,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 200, ['video_shape', 'counter'])
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 500, ['video_shape'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 

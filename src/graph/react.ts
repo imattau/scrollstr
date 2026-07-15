@@ -30,15 +30,37 @@ export function useGraphQuery<T>(
   const mountedRef = useRef(true)
   const isFirstRef = useRef(true)
   const nodeTypesRef = useRef(nodeTypes)
+  const queryInFlightRef = useRef(false)
+  const rerunPendingRef = useRef(false)
+  const queryEpochRef = useRef({})
+  const runQueryRef = useRef<() => void>(() => {})
 
   useEffect(() => {
     nodeTypesRef.current = nodeTypes
   }, [nodeTypes])
 
   const runQuery = useCallback(() => {
+    const epoch = queryEpochRef.current
+
+    if (queryInFlightRef.current) {
+      rerunPendingRef.current = true
+      return
+    }
+
+    queryInFlightRef.current = true
+
+    const finishQuery = () => {
+      queryInFlightRef.current = false
+      if (rerunPendingRef.current && mountedRef.current) {
+        rerunPendingRef.current = false
+        runQueryRef.current()
+      }
+    }
+
     try {
       const value = queryFn()
       const setValue = (resolved: T) => {
+        if (epoch !== queryEpochRef.current) return
         if (isFirstRef.current) {
           isFirstRef.current = false
           if (mountedRef.current) setResult(resolved)
@@ -50,20 +72,30 @@ export function useGraphQuery<T>(
         }
       }
       if (value instanceof Promise) {
-        value.then(setValue).catch((err) => {
-          console.error('[Graph] Query error:', err)
-          if (mountedRef.current) setResult(undefined)
-        })
+        value
+          .then(setValue)
+          .catch((err) => {
+            if (epoch !== queryEpochRef.current) return
+            console.error('[Graph] Query error:', err)
+            if (mountedRef.current) setResult(undefined)
+          })
+          .finally(finishQuery)
       } else {
         setValue(value)
+        finishQuery()
       }
     } catch (err) {
       console.error('[Graph] Query error:', err)
       if (mountedRef.current) setResult(undefined)
+      finishQuery()
     }
   // This hook intentionally accepts a caller-provided dependency list.
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
   }, deps)
+
+  useEffect(() => {
+    runQueryRef.current = runQuery
+  }, [runQuery])
 
   useEffect(() => {
     mountedRef.current = true
@@ -72,7 +104,6 @@ export function useGraphQuery<T>(
     runQuery()
 
     const types = nodeTypesRef.current
-
     const subscription = graph.changes.subscribe((event) => {
       if (types && event.nodeType && !types.includes(event.nodeType)) {
         return
@@ -82,6 +113,8 @@ export function useGraphQuery<T>(
 
     return () => {
       mountedRef.current = false
+      queryEpochRef.current = {}
+      rerunPendingRef.current = false
       clearTimeout(timerRef.current)
       subscription.unsubscribe()
     }

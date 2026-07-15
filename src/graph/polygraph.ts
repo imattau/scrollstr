@@ -14,7 +14,11 @@ function edgeId(source: string, type: EdgeType, target: string): string {
   return `${source}::${type}::${target}`
 }
 
-const HOT_CACHE_MAX = 20000
+const HOT_CACHE_MAX = 10000
+
+function yieldToUI(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0))
+}
 
 export class PolyGraph {
   private nodes = new Map<string, PolyNode>()
@@ -55,6 +59,41 @@ export class PolyGraph {
   private removedEdgeIds = new Set<string>()
   private removedNodeIds = new Set<string>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
+  private evictionSkipCounter = 0
+
+  // ── Change-event batching ──
+  // When batchDepth > 0, change events are queued instead of emitted
+  // immediately. endBatch() flushes the queue. Used by bulk cache ops
+  // to avoid cascading React re-renders on every single mutation.
+  private batchDepth = 0
+  private pendingBatchEvents: GraphChangeEvent[] = []
+
+  /** Start buffering change events. Every startBatch() must be paired
+   *  with exactly one endBatch(). Nested batching is supported. */
+  startBatch(): void {
+    this.batchDepth++
+  }
+
+  /** Flush buffered change events. Throws if called without a matching
+   *  startBatch(). */
+  endBatch(): void {
+    if (this.batchDepth === 0) throw new Error('endBatch without startBatch')
+    this.batchDepth--
+    if (this.batchDepth > 0) return
+    const events = this.pendingBatchEvents
+    this.pendingBatchEvents = []
+    for (const ev of events) {
+      this.changes.next(ev)
+    }
+  }
+
+  private emitChange(event: GraphChangeEvent): void {
+    if (this.batchDepth > 0) {
+      this.pendingBatchEvents.push(event)
+    } else {
+      this.changes.next(event)
+    }
+  }
 
   constructor() {
     this.vectors = new VectorIndex((id) => {
@@ -158,7 +197,7 @@ export class PolyGraph {
     this.touchHotCache(node.id)
     this.markDirty(node.id)
     this.indexNode(node)
-    this.changes.next({ type: 'node_added', nodeId: node.id, nodeType: node.type })
+    this.emitChange({ type: 'node_added', nodeId: node.id, nodeType: node.type })
   }
 
   private indexNode(node: PolyNode): void {
@@ -277,7 +316,7 @@ export class PolyGraph {
       if (node.vector) this.markVectorDirty(node.id)
       this.touchHotCache(node.id)
       this.markDirty(node.id)
-      this.changes.next({ type: 'node_updated', nodeId: node.id, nodeType: node.type })
+      this.emitChange({ type: 'node_updated', nodeId: node.id, nodeType: node.type })
     } else {
       this.addNode(node)
     }
@@ -324,7 +363,7 @@ export class PolyGraph {
     node.updatedAt = Date.now()
     this.touchHotCache(id)
     this.markDirty(id)
-    this.changes.next({ type: 'node_updated', nodeId: id, nodeType: node.type })
+    this.emitChange({ type: 'node_updated', nodeId: id, nodeType: node.type })
     return node
   }
 
@@ -347,7 +386,7 @@ export class PolyGraph {
     this.removedNodeIds.add(id)
     this.schedulePersist()
     this.hotCacheOrder.delete(id)
-    this.changes.next({ type: 'node_removed', nodeId: id, nodeType: node.type })
+    this.emitChange({ type: 'node_removed', nodeId: id, nodeType: node.type })
   }
 
   private cleanupNodeEdges(id: string): void {
@@ -384,7 +423,7 @@ export class PolyGraph {
     this.nodeToEdgeMap.get(target)!.add(source)
     this.dirtyEdges.add(id)
     this.schedulePersist()
-    this.changes.next({ type: 'edge_added', edgeId: id, edgeType: type, source, target })
+    this.emitChange({ type: 'edge_added', edgeId: id, edgeType: type, source, target })
   }
 
   /** Mark a vector added through the public VectorIndex as needing persistence. */
@@ -427,7 +466,7 @@ export class PolyGraph {
       this.nodeToEdgeMap.get(e.target)?.delete(source)
       this.dirtyEdges.delete(edgeId(source, e.type, e.target))
       this.removedEdgeIds.add(edgeId(source, e.type, e.target))
-      this.changes.next({ type: 'edge_removed', edgeType: e.type, source, target: e.target })
+      this.emitChange({ type: 'edge_removed', edgeType: e.type, source, target: e.target })
     }
     if (this.edges.get(source)?.length === 0) this.edges.delete(source)
     if (removed.length > 0) this.schedulePersist()
@@ -444,7 +483,11 @@ export class PolyGraph {
   private touchHotCache(id: string): void {
     this.hotCacheOrder.delete(id)
     this.hotCacheOrder.set(id, true)
-    this.evictOldestIfOverCap()
+    // Check eviction only every 10 touches to avoid the while-loop
+    // overhead on every single graph mutation during bulk operations.
+    if (++this.evictionSkipCounter % 10 === 0) {
+      this.evictOldestIfOverCap()
+    }
   }
 
   /** Evict the least-recently-touched nodes from RAM until the hot cache is
@@ -581,10 +624,14 @@ export class PolyGraph {
       }
     }
 
+    await yieldToUI()
+
     const allVectors = await this.persistence.getAllVectors()
     for (const { id, vector } of allVectors) {
       this.vectors.add(id, vector)
     }
+
+    await yieldToUI()
 
     // Now that vectors are loaded, evict any excess nodes down to the cap.
     // Evicted nodes lose their in-memory vector via vectors.remove() (which
@@ -596,7 +643,7 @@ export class PolyGraph {
     // Emit per-type change events so useGraphQuery nodeTypes filters work
     // properly during warm-up instead of a single generic event.
     for (const nodeType of this.allTypes) {
-      this.changes.next({ type: 'node_added', nodeType })
+      this.emitChange({ type: 'node_added', nodeType })
     }
   }
 

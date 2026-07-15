@@ -409,11 +409,13 @@ const PRUNE_INTERVAL = 30
 let _saveCounter = 0
 
 export async function pruneCache(): Promise<void> {
-  const totalShapes = await db.videoShapes.count()
-  const excess = totalShapes - MAX_VIDEOS
-  if (excess <= 0) return
+  graph.startBatch()
+  try {
+    const totalShapes = await db.videoShapes.count()
+    const excess = totalShapes - MAX_VIDEOS
+    if (excess <= 0) return
 
-  const oldestShapes = (await db.videoShapes.toArray())
+    const oldestShapes = (await db.videoShapes.toArray())
     .sort((a, b) => (a.insertOrder ?? 0) - (b.insertOrder ?? 0))
     .slice(0, excess)
 
@@ -437,6 +439,10 @@ export async function pruneCache(): Promise<void> {
     graph.removeNode(id)
   }
 
+  await yieldToUI()
+
+  await yieldToUI()
+
   const oldRejectionThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
   for (const node of graph.whereType('rejection')) {
     const checkedAt = (node.data as Record<string, unknown>).checkedAt as number | undefined
@@ -445,11 +451,15 @@ export async function pruneCache(): Promise<void> {
     }
   }
 
+  await yieldToUI()
+
   for (const url of videoUrls) {
     for (const node of graph.whereType('media')) {
       if (node.id === url) graph.removeNode(node.id)
     }
   }
+
+  await yieldToUI()
 
   const remainingPubkeySet = new Set<string>()
   for (const node of graph.whereType('video_shape')) {
@@ -466,6 +476,8 @@ export async function pruneCache(): Promise<void> {
       graph.removeNode(node.id)
     }
   }
+
+  await yieldToUI()
 
   // Prune orphan reaction events (kinds 7, 16, 9735, 1111) whose
   // referenced video shapes were already removed.
@@ -484,6 +496,8 @@ export async function pruneCache(): Promise<void> {
     }
   }
 
+  await yieldToUI()
+
   // Cap total event nodes — remove oldest events when above threshold
   const allEvents = graph.whereType('event')
   if (allEvents.length > MAX_EVENT_NODES) {
@@ -494,6 +508,9 @@ export async function pruneCache(): Promise<void> {
     for (const node of toRemove) {
       graph.removeNode(node.id)
     }
+  }
+  } finally {
+    graph.endBatch()
   }
 }
 
@@ -929,14 +946,27 @@ export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorPro
 
 const BULK_INSERT_CHUNK = 50
 
+const YIELD_INTERVAL = 20
+
+function yieldToUI(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0))
+}
+
 export async function bulkSaveEventsToCache(events: any[], relay?: string): Promise<void> {
   if (events.length === 0) return
 
-  const videoShapes: VideoShape[] = []
-  const reactionEvents: Array<{ eTag: string; event: any }> = []
-  const profileEvents: any[] = []
+  graph.startBatch()
+  try {
+    const videoShapes: VideoShape[] = []
+    const reactionEvents: Array<{ eTag: string; event: any }> = []
+    const profileEvents: any[] = []
 
-  for (const event of events) {
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i]
+
+      if (i > 0 && i % YIELD_INTERVAL === 0) {
+        await yieldToUI()
+      }
     if (!event || !event.id || typeof event.kind !== 'number') continue
     if (!event.sig) continue
     if (event.sig !== 'local-preview-sig' && !event.sig.startsWith('mock-')) {
@@ -1053,6 +1083,9 @@ export async function bulkSaveEventsToCache(events: any[], relay?: string): Prom
   if (++_saveCounter % PRUNE_INTERVAL === 0) {
     void pruneCache()
   }
+  } finally {
+    graph.endBatch()
+  }
 }
 
 export async function saveEventToCache(event: any, trusted = false, relay?: string): Promise<void> {
@@ -1087,6 +1120,7 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
     }
   }
 
+  graph.startBatch()
   try {
     if (kind === 1) {
       const rejected = await db.kindOneRejections.get(id)
@@ -1183,6 +1217,8 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
   } catch (error) {
     console.error(`[Cache] Error saving event ${id} (kind=${kind}, pubkey=${pubkey.slice(0,8)}):`, error)
     await cleanup()
+  } finally {
+    graph.endBatch()
   }
 }
 

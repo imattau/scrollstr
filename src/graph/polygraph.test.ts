@@ -292,7 +292,7 @@ describe('PolyGraph — hot cache eviction', () => {
   })
 
   it('keeps all nodes within HOT_CACHE_MAX', () => {
-    const COUNT = 15000
+    const COUNT = 10000
     for (let i = 0; i < COUNT; i++) {
       const node = makeEvent(`keep-${i}`, 1, 'pk1', 1_700_000_000 + i)
       graph.addNode(node)

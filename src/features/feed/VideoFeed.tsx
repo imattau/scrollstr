@@ -330,6 +330,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       <MediaStack
         ref={mediaStackRef}
         items={mediaItems}
+        preFetchAhead={1}
+        preFetchBehind={0}
+        cacheLimit={4}
         direction="vertical"
         autoPlay
         muted={isMuted}
