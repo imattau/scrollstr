@@ -1,6 +1,7 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
+import { graph } from '../graph'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
 import { getSearchRelays, getSearchOnlyRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
@@ -123,6 +124,22 @@ function handleWorkerMessage(e: MessageEvent): void {
       if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
       break
     }
+    case 'pruneResult': {
+      const resolvePrune = pruneCacheResolve
+      if (resolvePrune) {
+        pruneCacheResolve = null
+        resolvePrune(msg.removedIds)
+      }
+      break
+    }
+    case 'vectorSearchResult': {
+      const cb = vectorSearchCallbacks.get(msg.searchId)
+      if (cb) {
+        cb.resolve(msg.results)
+        vectorSearchCallbacks.delete(msg.searchId)
+      }
+      break
+    }
   }
 }
 
@@ -157,7 +174,10 @@ function terminateBackfillWorker(): void {
 
 // Lazily initialize on module load so existing call sites that use the worker
 // before getBackfillWorker() is first called still work.
-worker = createBackfillWorker()
+// Guard Worker constructor for test environments (jsdom/node).
+if (typeof Worker !== 'undefined') {
+  worker = createBackfillWorker()
+}
 
 // When new search-capable relays are discovered, update the worker's relay set
 setOnDiscoveredChange(() => syncSearchRelaysToWorker())
@@ -405,6 +425,9 @@ function processQueue() {
 
 let subIdCounter = 0
 const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
+
+let pruneCacheResolve: ((removedIds: string[]) => void) | null = null
+const vectorSearchCallbacks = new Map<string, { resolve: (results: any) => void }>()
 // Periodically purge search callbacks older than 30s to prevent leaks
 const SEARCH_CALLBACK_TTL = 30000
 let searchPurgeInterval: ReturnType<typeof setInterval> | null = null
@@ -548,12 +571,47 @@ export async function searchRelays(
   })
 }
 
+/**
+ * Delegate pruneCache to the backfill worker.
+ * The in-memory graph must be flushed before calling so IDB is consistent.
+ * Returns the list of node IDs removed from persistence.
+ */
+export async function runPruneCache(): Promise<string[]> {
+  if (typeof Worker === 'undefined') return []
+  await graph.flush()
+  return new Promise<string[]>((resolve) => {
+    pruneCacheResolve = resolve
+    getBackfillWorker().postMessage({ type: 'pruneCache' })
+  })
+}
+
+/**
+ * Delegate vector similarity search to the backfill worker.
+ * @param queryVec - the query vector to search with
+ * @param topK - number of results to return
+ * @param threshold - minimum similarity score
+ */
+export async function runVectorSearch(
+  queryVec: number[],
+  topK = 10,
+  threshold = 0.3
+): Promise<Array<{ id: string; score: number }>> {
+  if (typeof Worker === 'undefined') return []
+  const searchId = `vec_${++subIdCounter}`
+  return new Promise<Array<{ id: string; score: number }>>((resolve) => {
+    vectorSearchCallbacks.set(searchId, { resolve })
+    getBackfillWorker().postMessage({ type: 'vectorSearch', searchId, queryVec, topK, threshold })
+  })
+}
+
 /** Clean up all pool resources — call on logout / unmount */
 export function cleanupPool(): void {
   if (searchPurgeInterval) clearInterval(searchPurgeInterval)
   searchPurgeInterval = null
   terminateBackfillWorker()
   searchCallbacks.clear()
+  vectorSearchCallbacks.clear()
+  pruneCacheResolve = null
   pendingSubscriptionBatch = []
   pendingBackfillBatch = []
   backfillBuffer = []

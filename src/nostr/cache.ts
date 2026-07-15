@@ -1,6 +1,7 @@
 import { verifyEvent } from 'nostr-tools'
 import { graph, computeEventVector } from '../graph'
 import type { NodeType, PolyNode } from '../graph'
+import { runPruneCache } from './pool'
 
 // ── IDs ──
 
@@ -409,106 +410,15 @@ const PRUNE_INTERVAL = 30
 let _saveCounter = 0
 
 export async function pruneCache(): Promise<void> {
+  const removedIds = await runPruneCache()
+  if (removedIds.length === 0) return
+
+  // Remove from in-memory graph to stay in sync with IDB
   graph.startBatch()
   try {
-    const totalShapes = await db.videoShapes.count()
-    const excess = totalShapes - MAX_VIDEOS
-    if (excess <= 0) return
-
-    const oldestShapes = (await db.videoShapes.toArray())
-    .sort((a, b) => (a.insertOrder ?? 0) - (b.insertOrder ?? 0))
-    .slice(0, excess)
-
-  const oldestIds = oldestShapes.map(s => s.id)
-  const oldestIdSet = new Set(oldestIds)
-  const videoUrls = oldestShapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
-
-  const reactionIds: string[] = []
-  for (const node of graph.whereType('event')) {
-    const data = node.data as Record<string, unknown>
-    const kind = data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = data.eTags as string[] | undefined
-      if (eTags?.some(eid => oldestIdSet.has(eid))) {
-        reactionIds.push(node.id)
-      }
+    for (const id of removedIds) {
+      if (graph.getNode(id)) graph.removeNode(id)
     }
-  }
-
-  for (const id of [...reactionIds, ...oldestIds.map(sid => `shp:${sid}`)]) {
-    graph.removeNode(id)
-  }
-
-  await yieldToUI()
-
-  await yieldToUI()
-
-  const oldRejectionThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
-  for (const node of graph.whereType('rejection')) {
-    const checkedAt = (node.data as Record<string, unknown>).checkedAt as number | undefined
-    if (checkedAt !== undefined && checkedAt < oldRejectionThreshold) {
-      graph.removeNode(node.id)
-    }
-  }
-
-  await yieldToUI()
-
-  for (const url of videoUrls) {
-    for (const node of graph.whereType('media')) {
-      if (node.id === url) graph.removeNode(node.id)
-    }
-  }
-
-  await yieldToUI()
-
-  const remainingPubkeySet = new Set<string>()
-  for (const node of graph.whereType('video_shape')) {
-    const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
-    if (pubkey) remainingPubkeySet.add(pubkey)
-  }
-  for (const node of graph.whereType('event')) {
-    const pubkey = (node.data as Record<string, unknown>).pubkey as string | undefined
-    if (pubkey) remainingPubkeySet.add(pubkey)
-  }
-
-  for (const node of graph.whereType('profile')) {
-    if (!remainingPubkeySet.has((node.data as Record<string, unknown>).pubkey as string)) {
-      graph.removeNode(node.id)
-    }
-  }
-
-  await yieldToUI()
-
-  // Prune orphan reaction events (kinds 7, 16, 9735, 1111) whose
-  // referenced video shapes were already removed.
-  const remainingShapeIds = new Set<string>()
-  for (const node of graph.whereType('video_shape')) {
-    remainingShapeIds.add(node.id)
-  }
-  for (const node of graph.whereType('event')) {
-    const data = node.data as Record<string, unknown>
-    const kind = data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = data.eTags as string[] | undefined
-      if (eTags?.length && !eTags.some(eid => remainingShapeIds.has(eid))) {
-        graph.removeNode(node.id)
-      }
-    }
-  }
-
-  await yieldToUI()
-
-  // Cap total event nodes — remove oldest events when above threshold
-  const allEvents = graph.whereType('event')
-  if (allEvents.length > MAX_EVENT_NODES) {
-    const excess = allEvents.length - MAX_EVENT_NODES
-    const toRemove = allEvents
-      .sort((a, b) => a.updatedAt - b.updatedAt)
-      .slice(0, excess)
-    for (const node of toRemove) {
-      graph.removeNode(node.id)
-    }
-  }
   } finally {
     graph.endBatch()
   }

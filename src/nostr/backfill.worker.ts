@@ -1,8 +1,10 @@
 import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
 import { PolyPersistence } from '../graph/persistence'
+import type { NodeType } from '../graph/types'
 
 const persistence = new PolyPersistence()
 const MAX_VIDEOS = 10000
+const MAX_EVENT_NODES = 30000
 const VIDEO_KINDS = new Set([1, 21, 22, 34236])
 
 /**
@@ -405,6 +407,145 @@ async function handleSearch(id: string, relays: string[], query: string, kinds?:
   }
 }
 
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i]
+    na += a[i] * a[i]
+    nb += b[i] * b[i]
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb)
+  return denom === 0 ? 0 : dot / denom
+}
+
+/** Load all nodes of a given type from IDB. */
+async function loadNodesByType(type: NodeType): Promise<any[]> {
+  const ids = await persistence.allNodeIds(type)
+  if (ids.length === 0) return []
+  return persistence.getNodes(ids)
+}
+
+/**
+ * Prune excess videos and orphan data from IndexedDB.
+ * The main thread must call flush() before invoking this so IDB is consistent
+ * with the in-memory graph. Returns the list of removed node IDs.
+ */
+async function handlePruneCache(): Promise<void> {
+  const removedIds: string[] = []
+
+  // 1. Load all video shapes sorted by insertOrder
+  const shapes = (await loadNodesByType('video_shape'))
+    .map((n: any) => ({ id: n.id, data: n.data }))
+    .sort((a: any, b: any) => (a.data.insertOrder ?? 0) - (b.data.insertOrder ?? 0))
+
+  const excess = shapes.length - MAX_VIDEOS
+  if (excess <= 0) {
+    self.postMessage({ type: 'pruneResult', removedIds })
+    return
+  }
+
+  const oldestShapes = shapes.slice(0, excess)
+  const oldestIdSet = new Set(oldestShapes.map((s: any) => s.id.replace('shp:', '')))
+  const videoUrls = oldestShapes.filter((s: any) => s.data.videoUrl).map((s: any) => s.data.videoUrl)
+
+  // 2. Find reaction events referencing the oldest shapes
+  const events = await loadNodesByType('event')
+  const reactionIds: string[] = []
+  for (const node of events) {
+    const kind = node.data.kind as number | undefined
+    if (kind && [7, 16, 9735, 1111].includes(kind)) {
+      const eTags = (node.data.eTags as string[]) ?? []
+      if (eTags.some((eid: string) => oldestIdSet.has(eid))) {
+        reactionIds.push(node.id)
+      }
+    }
+  }
+
+  // 3. Remove reaction events + oldest shapes from IDB
+  const toRemove = [...reactionIds, ...oldestShapes.map((s: any) => s.id)]
+  for (const id of toRemove) {
+    await persistence.deleteNode(id)
+    removedIds.push(id)
+  }
+
+  // 4. Remove stale rejection nodes (>30 days)
+  const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
+  const rejections = await loadNodesByType('rejection')
+  for (const node of rejections) {
+    const checkedAt = node.data.checkedAt as number | undefined
+    if (checkedAt !== undefined && checkedAt < oldThreshold) {
+      await persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  // 5. Remove orphan media nodes
+  const urlSet = new Set(videoUrls)
+  const mediaNodes = await loadNodesByType('media')
+  for (const node of mediaNodes) {
+    if (urlSet.has(node.id)) {
+      await persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  // 6. Remove orphan profiles
+  const remainingPubkeys = new Set<string>()
+  for (const s of shapes) {
+    if (s.data.pubkey) remainingPubkeys.add(s.data.pubkey)
+  }
+  for (const node of events) {
+    if (node.data.pubkey) remainingPubkeys.add(node.data.pubkey)
+  }
+  const profiles = await loadNodesByType('profile')
+  for (const node of profiles) {
+    if (!remainingPubkeys.has(node.data.pubkey as string)) {
+      await persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  // 7. Remove orphan reaction events (no remaining shape)
+  const remainingShapeIds = new Set(shapes.map((s: any) => s.id))
+  for (const node of events) {
+    const kind = node.data.kind as number | undefined
+    if (kind && [7, 16, 9735, 1111].includes(kind)) {
+      const eTags = (node.data.eTags as string[]) ?? []
+      if (eTags.length && !eTags.some((eid: string) => remainingShapeIds.has(`shp:${eid}`))) {
+        await persistence.deleteNode(node.id)
+        removedIds.push(node.id)
+      }
+    }
+  }
+
+  // 8. Cap total event nodes
+  const allEventIds = await persistence.allNodeIds('event')
+  if (allEventIds.length > MAX_EVENT_NODES) {
+    const eventNodes = await persistence.getNodes(allEventIds)
+    const excessEvents = eventNodes
+      .sort((a: any, b: any) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0))
+      .slice(0, allEventIds.length - MAX_EVENT_NODES)
+    for (const node of excessEvents) {
+      await persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  self.postMessage({ type: 'pruneResult', removedIds })
+}
+
+async function handleVectorSearch(msg: { queryVec: number[]; topK: number; threshold: number; searchId: string }): Promise<void> {
+  const vectors = await persistence.getAllVectors()
+  const results: Array<{ id: string; score: number }> = []
+  for (const { id, vector } of vectors) {
+    const score = cosineSimilarity(msg.queryVec, vector)
+    if (score >= msg.threshold) results.push({ id, score })
+  }
+  results.sort((a, b) => b.score - a.score)
+  const top = results.slice(0, msg.topK)
+  self.postMessage({ type: 'vectorSearchResult', searchId: msg.searchId, results: top })
+}
+
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
@@ -445,6 +586,12 @@ self.onmessage = (e: MessageEvent) => {
       subs.clear()
       searchedIdsAborted.clear()
       pool.close([])
+      break
+    case 'pruneCache':
+      void handlePruneCache()
+      break
+    case 'vectorSearch':
+      void handleVectorSearch(msg)
       break
   }
 }
