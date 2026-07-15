@@ -77,6 +77,21 @@ function cancelProfileFetch(pubkey: string) {
   }
 }
 
+/** Tear down the module-level profile batch state. Closes any in-flight
+ *  nostr subscription, clears the pending set, and stops the timer.
+ *  Call on logout / teardown. */
+export function resetProfileBatch(): void {
+  if (batchUnsub) {
+    batchUnsub()
+    batchUnsub = null
+  }
+  pendingPubkeys.clear()
+  if (batchTimer) {
+    clearTimeout(batchTimer)
+    batchTimer = null
+  }
+}
+
 // React hook to fetch creator profile reactively from Dexie cache
 // Pass refreshKey to force a re-fetch even when the profile is cached.
 export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile => {

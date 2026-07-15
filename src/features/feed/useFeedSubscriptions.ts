@@ -46,6 +46,8 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     if (initialBackfillsFiredRef.current) return
 
     let cancelled = false
+    let unsub: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     async function bootstrapMetadata() {
       const cached = await Promise.all([
@@ -63,15 +65,19 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
         'wss://relay.snort.social',
       ]
       console.log(`[VideoFeed] Fetching user metadata for ${sessionPubkey} over bootstrap relays`)
-      const unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [sessionPubkey], limit: 3 })
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(() => resolve(), 1500)
-        return () => { clearTimeout(timer); unsub() }
-      })
+      timer = setTimeout(() => {
+        unsub?.()
+        unsub = undefined
+      }, 1500)
+      unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [sessionPubkey], limit: 3 })
     }
 
     void bootstrapMetadata()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      unsub?.()
+    }
   }, [sessionPubkey])
 
   // Backfill: follow + user-video + general cache (once per session)

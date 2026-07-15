@@ -205,6 +205,17 @@ export const ProfilePage: React.FC = () => {
     setListView(null)
   }, [targetPubkey])
 
+  // Clear the refresh-state timer on unmount so it can't fire setState
+  // after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+        refreshTimerRef.current = undefined
+      }
+    }
+  }, [])
+
   // Fetch creator profile details
   const profile = useProfile(targetPubkey || '', refreshKey)
   const displayName = profile.displayName || profile.name || 'Nostr User'
@@ -367,6 +378,7 @@ export const ProfilePage: React.FC = () => {
     const pubkeys = listView === 'followers' ? followerPubkeys : followingPubkeys
     const realPubkeys = pubkeys.filter((pk: string) => !pk.startsWith('mock-'))
     if (!realPubkeys.length) return
+    let cancelled = false
     let unsub: (() => void) | undefined
 
     const checkCache = async () => {
@@ -378,6 +390,7 @@ export const ProfilePage: React.FC = () => {
       return uncached
     }
     checkCache().then(uncachedPubkeys => {
+      if (cancelled) return
       if (!uncachedPubkeys.length) return
       unsub = subscribeToRelays(relayUrls, {
         kinds: [0],
@@ -386,7 +399,10 @@ export const ProfilePage: React.FC = () => {
       })
     })
 
-    return () => { unsub?.() }
+    return () => {
+      cancelled = true
+      unsub?.()
+    }
   }, [listView, followerPubkeys, followingPubkeys, relayUrls])
 
   const handleEditProfile = () => {

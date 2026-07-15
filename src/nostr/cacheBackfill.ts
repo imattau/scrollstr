@@ -1,4 +1,4 @@
-import { backfillWorker } from './pool'
+import { getBackfillWorker } from './pool'
 import { db } from './cache'
 
 type BackfillCompleteEvent =
@@ -22,6 +22,8 @@ interface BackfillConfig {
   logName: string
 }
 
+const activeBackfillListeners = new Set<(e: MessageEvent) => void>()
+
 function createBackfillRunner(config: BackfillConfig) {
   function start(message: Record<string, any>): void {
     if (config.flag.current) {
@@ -33,12 +35,14 @@ function createBackfillRunner(config: BackfillConfig) {
     const handleComplete = (e: MessageEvent) => {
       if (e.data.type === config.completeType) {
         config.flag.current = false
-        backfillWorker.removeEventListener('message', handleComplete)
+        getBackfillWorker().removeEventListener('message', handleComplete)
+        activeBackfillListeners.delete(handleComplete)
       }
     }
-    backfillWorker.addEventListener('message', handleComplete)
+    activeBackfillListeners.add(handleComplete)
+    getBackfillWorker().addEventListener('message', handleComplete)
 
-    backfillWorker.postMessage({ type: config.startType, ...message })
+    getBackfillWorker().postMessage({ type: config.startType, ...message })
   }
 
   function maybeResume(message: Record<string, any>): void {
@@ -52,6 +56,17 @@ function createBackfillRunner(config: BackfillConfig) {
   }
 
   return { start, maybeResume, forceRestart }
+}
+
+/** Reset all backfill flags and remove orphaned worker message listeners. */
+export function resetBackfillState(): void {
+  for (const listener of activeBackfillListeners) {
+    getBackfillWorker().removeEventListener('message', listener)
+  }
+  activeBackfillListeners.clear()
+  for (const flag of Object.values(backfillFlags)) {
+    flag.current = false
+  }
 }
 
 const backfillFlags = {

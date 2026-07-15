@@ -137,6 +137,17 @@ export const DiscoverPage: React.FC = () => {
   const seenSearchIds = useRef(new Set<string>())
   const searchPageCount = useRef(0)
   const searchResultCache = useRef(new Map<string, { results: VideoItemData[]; cursor: number | undefined }>())
+
+  // Clear the refresh-state timer on unmount so it can't fire setState
+  // after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+        refreshTimerRef.current = undefined
+      }
+    }
+  }, [])
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 

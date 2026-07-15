@@ -29,6 +29,36 @@ const nip50Capable = new Set<string>()
 const nip50Checked = new Set<string>()
 const NIP11_CACHE_TTL = 6 * 60 * 60 * 1000 // 6 hours
 const nip11Cache = new Map<string, { expires: number }>()
+// Cap the NIP-11 / NIP-50 metadata caches so a large relay directory fetch
+// (thousands of URLs) can't accumulate stale entries indefinitely. The cap
+// is 4× MAX_DISCOVERED for headroom — entries beyond the cap are evicted in
+// LRU order (Map insertion order). Evicted relays simply re-fetch on demand
+// if they re-enter discoveredRelays later.
+const NIP_CACHE_MAX = MAX_DISCOVERED * 4
+
+function evictNipCaches(): void {
+  // Drop expired nip11Cache entries first (cheap opportunistic purge).
+  const now = Date.now()
+  for (const [url, entry] of nip11Cache) {
+    if (entry.expires <= now) {
+      nip11Cache.delete(url)
+      nip50Checked.delete(url)
+      nip50Capable.delete(url)
+    }
+  }
+  // Then enforce size cap on still-valid entries (LRU = Map insertion order).
+  while (nip11Cache.size > NIP_CACHE_MAX) {
+    const oldest = nip11Cache.keys().next().value
+    if (oldest === undefined) break
+    nip11Cache.delete(oldest)
+  }
+  // Cap nip50Checked separately (it may hold entries whose nip11 fetch failed).
+  while (nip50Checked.size > NIP_CACHE_MAX) {
+    const oldest = nip50Checked.keys().next().value
+    if (oldest === undefined) break
+    nip50Checked.delete(oldest)
+  }
+}
 
 async function checkNip50Support(relayUrl: string): Promise<boolean> {
   if (KNOWN_SEARCH_RELAYS.includes(relayUrl)) return true
@@ -45,12 +75,18 @@ async function checkNip50Support(relayUrl: string): Promise<boolean> {
     const doc: any = await res.json()
     const supportsNip50 = Array.isArray(doc?.supported_nips) && doc.supported_nips.includes(50)
     if (supportsNip50) nip50Capable.add(relayUrl)
+    // Refresh insertion order (LRU touch).
+    nip11Cache.delete(relayUrl)
     nip11Cache.set(relayUrl, { expires: Date.now() + NIP11_CACHE_TTL })
+    nip50Checked.delete(relayUrl)
     nip50Checked.add(relayUrl)
     return supportsNip50
   } catch {
+    nip50Checked.delete(relayUrl)
     nip50Checked.add(relayUrl)
     return false
+  } finally {
+    evictNipCaches()
   }
 }
 
@@ -63,6 +99,7 @@ export function addDiscoveredRelays(urls: string[]): void {
       const evicted = discoveredRelays.shift()!
       nip50Capable.delete(evicted)
       nip50Checked.delete(evicted)
+      nip11Cache.delete(evicted)
     }
     discoveredRelays.push(normalized)
     changed = true
@@ -70,6 +107,7 @@ export function addDiscoveredRelays(urls: string[]): void {
     checkNip50Support(normalized).catch(() => {})
   }
   if (changed) {
+    evictNipCaches()
     _onDiscoveredChange?.()
   }
 }

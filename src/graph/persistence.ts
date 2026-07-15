@@ -304,8 +304,22 @@ export class PolyPersistence {
     await idbTransaction(tx)
   }
 
-  async destroy(): Promise<void> {
+  /** Close the cached IDBDatabase connection (if any) without deleting data.
+   *  Safe to call when no connection is open. Subsequent operations will
+   *  re-open the connection lazily via `db()`. */
+  async close(): Promise<void> {
+    if (!this.dbPromise) return
+    try {
+      const database = await this.dbPromise
+      database.close()
+    } catch (err) {
+      console.warn('[PolyPersistence] close failed:', err)
+    }
     this.dbPromise = null
+  }
+
+  async destroy(): Promise<void> {
+    await this.close()
     indexedDB.deleteDatabase(DB_NAME)
   }
 }

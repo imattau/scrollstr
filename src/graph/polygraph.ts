@@ -250,16 +250,22 @@ export class PolyGraph {
   private touchHotCache(id: string): void {
     this.hotCacheOrder.delete(id)
     this.hotCacheOrder.set(id, true)
-    if (this.hotCacheOrder.size > HOT_CACHE_MAX) {
+    this.evictOldestIfOverCap()
+  }
+
+  /** Evict the least-recently-touched nodes from RAM until the hot cache is
+   *  at or below HOT_CACHE_MAX. Evicted nodes are NOT removed from
+   *  IndexedDB — they remain durable and can be restored via getNodeSafe(). */
+  private evictOldestIfOverCap(): void {
+    while (this.hotCacheOrder.size > HOT_CACHE_MAX) {
       const evict = this.hotCacheOrder.keys().next().value
-      if (evict !== undefined) {
-        this.hotCacheOrder.delete(evict)
-        this.cleanupNodeEdges(evict)
-        this.nodes.delete(evict)
-        this.vectors.remove(evict)
-        const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
-        if (evictRaw !== evict) this.vectors.remove(evictRaw)
-      }
+      if (evict === undefined) break
+      this.hotCacheOrder.delete(evict)
+      this.cleanupNodeEdges(evict)
+      this.nodes.delete(evict)
+      this.vectors.remove(evict)
+      const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
+      if (evictRaw !== evict) this.vectors.remove(evictRaw)
     }
   }
 
@@ -366,6 +372,12 @@ export class PolyGraph {
           updatedAt: sn.updatedAt,
         })
         this.allTypes.add(sn.type)
+        // Register in LRU order. We deliberately do NOT call touchHotCache
+        // per-node here, because mid-loop eviction would race with the
+        // vector-load step below and re-add vectors for evicted nodes.
+        // Eviction down to HOT_CACHE_MAX runs once after the vector load.
+        this.hotCacheOrder.delete(sn.id)
+        this.hotCacheOrder.set(sn.id, true)
       }
     }
 
@@ -373,6 +385,11 @@ export class PolyGraph {
     for (const { id, vector } of allVectors) {
       this.vectors.add(id, vector)
     }
+
+    // Now that vectors are loaded, evict any excess nodes down to the cap.
+    // Evicted nodes lose their in-memory vector via vectors.remove() (which
+    // is fine — they were just added; the IDB copy remains for getNodeSafe).
+    this.evictOldestIfOverCap()
 
     await this.rebuildEdgeIndex()
 
@@ -401,6 +418,18 @@ export class PolyGraph {
     this.vectors.clear()
     this.hotCacheOrder.clear()
     this.nodeToEdgeMap.clear()
+  }
+
+  /** Tear down long-lived resources: close the IndexedDB connection and
+   *  clear in-memory state. The singleton `graph` remains reusable after
+   *  this — re-`warm()` will re-open the DB. Call on logout. */
+  async dispose(): Promise<void> {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    this.clear()
+    await this.persistence.close()
   }
 
   get size(): number {

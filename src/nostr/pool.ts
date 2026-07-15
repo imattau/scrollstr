@@ -77,12 +77,68 @@ async function flushPendingIndexWrites(): Promise<void> {
 
 // ── Web Worker ───────────────────────────────────────────────────────────
 
-const worker = new Worker(
-  new URL('./backfill.worker.ts', import.meta.url),
-  { type: 'module' }
-)
+let worker: Worker | null = null
 
-export { worker as backfillWorker }
+function handleWorkerMessage(e: MessageEvent): void {
+  const msg = e.data
+  switch (msg.type) {
+    case 'backfillEvents': {
+      pushBackfillEvents((msg as any).events)
+      break
+    }
+    case 'subscriptionEvent': {
+      const event = (msg as any).event
+      pushSubscriptionEvent(event)
+      break
+    }
+    case 'backfillComplete':
+      break
+    case 'searchResults': {
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { console.log('[Pool] Search', msg.id, 'resolved with', msg.events?.length ?? 0, 'events'); cb.resolve(msg.events); searchCallbacks.delete(msg.id) }
+      break
+    }
+    case 'searchError': {
+      console.error('[Pool] Search', msg.id, 'failed:', msg.error)
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
+      break
+    }
+  }
+}
+
+function createBackfillWorker(): Worker {
+  const w = new Worker(
+    new URL('./backfill.worker.ts', import.meta.url),
+    { type: 'module' }
+  )
+  w.addEventListener('message', handleWorkerMessage)
+  return w
+}
+
+/** Returns the current backfill worker, creating one lazily if needed. */
+export function getBackfillWorker(): Worker {
+  let w = worker
+  if (!w) {
+    w = createBackfillWorker()
+    w.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+    worker = w
+  }
+  return w
+}
+
+/** Terminate and discard the current worker. Safe to call multiple times. */
+function terminateBackfillWorker(): void {
+  if (!worker) return
+  worker.postMessage({ type: 'cleanup' })
+  worker.removeEventListener('message', handleWorkerMessage)
+  worker.terminate()
+  worker = null
+}
+
+// Lazily initialize on module load so existing call sites that use the worker
+// before getBackfillWorker() is first called still work.
+worker = createBackfillWorker()
 
 // When new search-capable relays are discovered, update the worker's relay set
 setOnDiscoveredChange(() => syncSearchRelaysToWorker())
@@ -166,45 +222,19 @@ function pushSubscriptionEvent(event: any): void {
   }
 }
 
-worker.onmessage = (e: MessageEvent) => {
-  const msg = e.data
-  switch (msg.type) {
-    case 'backfillEvents': {
-      pushBackfillEvents((msg as any).events)
-      break
-    }
-    case 'subscriptionEvent': {
-      const event = (msg as any).event
-      pushSubscriptionEvent(event)
-      break
-    }
-    case 'backfillComplete':
-      break
-    case 'searchResults': {
-      const cb = searchCallbacks.get(msg.id)
-      if (cb) { console.log('[Pool] Search', msg.id, 'resolved with', msg.events?.length ?? 0, 'events'); cb.resolve(msg.events); searchCallbacks.delete(msg.id) }
-      break
-    }
-    case 'searchError': {
-      console.error('[Pool] Search', msg.id, 'failed:', msg.error)
-      const cb = searchCallbacks.get(msg.id)
-      if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
-      break
-    }
-  }
-}
+
 
 export const setActiveRelays = (urls: string[]) => {
   const base = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
   activeRelays = getSearchRelays(base)
-  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+  getBackfillWorker().postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
 }
 
 /** Re-sync the worker's relay set — call after new search-capable relays are discovered */
 export function syncSearchRelaysToWorker(): void {
   const base = activeRelays.length > 0 ? activeRelays : [...DEFAULT_RELAYS]
   activeRelays = getSearchRelays(base)
-  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+  getBackfillWorker().postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
 }
 
 // ── Mock events (seed cache with local preview data) ─────────────────────
@@ -329,7 +359,7 @@ function processQueue() {
     }
     subQueue.splice(bestIdx, 1)
     subMetadata.set(item.id, 'active')
-    worker.postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
+    getBackfillWorker().postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
   }
 }
 
@@ -366,14 +396,14 @@ export function subscribeToRelays(
     }
     if (subMetadata.get(id) === 'active') {
       subMetadata.delete(id)
-      worker.postMessage({ type: 'unsubscribe', id })
+      getBackfillWorker().postMessage({ type: 'unsubscribe', id })
       processQueue()
     }
   }
 
   if (subMetadata.size < MAX_CONCURRENT_SUBS) {
     subMetadata.set(id, 'active')
-    worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
+    getBackfillWorker().postMessage({ type: 'subscribe', id, relays, filters: filterList })
   } else if (subQueue.length < MAX_QUEUE_SIZE) {
     subMetadata.set(id, 'queued')
     subQueue.push({ id, relays, filters: filterList, priority })
@@ -442,7 +472,7 @@ export async function searchRelays(
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
     searchCallbacks.set(id, { resolve, reject, createdAt: Date.now() })
-    worker.postMessage({
+    getBackfillWorker().postMessage({
       type: 'search',
       id,
       relays: expandedRelays,
@@ -454,13 +484,13 @@ export async function searchRelays(
 
     if (options?.signal) {
       if (options.signal.aborted) {
-        worker.postMessage({ type: 'abortSearch', id })
+        getBackfillWorker().postMessage({ type: 'abortSearch', id })
         searchCallbacks.delete(id)
         reject(new DOMException('Aborted', 'AbortError'))
         return
       }
       options.signal.addEventListener('abort', () => {
-        worker.postMessage({ type: 'abortSearch', id })
+        getBackfillWorker().postMessage({ type: 'abortSearch', id })
         const cb = searchCallbacks.get(id)
         if (cb) {
           cb.reject(new DOMException('Aborted', 'AbortError'))
@@ -474,11 +504,12 @@ export async function searchRelays(
 /** Clean up all pool resources — call on logout / unmount */
 export function cleanupPool(): void {
   clearInterval(searchPurgeInterval)
-  worker.postMessage({ type: 'cleanup' })
+  terminateBackfillWorker()
   searchCallbacks.clear()
   pendingSubscriptionBatch = []
   pendingBackfillBatch = []
   backfillBuffer = []
+  subscriptionBatch = []
   if (backfillFlushTimer) {
     clearTimeout(backfillFlushTimer)
     backfillFlushTimer = null

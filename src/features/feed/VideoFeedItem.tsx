@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProfile } from '../../nostr/profile'
 import { Heart, MessageCircle, Repeat2, Zap, Volume2, VolumeX, Share2, EyeOff, AlertTriangle, SkipForward } from 'lucide-react'
@@ -125,6 +125,15 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current)
       longPressTimer.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current)
+        longPressTimer.current = null
+      }
     }
   }, [])
 

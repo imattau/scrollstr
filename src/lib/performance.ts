@@ -1,5 +1,7 @@
 const isDev = import.meta.env.DEV
 
+const observers: PerformanceObserver[] = []
+
 export function initPerformanceObserver(): void {
   if (!('PerformanceObserver' in window)) return
 
@@ -12,6 +14,7 @@ export function initPerformanceObserver(): void {
       }
     })
     lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true })
+    observers.push(lcpObserver)
   } catch {}
 
   try {
@@ -25,6 +28,7 @@ export function initPerformanceObserver(): void {
       }
     })
     clsObserver.observe({ type: 'layout-shift', buffered: true })
+    observers.push(clsObserver)
   } catch {}
 
   try {
@@ -36,7 +40,16 @@ export function initPerformanceObserver(): void {
       }
     })
     inpObserver.observe({ type: 'first-input', buffered: true })
+    observers.push(inpObserver)
   } catch {}
+}
+
+/** Disconnect all performance observers. Safe to call when none are active. */
+export function stopPerformanceObservers(): void {
+  for (const obs of observers) {
+    try { obs.disconnect() } catch {}
+  }
+  observers.length = 0
 }
 
 export function markVideoLoadStart(videoId: string): void {
