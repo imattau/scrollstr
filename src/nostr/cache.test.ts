@@ -220,7 +220,7 @@ describe('Nostr event cache — realistic scenarios', () => {
     expect(state!.watched).toBe(true)
 
     // Shape should also be updated
-    let shape = await db.videoShapes.get('vid-state') as any
+    const shape = await db.videoShapes.get('vid-state') as any
     expect(shape.userState?.liked).toBe(true)
     expect(shape.userState?.watched).toBe(true)
 

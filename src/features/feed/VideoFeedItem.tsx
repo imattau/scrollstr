@@ -256,15 +256,31 @@ const VideoFeedItemComponent: React.FC<VideoFeedItemProps> = ({ video, isActive,
 }
 
 export const VideoFeedItem = React.memo(VideoFeedItemComponent, (prevProps, nextProps) => {
-  return prevProps.video.id === nextProps.video.id &&
-    prevProps.video.likesCount === nextProps.video.likesCount &&
-    prevProps.video.commentsCount === nextProps.video.commentsCount &&
-    prevProps.video.boostsCount === nextProps.video.boostsCount &&
-    prevProps.video.zapsCount === nextProps.video.zapsCount &&
-    prevProps.video.hasLiked === nextProps.video.hasLiked &&
-    prevProps.video.hasBoosted === nextProps.video.hasBoosted &&
-    prevProps.video.hasZapped === nextProps.video.hasZapped &&
+  const pv = prevProps.video
+  const nv = nextProps.video
+  return pv.id === nv.id &&
+    pv.likesCount === nv.likesCount &&
+    pv.commentsCount === nv.commentsCount &&
+    pv.boostsCount === nv.boostsCount &&
+    pv.zapsCount === nv.zapsCount &&
+    pv.hasLiked === nv.hasLiked &&
+    pv.hasBoosted === nv.hasBoosted &&
+    pv.hasZapped === nv.hasZapped &&
+    pv.kind === nv.kind &&
+    pv.url === nv.url &&
+    pv.poster === nv.poster &&
+    pv.title === nv.title &&
+    pv.description === nv.description &&
+    pv.mediaStatus === nv.mediaStatus &&
+    pv.contentWarning === nv.contentWarning &&
+    pv.duration === nv.duration &&
+    pv.width === nv.width &&
+    pv.height === nv.height &&
+    pv.creator?.pubkey === nv.creator?.pubkey &&
+    pv.creator?.name === nv.creator?.name &&
+    pv.creator?.picture === nv.creator?.picture &&
     prevProps.isActive === nextProps.isActive &&
     prevProps.isMuted === nextProps.isMuted &&
-    prevProps.uiHidden === nextProps.uiHidden
+    prevProps.uiHidden === nextProps.uiHidden &&
+    prevProps.nsfwBlur === nextProps.nsfwBlur
 })

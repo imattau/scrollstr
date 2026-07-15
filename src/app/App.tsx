@@ -117,7 +117,7 @@ function AppContent() {
     } else {
       console.log(`Triggered guest action: ${actionType}`)
     }
-  }, [session, signEvent, activeVideoKind, isMuted])
+  }, [session, signEvent, activeVideoKind, isMuted, toast])
 
   // Sync ref after commit so pending post-login actions use the latest closure.
   useEffect(() => {

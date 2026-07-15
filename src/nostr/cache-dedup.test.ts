@@ -34,7 +34,7 @@ describe('Polygraph — many authors, many videos', () => {
       ['title', 'Alice Video'],
       ['imeta', `url ${url}`, 'm video/mp4'],
     ]))
-    let shape = await db.videoShapes.get('vid-alice') as VideoShape | undefined
+    const shape = await db.videoShapes.get('vid-alice') as VideoShape | undefined
     expect(shape).toBeDefined()
     expect(shape!.videoUrl).toBe(url)
 

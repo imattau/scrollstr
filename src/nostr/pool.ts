@@ -407,15 +407,23 @@ let subIdCounter = 0
 const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
 // Periodically purge search callbacks older than 30s to prevent leaks
 const SEARCH_CALLBACK_TTL = 30000
-const searchPurgeInterval = setInterval(() => {
-  const now = Date.now()
-  for (const [id, cb] of searchCallbacks) {
-    if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
-      cb.reject(new Error('Search timed out'))
-      searchCallbacks.delete(id)
+let searchPurgeInterval: ReturnType<typeof setInterval> | null = null
+function ensureSearchPurgeInterval(): void {
+  if (searchPurgeInterval) return
+  searchPurgeInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [id, cb] of searchCallbacks) {
+      if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
+        cb.reject(new Error('Search timed out'))
+        searchCallbacks.delete(id)
+      }
     }
-  }
-}, SEARCH_CALLBACK_TTL)
+    if (searchCallbacks.size === 0) {
+      clearInterval(searchPurgeInterval!)
+      searchPurgeInterval = null
+    }
+  }, SEARCH_CALLBACK_TTL)
+}
 
 export function subscribeToRelays(
   relays: string[],
@@ -510,6 +518,7 @@ export async function searchRelays(
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
     searchCallbacks.set(id, { resolve, reject, createdAt: Date.now() })
+    ensureSearchPurgeInterval()
     getBackfillWorker().postMessage({
       type: 'search',
       id,
@@ -541,7 +550,8 @@ export async function searchRelays(
 
 /** Clean up all pool resources — call on logout / unmount */
 export function cleanupPool(): void {
-  clearInterval(searchPurgeInterval)
+  if (searchPurgeInterval) clearInterval(searchPurgeInterval)
+  searchPurgeInterval = null
   terminateBackfillWorker()
   searchCallbacks.clear()
   pendingSubscriptionBatch = []

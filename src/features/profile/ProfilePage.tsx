@@ -29,6 +29,9 @@ const CreatorList: React.FC<{
   const scrollRef = useRef<HTMLDivElement>(null)
   const data = useCreatorListData(pubkeys)
 
+  // TanStack Virtual exposes imperative methods that React Compiler cannot
+  // safely memoize; the hook remains correct and manages its own state.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: pubkeys.length,
     getScrollElement: () => scrollRef.current,

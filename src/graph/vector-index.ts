@@ -46,9 +46,15 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 export class VectorIndex {
   private vectors = new Map<string, number[]>()
+  private onChange?: (id: string) => void
+
+  constructor(onChange?: (id: string) => void) {
+    this.onChange = onChange
+  }
 
   add(id: string, vector: number[]): void {
     this.vectors.set(id, vector)
+    this.onChange?.(id)
   }
 
   remove(id: string): void {

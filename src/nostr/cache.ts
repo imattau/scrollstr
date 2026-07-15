@@ -418,6 +418,7 @@ export async function pruneCache(): Promise<void> {
     .slice(0, excess)
 
   const oldestIds = oldestShapes.map(s => s.id)
+  const oldestIdSet = new Set(oldestIds)
   const videoUrls = oldestShapes.filter(s => s.videoUrl).map(s => s.videoUrl!)
 
   const reactionIds: string[] = []
@@ -426,7 +427,7 @@ export async function pruneCache(): Promise<void> {
     const kind = data.kind as number | undefined
     if (kind && [7, 16, 9735, 1111].includes(kind)) {
       const eTags = data.eTags as string[] | undefined
-      if (eTags?.some(eid => oldestIds.includes(eid))) {
+      if (eTags?.some(eid => oldestIdSet.has(eid))) {
         reactionIds.push(node.id)
       }
     }
@@ -1162,6 +1163,7 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
       hashtags: event.tags?.filter((t: any) => t[0] === 't').map((t: any) => t[1]) ?? [],
     })
     graph.vectors.add(id, vec)
+    graph.markVectorDirty(id)
 
     if (isVideo) {
       await buildOrUpdateVideoShape(event)
@@ -1222,9 +1224,18 @@ export async function mergeCountersIntoShape(shape: VideoShape): Promise<VideoSh
 
 export async function mergeCountersIntoShapes(shapes: VideoShape[]): Promise<VideoShape[]> {
   if (shapes.length === 0) return shapes
-  const counters = await Promise.all(shapes.map(s => db.videoCounters.get(s.id)))
-  return shapes.map((shape, i) => {
-    const c = counters[i]
+  // Batch: query all counters in a single whereType scan instead of N individual lookups.
+  const shapeIdSet = new Set(shapes.map(s => s.id))
+  const counterNodes = graph.whereType('counter')
+  const counterMap = new Map<string, VideoCountersRecord>()
+  for (const node of counterNodes) {
+    const c = node.data as unknown as VideoCountersRecord
+    if (shapeIdSet.has(c.id)) {
+      counterMap.set(c.id, c)
+    }
+  }
+  return shapes.map((shape) => {
+    const c = counterMap.get(shape.id)
     if (!c) return shape
     return {
       ...shape,

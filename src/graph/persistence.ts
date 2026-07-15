@@ -301,6 +301,15 @@ export class PolyPersistence {
     await idbTransaction(tx)
   }
 
+  async bulkDeleteEdges(ids: string[]): Promise<void> {
+    if (ids.length === 0) return
+    const database = await this.db()
+    const tx = database.transaction('edges', 'readwrite')
+    const store = tx.objectStore('edges')
+    for (const id of ids) store.delete(id)
+    await idbTransaction(tx)
+  }
+
   async countEdges(type?: EdgeType): Promise<number> {
     const database = await this.db()
     const tx = database.transaction('edges')

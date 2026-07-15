@@ -187,7 +187,7 @@ export const DiscoverPage: React.FC = () => {
   // into the search relay pool for future queries.
   // Use created_at index with a hard limit so we don't load every cached
   // event into memory on every liveQuery re-fire.
-  const rawRelayListEvents = useLiveQuery(
+  const rawRelayListEvents = useGraphQuery(
     () => {
       if (!graph) return []
       return graph.whereType('event')
@@ -196,7 +196,9 @@ export const DiscoverPage: React.FC = () => {
         .slice(0, 200)
         .map(n => n.data)
     },
-    []
+    [],
+    200,
+    ['event'],
   )
   const relayListEvents = useMemo(() => {
     if (!rawRelayListEvents) return []
@@ -243,19 +245,21 @@ export const DiscoverPage: React.FC = () => {
 
   // Query video shapes from the Dexie cache — bounded to avoid loading
   // thousands of cached shapes into memory on every liveQuery re-fire.
-  const rawVideoShapes = useLiveQuery(
+  const rawVideoShapes = useGraphQuery(
     () => {
       if (!graph) return []
       return graph.recentBy('insertOrder', 1000, 'video_shape')
         .map(n => n.data as unknown as VideoShape)
         .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
     },
-    []
+    [],
+    200,
+    ['video_shape'],
   ) ?? EMPTY_VIDEOS
 
   // Query recent video shapes (last 48 hours) — for trending creators.
   // Use created_at index with a hard limit so it stays memory-bounded.
-  const rawRecentVideoShapes = useLiveQuery(
+  const rawRecentVideoShapes = useGraphQuery(
     () => {
       if (!graph) return []
       return graph.whereFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 48 * 3600 }, 'video_shape')
@@ -264,7 +268,9 @@ export const DiscoverPage: React.FC = () => {
         .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
         .slice(0, 500)
     },
-    []
+    [],
+    200,
+    ['video_shape'],
   ) ?? EMPTY_VIDEOS
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
@@ -296,7 +302,7 @@ export const DiscoverPage: React.FC = () => {
   }, [rawVideoShapes, mutedPubkeys])
 
   // Load author profiles into a lookup map for richer search
-  const _authorProfileMap = useLiveQuery(
+  const _authorProfileMap = useGraphQuery(
     () => {
       if (!graph) return {}
       const map: Record<string, { name: string; displayName?: string; nip05?: string }> = {}
@@ -307,7 +313,9 @@ export const DiscoverPage: React.FC = () => {
       }
       return map
     },
-    []
+    [],
+    200,
+    ['profile'],
   )
   const authorProfileMap = useMemo(() => _authorProfileMap ?? {}, [_authorProfileMap])
 
@@ -512,23 +520,22 @@ export const DiscoverPage: React.FC = () => {
     }))
   }, [videos, authorProfileMap])
 
+  const fuse = useMemo(() => new Fuse(searchCorpus, {
+    keys: [
+      { name: 'title', weight: 0.3 },
+      { name: 'description', weight: 0.2 },
+      { name: 'hashtags', weight: 0.4 },
+      { name: 'creator.name', weight: 0.5 },
+      { name: 'creator.pubkey', weight: 0.1 },
+      { name: 'displayName', weight: 0.5 },
+      { name: 'nip05', weight: 0.1 },
+    ],
+    threshold: 0.4,
+  }), [searchCorpus])
   const filteredVideos = useMemo(() => {
-    if (!debouncedSearch.trim()) return []
-    if (searchCorpus.length === 0) return []
-    const fuse = new Fuse(searchCorpus, {
-      keys: [
-        { name: 'title', weight: 0.3 },
-        { name: 'description', weight: 0.2 },
-        { name: 'hashtags', weight: 0.4 },
-        { name: 'creator.name', weight: 0.5 },
-        { name: 'creator.pubkey', weight: 0.1 },
-        { name: 'displayName', weight: 0.5 },
-        { name: 'nip05', weight: 0.1 },
-      ],
-      threshold: 0.4,
-    })
+    if (!debouncedSearch.trim() || searchCorpus.length === 0) return []
     return fuse.search(debouncedSearch).map(r => r.item)
-  }, [debouncedSearch, searchCorpus])
+  }, [debouncedSearch, fuse, searchCorpus.length])
 
   // Merge relay results (first) with local Fuse results, dedup by id
   const combinedResults = useMemo(() => {
@@ -626,7 +633,7 @@ export const DiscoverPage: React.FC = () => {
       console.error('Follow toggle failed:', err)
       toast('Failed to update follow status', 'error')
     }
-  }, [session, signEvent, myContactListEvent])
+  }, [session, signEvent, myContactListEvent, toast])
 
   return (
     <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">

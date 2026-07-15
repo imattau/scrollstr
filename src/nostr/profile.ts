@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { useUserRelayUrls } from './relays'
-import { graph, useLiveQuery } from '../graph'
+import { graph, useGraphQuery } from '../graph'
 import type { CreatorProfile } from '../features/feed/VideoFeedItem'
 
 // Parse metadata JSON content from kind:0 event
@@ -101,14 +101,15 @@ export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile 
   const pubkeyRef = useRef(pubkey)
   useEffect(() => { pubkeyRef.current = pubkey }, [pubkey])
 
-  const cachedProfile = useLiveQuery(
+  const cachedProfile = useGraphQuery(
     () => {
       if (!pubkey) return null
       const node = graph.getNode(`pro:${pubkey}`)
       return node?.data as CreatorProfile | undefined
     },
     [pubkey, refreshKey],
-    undefined as CreatorProfile | undefined,
+    200,
+    ['profile'],
   )
 
   useEffect(() => {

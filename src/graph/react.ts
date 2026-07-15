@@ -30,7 +30,10 @@ export function useGraphQuery<T>(
   const mountedRef = useRef(true)
   const isFirstRef = useRef(true)
   const nodeTypesRef = useRef(nodeTypes)
-  nodeTypesRef.current = nodeTypes
+
+  useEffect(() => {
+    nodeTypesRef.current = nodeTypes
+  }, [nodeTypes])
 
   const runQuery = useCallback(() => {
     try {
@@ -58,7 +61,9 @@ export function useGraphQuery<T>(
       console.error('[Graph] Query error:', err)
       if (mountedRef.current) setResult(undefined)
     }
-  }, deps) // eslint-disable-line react-hooks/exhaustive-deps
+  // This hook intentionally accepts a caller-provided dependency list.
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/use-memo
+  }, deps)
 
   useEffect(() => {
     mountedRef.current = true

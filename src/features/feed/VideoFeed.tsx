@@ -261,7 +261,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       nsfw: !!(settingsRef.current.nsfwBlur && (v.contentWarning || settingsRef.current.nsfwPubkeys?.includes(v.creator.pubkey))),
       customData: v,
     })),
-    [videos, settingsRef.current.nsfwBlur, settingsRef.current.nsfwPubkeys]
+    [videos]
   )
 
   if (videos.length === 0) {

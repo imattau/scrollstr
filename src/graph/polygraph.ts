@@ -21,7 +21,7 @@ export class PolyGraph {
   private edges: EdgeIndex = new Map()
   private allTypes = new Set<NodeType>()
 
-  readonly vectors = new VectorIndex()
+  readonly vectors: VectorIndex
   readonly persistence = new PolyPersistence()
   readonly changes = new Subject<GraphChangeEvent>()
 
@@ -31,12 +31,16 @@ export class PolyGraph {
 
   // ── In-memory secondary indexes (maintained on addNode / removeNode / eviction) ──
 
+  /** type → Set<nodeId> for O(1) lookups of all nodes of a given type. */
+  private _byType = new Map<NodeType, Set<string>>()
   /** pubkey → Set<nodeId> for O(1) lookups of all nodes owned by a pubkey. */
   private _byPubkey = new Map<string, Set<string>>()
   /** Composite key `${kind}:${pubkey}` → node id. Uses most-recent-wins for
    *  replaceable events (kept current by putReplaceable); for non-replaceable
    *  events the first stored entry wins. */
   private _byKindPubkey = new Map<string, string>()
+  /** replaceableKey -> in-memory node IDs for O(1) replacement lookup. */
+  private _byReplaceableKey = new Map<string, Set<string>>()
   /** tag (lowercase) → Set<nodeId> for O(1) hashtag → shape lookups. */
   private byHashtag = new Map<string, Set<string>>()
   /** Target event id → Set<source event id> for #e tag lookups (maintained
@@ -46,8 +50,18 @@ export class PolyGraph {
   // ── Dirty tracking for auto-persist ──
 
   private dirtyNodes = new Set<string>()
+  private dirtyEdges = new Set<string>()
+  private dirtyVectors = new Set<string>()
+  private removedEdgeIds = new Set<string>()
   private removedNodeIds = new Set<string>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
+
+  constructor() {
+    this.vectors = new VectorIndex((id) => {
+      this.dirtyVectors.add(id)
+      this.schedulePersist()
+    })
+  }
 
   private markDirty(id: string): void {
     if (!this.removedNodeIds.has(id)) this.dirtyNodes.add(id)
@@ -94,28 +108,46 @@ export class PolyGraph {
       await this.persistence.bulkPutNodes(nodesToSave)
     }
 
-    // Write all edges (small, full-sync is cheap)
-    const allEdges: SerializedEdge[] = []
-    for (const [source, edgeList] of this.edges) {
-      for (const e of edgeList) {
-        allEdges.push({
-          id: edgeId(source, e.type, e.target),
+    // Write only dirty edges (previously wrote all edges every 2s)
+    const dirtyEdgeList: SerializedEdge[] = []
+    for (const edgeIdStr of this.dirtyEdges) {
+      const parts = edgeIdStr.split('::')
+      if (parts.length < 3) continue
+      const [source, type, ...rest] = parts
+      const target = rest.join('::')
+      const edges = this.edges.get(source)
+      const edge = edges?.find(e => e.type === type && e.target === target)
+      if (edge) {
+        dirtyEdgeList.push({
+          id: edgeIdStr,
           source,
-          target: e.target,
-          type: e.type,
-          data: e.data ?? null,
+          target: edge.target,
+          type: edge.type,
+          data: edge.data ?? null,
           createdAt: Date.now(),
         })
       }
     }
-    await this.persistence.bulkPutEdges(allEdges)
+    await this.persistence.bulkPutEdges(dirtyEdgeList)
+    this.dirtyEdges.clear()
 
-    // Write all vectors (IDs may differ from node IDs)
-    for (const [id, vec] of this.vectors.entries()) {
-      await this.persistence.putVector(id, vec)
+    if (this.removedEdgeIds.size > 0) {
+      const removedEdges = [...this.removedEdgeIds]
+      await this.persistence.bulkDeleteEdges(removedEdges)
+      this.removedEdgeIds.clear()
     }
 
+    // Write only changed vectors (IDs may differ from node IDs) in one
+    // transaction to avoid one IndexedDB transaction per vector.
+    const dirtyVectorEntries: Array<{ id: string; vector: number[] }> = []
+    for (const id of this.dirtyVectors) {
+      const vector = this.vectors.get(id)
+      if (vector) dirtyVectorEntries.push({ id, vector })
+    }
+    await this.persistence.bulkPutVectors(dirtyVectorEntries)
+
     this.dirtyNodes.clear()
+    this.dirtyVectors.clear()
   }
 
   // ── Node CRUD ──
@@ -135,6 +167,9 @@ export class PolyGraph {
     const pubkey = data.pubkey as string | undefined
     const id = node.id
 
+    if (!this._byType.has(node.type)) this._byType.set(node.type, new Set())
+    this._byType.get(node.type)!.add(id)
+
     if (pubkey) {
       if (!this._byPubkey.has(pubkey)) this._byPubkey.set(pubkey, new Set())
       this._byPubkey.get(pubkey)!.add(id)
@@ -148,6 +183,12 @@ export class PolyGraph {
         }
       }
     }
+
+    const replaceableKey = data.replaceableKey as string | undefined
+    if (replaceableKey) {
+      if (!this._byReplaceableKey.has(replaceableKey)) this._byReplaceableKey.set(replaceableKey, new Set())
+      this._byReplaceableKey.get(replaceableKey)!.add(id)
+    }
   }
 
   private unindexNode(id: string): void {
@@ -156,6 +197,12 @@ export class PolyGraph {
     const data = node.data as Record<string, unknown>
     const kind = data.kind as number | undefined
     const pubkey = data.pubkey as string | undefined
+
+    const typeSet = this._byType.get(node.type)
+    if (typeSet) {
+      typeSet.delete(id)
+      if (typeSet.size === 0) this._byType.delete(node.type)
+    }
 
     if (pubkey) {
       const set = this._byPubkey.get(pubkey)
@@ -167,6 +214,13 @@ export class PolyGraph {
         const key = `${kind}:${pubkey}`
         if (this._byKindPubkey.get(key) === id) this._byKindPubkey.delete(key)
       }
+    }
+
+    const replaceableKey = data.replaceableKey as string | undefined
+    if (replaceableKey) {
+      const ids = this._byReplaceableKey.get(replaceableKey)
+      ids?.delete(id)
+      if (ids?.size === 0) this._byReplaceableKey.delete(replaceableKey)
     }
   }
 
@@ -186,9 +240,9 @@ export class PolyGraph {
 
     // 1. Check in-memory hot cache for an older version with the same key.
     const nodeCreatedAt = (node.data.created_at as number) ?? 0
-    const existingByKey = [...this.nodes.values()].filter(
-      n => (n.data.replaceableKey as string) === replaceableKey,
-    )
+    const existingByKey = [...(this._byReplaceableKey.get(replaceableKey) ?? [])]
+      .map(id => this.nodes.get(id))
+      .filter((n): n is PolyNode => !!n)
     for (const existing of existingByKey) {
       if (existing.id === node.id) continue
       const existingCreatedAt = (existing.data.created_at as number) ?? 0
@@ -220,6 +274,7 @@ export class PolyGraph {
       Object.assign(existing.data, node.data)
       existing.updatedAt = node.updatedAt
       existing.vector = node.vector
+      if (node.vector) this.markVectorDirty(node.id)
       this.touchHotCache(node.id)
       this.markDirty(node.id)
       this.changes.next({ type: 'node_updated', nodeId: node.id, nodeType: node.type })
@@ -281,8 +336,12 @@ export class PolyGraph {
     this.unindexNode(id)
     this.nodes.delete(id)
     this.vectors.remove(id)
+    this.dirtyVectors.delete(id)
     const rawId = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
-    if (rawId !== id) this.vectors.remove(rawId)
+    if (rawId !== id) {
+      this.vectors.remove(rawId)
+      this.dirtyVectors.delete(rawId)
+    }
 
     this.dirtyNodes.delete(id)
     this.removedNodeIds.add(id)
@@ -323,8 +382,15 @@ export class PolyGraph {
     edges.push({ target, type, data: fullData })
     if (!this.nodeToEdgeMap.has(target)) this.nodeToEdgeMap.set(target, new Set())
     this.nodeToEdgeMap.get(target)!.add(source)
+    this.dirtyEdges.add(id)
     this.schedulePersist()
     this.changes.next({ type: 'edge_added', edgeId: id, edgeType: type, source, target })
+  }
+
+  /** Mark a vector added through the public VectorIndex as needing persistence. */
+  markVectorDirty(id: string): void {
+    if (this.vectors.has(id)) this.dirtyVectors.add(id)
+    this.schedulePersist()
   }
 
   getEdges(source: string, type?: EdgeType): Array<{ target: string; type: EdgeType; data?: Record<string, unknown> }> {
@@ -359,6 +425,8 @@ export class PolyGraph {
     )
     for (const e of removed) {
       this.nodeToEdgeMap.get(e.target)?.delete(source)
+      this.dirtyEdges.delete(edgeId(source, e.type, e.target))
+      this.removedEdgeIds.add(edgeId(source, e.type, e.target))
       this.changes.next({ type: 'edge_removed', edgeType: e.type, source, target: e.target })
     }
     if (this.edges.get(source)?.length === 0) this.edges.delete(source)
@@ -391,8 +459,10 @@ export class PolyGraph {
       this.unindexNode(evict)
       this.nodes.delete(evict)
       this.vectors.remove(evict)
+      this.dirtyVectors.delete(evict)
       const evictRaw = evict.includes(':') ? evict.slice(evict.indexOf(':') + 1) : evict
       if (evictRaw !== evict) this.vectors.remove(evictRaw)
+      if (evictRaw !== evict) this.dirtyVectors.delete(evictRaw)
     }
   }
 
@@ -501,6 +571,7 @@ export class PolyGraph {
           updatedAt: sn.updatedAt,
         })
         this.allTypes.add(sn.type)
+        this.indexNode(this.nodes.get(sn.id)!)
         // Register in LRU order. We deliberately do NOT call touchHotCache
         // per-node here, because mid-loop eviction would race with the
         // vector-load step below and re-add vectors for evicted nodes.
@@ -522,7 +593,11 @@ export class PolyGraph {
 
     await this.rebuildEdgeIndex()
 
-    this.changes.next({ type: 'node_added' })
+    // Emit per-type change events so useGraphQuery nodeTypes filters work
+    // properly during warm-up instead of a single generic event.
+    for (const nodeType of this.allTypes) {
+      this.changes.next({ type: 'node_added', nodeType })
+    }
   }
 
   // ── Pruning ──
@@ -547,10 +622,17 @@ export class PolyGraph {
     this.vectors.clear()
     this.hotCacheOrder.clear()
     this.nodeToEdgeMap.clear()
+    this._byType.clear()
     this._byPubkey.clear()
     this._byKindPubkey.clear()
+    this._byReplaceableKey.clear()
     this.byHashtag.clear()
     this._byETag.clear()
+    this.dirtyEdges.clear()
+    this.dirtyVectors.clear()
+    this.dirtyNodes.clear()
+    this.removedNodeIds.clear()
+    this.removedEdgeIds.clear()
   }
 
   /** Tear down long-lived resources: close the IndexedDB connection and
@@ -567,20 +649,28 @@ export class PolyGraph {
 
   // ── Public Query API ────────────────────────────────────────────
 
-  /** Return all nodes of the given type (linear scan, O(n)). */
+  /** Return all nodes of the given type (O(1) via _byType index). */
   whereType(type: NodeType): PolyNode[] {
+    const ids = this._byType.get(type)
+    if (!ids) return []
     const results: PolyNode[] = []
-    for (const node of this.nodes.values()) {
-      if (node.type === type) results.push(node)
+    for (const id of ids) {
+      const node = this.nodes.get(id)
+      if (node) results.push(node)
     }
     return results
   }
 
-  /** Return all nodes whose data field is in the given range. Falls back to
-   *  linear scan filtered by `type` when provided. */
+  /** Return all nodes whose data field is in the given range. Uses _byType
+   *  index when `type` is provided (O(n) over the type subset), otherwise
+   *  scans all nodes. */
   whereFieldRange(field: string, range: { above?: number; below?: number }, type?: NodeType): PolyNode[] {
     const results: PolyNode[] = []
-    for (const node of this.nodes.values()) {
+    const candidates = type ? this._byType.get(type) : null
+    const source = candidates
+      ? [...candidates].map(id => this.nodes.get(id)).filter(Boolean) as PolyNode[]
+      : [...this.nodes.values()]
+    for (const node of source) {
       if (type && node.type !== type) continue
       const val = (node.data as Record<string, unknown>)[field] as number | undefined
       if (val === undefined) continue
@@ -591,10 +681,15 @@ export class PolyGraph {
     return results
   }
 
-  /** Count nodes matching a field range, optionally filtered by type. */
+  /** Count nodes matching a field range, optionally filtered by type (uses
+   *  _byType index when type is provided). */
   countByFieldRange(field: string, range: { above?: number; below?: number }, type?: NodeType): number {
     let count = 0
-    for (const node of this.nodes.values()) {
+    const candidates = type ? this._byType.get(type) : null
+    const source = candidates
+      ? [...candidates].map(id => this.nodes.get(id)).filter(Boolean) as PolyNode[]
+      : [...this.nodes.values()]
+    for (const node of source) {
       if (type && node.type !== type) continue
       const val = (node.data as Record<string, unknown>)[field] as number | undefined
       if (val === undefined) continue
@@ -605,11 +700,15 @@ export class PolyGraph {
     return count
   }
 
-  /** Return the N most-recently-inserted nodes, optionally filtered by type.
-   *  Sorts by `insertOrder` or `created_at` descending. */
+  /** Return the N most-recently-inserted nodes, optionally filtered by type
+   *  (uses _byType index when type is provided). */
   recentBy(field: 'insertOrder' | 'created_at', limit: number, type?: NodeType): PolyNode[] {
     const candidates: PolyNode[] = []
-    for (const node of this.nodes.values()) {
+    const source = type ? this._byType.get(type) : null
+    const nodes = source
+      ? [...source].map(id => this.nodes.get(id)).filter(Boolean) as PolyNode[]
+      : [...this.nodes.values()]
+    for (const node of nodes) {
       if (type && node.type !== type) continue
       if ((node.data[field] as number | undefined) !== undefined) {
         candidates.push(node)
