@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { VideoItemData } from './VideoFeedItem'
+import { markVideosSeen, getSeenVideoIds } from '../../nostr/cache'
+
+const FEED_STATE_KEY = 'scrollstr-feed-state'
+const SEEN_FLUSH_INTERVAL_MS = 5000
 
 interface UseFeedPositionInput {
   initialVideoId: string | null
@@ -80,14 +84,16 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     }
   }, [initialVideoId, videos])
 
-  // Save feed position to sessionStorage on slide change (skip when deep link is active)
+  // Save feed position to localStorage on slide change (skip when deep link
+  // is active). localStorage rather than sessionStorage so this survives a
+  // real app restart, not just tab lifetime.
   const currentVideoId = videos[activeIndex]?.id
   const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => {
     if (!currentVideoId || initialVideoId) return
     clearTimeout(feedStateTimer.current)
     feedStateTimer.current = setTimeout(() => {
-      sessionStorage.setItem('scrollstr-feed-state', JSON.stringify({
+      localStorage.setItem(FEED_STATE_KEY, JSON.stringify({
         videoId: currentVideoId,
         feedType,
         filterTag,
@@ -95,6 +101,53 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     }, 1000)
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
+
+  // ── "Seen" tracking ──
+  // Mark videos as seen once they become active, batched and flushed
+  // periodically (not per-video) so scrolling doesn't hammer the cache with
+  // writes. Used below as a fallback resume position when the exact saved
+  // video is no longer in the loaded window (pruned, or content changed).
+  const pendingSeenRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    const video = videos[activeIndex]
+    if (video) pendingSeenRef.current.add(video.id)
+  }, [activeIndex, videos])
+
+  useEffect(() => {
+    const flush = () => {
+      if (pendingSeenRef.current.size === 0) return
+      const ids = [...pendingSeenRef.current]
+      pendingSeenRef.current.clear()
+      void markVideosSeen(ids)
+    }
+    const interval = setInterval(flush, SEEN_FLUSH_INTERVAL_MS)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [])
+
+  // Look up which of the currently-loaded videos are already seen, for the
+  // fallback resume position below. Re-fetched whenever the loaded window
+  // or feed identity changes.
+  const [seenIds, setSeenIds] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (videos.length === 0) return
+    let cancelled = false
+    getSeenVideoIds(videos.map(v => v.id)).then((ids) => {
+      if (!cancelled) setSeenIds(ids)
+    })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos, feedType, filterTag])
 
   // Compute initial scroll target and scroll on mount
   const initialTargetIndex = useMemo(() => {
@@ -104,16 +157,22 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     }
     const saved = (() => {
       try {
-        const raw = sessionStorage.getItem('scrollstr-feed-state')
+        const raw = localStorage.getItem(FEED_STATE_KEY)
         return raw ? JSON.parse(raw) : null
       } catch { return null }
     })()
     if (saved?.videoId && saved.feedType === feedType && saved.filterTag === filterTag) {
       const idx = videos.findIndex(v => v.id === saved.videoId)
-      return idx >= 0 ? idx : null
+      if (idx >= 0) return idx
+    }
+    // Fallback: the exact saved video isn't in the loaded window anymore —
+    // resume at the first not-yet-seen video instead of starting from 0.
+    if (saved?.feedType === feedType && saved?.filterTag === filterTag && seenIds) {
+      const idx = videos.findIndex(v => !seenIds.has(v.id))
+      if (idx > 0) return idx
     }
     return null
-  }, [videos, initialVideoId, feedType, filterTag])
+  }, [videos, initialVideoId, feedType, filterTag, seenIds])
 
   // Scroll to initial target on mount (deep link or session restore)
   useEffect(() => {

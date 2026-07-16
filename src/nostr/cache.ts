@@ -836,6 +836,49 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
   }
 }
 
+/**
+ * Batched, lean "seen" write for feed resume tracking. Unlike
+ * updateUserVideoState this deliberately skips the videoShapes rewrite
+ * (no HAS_STATE edge, no video_shape node touch) — nothing needs to react
+ * to a video being marked seen, so there's no reason to emit a video_shape
+ * change event and trigger feed requeries for every scroll. Callers should
+ * accumulate ids client-side and flush this periodically, not per-video.
+ */
+export async function markVideosSeen(ids: Iterable<string>): Promise<void> {
+  const idList = [...new Set(ids)]
+  if (idList.length === 0) return
+  graph.startBatch()
+  try {
+    for (const id of idList) {
+      const existing = await db.userVideoState.get(id)
+      if (existing?.watched) continue
+      await db.userVideoState.put({
+        id,
+        watched: true,
+        skipped: existing?.skipped,
+        liked: existing?.liked,
+        boosted: existing?.boosted,
+        zapped: existing?.zapped,
+        updatedAt: Date.now(),
+      })
+    }
+  } finally {
+    graph.endBatch()
+  }
+}
+
+/** Which of the given video ids have been marked seen. Used to resume the
+ *  feed near where the user left off when the exact last-position id is no
+ *  longer in the loaded window (pruned, or feed content changed). */
+export async function getSeenVideoIds(ids: string[]): Promise<Set<string>> {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    const rec = await db.userVideoState.get(id)
+    if (rec?.watched) seen.add(id)
+  }
+  return seen
+}
+
 export async function buildOrUpdateAuthorProfile(event: any): Promise<CreatorProfileRecord | null> {
   if (event.kind !== 0) return null
   try {

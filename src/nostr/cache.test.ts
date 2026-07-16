@@ -13,6 +13,8 @@ import {
   buildOrUpdateAuthorProfile,
   pruneCache,
   pruneBlockedContent,
+  markVideosSeen,
+  getSeenVideoIds,
 } from './cache'
 import type { VideoShape, CachedEvent, CreatorProfileRecord } from './cache'
 
@@ -229,6 +231,42 @@ describe('Nostr event cache — realistic scenarios', () => {
     expect(state!.boosted).toBe(true)
     expect(state!.zapped).toBe(true)
     expect(state!.liked).toBe(true) // previous state preserved
+  })
+
+  it('marks videos seen in a batch and reports them back via getSeenVideoIds', async () => {
+    await markVideosSeen(['seen-a', 'seen-b'])
+
+    const recA = await db.userVideoState.get('seen-a')
+    expect(recA?.watched).toBe(true)
+    const recB = await db.userVideoState.get('seen-b')
+    expect(recB?.watched).toBe(true)
+
+    const seen = await getSeenVideoIds(['seen-a', 'seen-b', 'unseen-c'])
+    expect(seen.has('seen-a')).toBe(true)
+    expect(seen.has('seen-b')).toBe(true)
+    expect(seen.has('unseen-c')).toBe(false)
+  })
+
+  it('markVideosSeen does not clobber existing liked/boosted/zapped state', async () => {
+    await updateUserVideoState('vid-with-like', { liked: true })
+
+    await markVideosSeen(['vid-with-like'])
+
+    const state = await db.userVideoState.get('vid-with-like')
+    expect(state?.watched).toBe(true)
+    expect(state?.liked).toBe(true)
+  })
+
+  it('markVideosSeen skips already-watched videos without error', async () => {
+    await markVideosSeen(['vid-x'])
+    const before = await db.userVideoState.get('vid-x')
+
+    await markVideosSeen(['vid-x', 'vid-y'])
+    const after = await db.userVideoState.get('vid-x')
+
+    expect(after?.watched).toBe(true)
+    expect(after?.updatedAt).toBe(before?.updatedAt) // untouched second time
+    expect((await db.userVideoState.get('vid-y'))?.watched).toBe(true)
   })
 
   it('caches kind-3 contact lists', async () => {

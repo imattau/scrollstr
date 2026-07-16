@@ -569,6 +569,17 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
+  // 9. Remove orphan "seen" state (no remaining shape) — user_state records
+  // have no cap of their own, so they'd otherwise accumulate forever.
+  const userStates = await loadNodesByType('user_state')
+  for (const node of userStates) {
+    const rawId = node.id.startsWith('sta:') ? node.id.slice(4) : node.id
+    if (!remainingShapeIds.has(`shp:${rawId}`)) {
+      await persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
   self.postMessage({ type: 'pruneResult', removedIds })
 }
 
