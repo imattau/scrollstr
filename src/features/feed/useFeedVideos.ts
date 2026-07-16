@@ -28,6 +28,25 @@ function useStableFeedOrder(items: VideoItemData[], resetKey: string): VideoItem
 }
 
 const FEED_QUERY_LIMIT = 200
+// The raw query below is a *ranked snapshot*, re-evaluated on every graph
+// change — not a stable "first N loaded" set. If it stayed fixed at
+// FEED_QUERY_LIMIT, a large batch of newer content could rank whatever the
+// user is currently watching below the cutoff and silently drop it from the
+// results, even though nothing was actually removed. useStableFeedOrder
+// would then lose that id, and the feed would visibly jump as MediaStack's
+// "active item no longer exists" fallback kicks in. Expanding the window to
+// track how far the user has actually scrolled keeps their current position
+// inside it regardless of how much new content arrives elsewhere. Rounded
+// to a coarse step so it doesn't requery on every single scroll tick.
+const SCROLL_WINDOW_BUFFER = 50
+const SCROLL_WINDOW_STEP = 100
+
+export function queryWindowSize(activeIndex: number): number {
+  return Math.max(
+    FEED_QUERY_LIMIT,
+    Math.ceil((activeIndex + SCROLL_WINDOW_BUFFER) / SCROLL_WINDOW_STEP) * SCROLL_WINDOW_STEP
+  )
+}
 
 const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
   id: shape.id,
@@ -71,6 +90,7 @@ interface UseFeedVideosInput {
   filterTag: string | null
   refreshKey: number
   deeplinkVideoId?: string | null
+  activeIndex: number
 }
 
 interface UseFeedVideosOutput {
@@ -81,7 +101,8 @@ interface UseFeedVideosOutput {
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
-  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId } = input
+  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, activeIndex } = input
+  const windowSize = queryWindowSize(activeIndex)
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
@@ -95,10 +116,10 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
             return tags.some(t => t.toLowerCase() === filterTag.toLowerCase())
           })
           .sort((a, b) => ((b.data.insertOrder as number) ?? 0) - ((a.data.insertOrder as number) ?? 0))
-          .slice(0, FEED_QUERY_LIMIT)
+          .slice(0, windowSize)
         shapes = nodes.map(n => n.data as unknown as VideoShape)
       } else {
-        const nodes = graph.recentBy('insertOrder', FEED_QUERY_LIMIT, 'video_shape')
+        const nodes = graph.recentBy('insertOrder', windowSize, 'video_shape')
         shapes = nodes.map(n => n.data as unknown as VideoShape)
       }
       const valid = shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
@@ -107,7 +128,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag], 500, ['video_shape'])
+  }, [refreshKey, filterTag, windowSize], 500, ['video_shape'])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
@@ -126,13 +147,13 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
         )
       }
       shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
-      shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      shapes = shapes.slice(0, windowSize)
       return await mergeCountersIntoShapes(shapes)
     } catch (err) {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 500, ['video_shape'])
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, windowSize], 500, ['video_shape'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
