@@ -53,41 +53,83 @@ const PROFILE_BATCH_DELAY_MS = 300
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-async function fetchBatch(relayUrls: string[], until: number): Promise<any[]> {
-  try {
-    const events = await pool.querySync(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      limit: BACKFILL_BATCH_SIZE,
-      until,
-    })
-    return events.filter((ev: any) => {
-      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
-        try { return verifyEvent(ev as any) } catch { return false }
-      }
-      return true
-    })
-  } catch (err) {
-    console.warn('[Worker] Relay error during batch fetch:', err)
-    return []
+// Bounded, exponential backoff used only when NO relay could be reached at
+// all. Deliberately short — this recovers from a transient blip within a
+// single batch's lifetime, it isn't a long-lived retry queue.
+const RECONNECT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000]
+
+/**
+ * Resolve true as soon as any relay in `relayUrls` is reachable, false only
+ * once every relay's connection attempt has failed. pool.ensureRelay() is
+ * cheap to call even when already connected — SimplePool memoizes the
+ * connection and AbstractRelay.connect() returns the cached promise.
+ */
+function anyRelayReachable(relayUrls: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (relayUrls.length === 0) { resolve(false); return }
+    let pending = relayUrls.length
+    for (const url of relayUrls) {
+      pool.ensureRelay(url).then(
+        () => resolve(true),
+        () => { if (--pending === 0) resolve(false) }
+      )
+    }
+  })
+}
+
+/**
+ * Shared retry-with-backoff wrapper for backfill relay queries.
+ * pool.querySync() never rejects — even when every relay is unreachable it
+ * resolves via onclose with an empty array — so an empty result alone can't
+ * tell us "nothing more to fetch" from "couldn't reach anything." We check
+ * reachability directly first; only when nothing is reachable do we back off
+ * and retry. A result from a reachable relay is trusted as-is, even if empty.
+ */
+async function queryRelaysWithRetry(
+  relayUrls: string[],
+  filter: Filter,
+  label: string
+): Promise<{ events: any[]; unreachable: boolean }> {
+  for (let attempt = 0; ; attempt++) {
+    if (await anyRelayReachable(relayUrls)) {
+      const events = await pool.querySync(relayUrls, filter)
+      return { events, unreachable: false }
+    }
+    if (attempt >= RECONNECT_RETRY_DELAYS_MS.length) {
+      console.warn(`[Worker] ${label}: no relay reachable after ${attempt + 1} attempts, giving up for now.`)
+      return { events: [], unreachable: true }
+    }
+    const backoff = RECONNECT_RETRY_DELAYS_MS[attempt]
+    console.warn(`[Worker] ${label}: no relay reachable (attempt ${attempt + 1}/${RECONNECT_RETRY_DELAYS_MS.length + 1}), retrying in ${backoff}ms...`)
+    await delay(backoff)
   }
 }
 
-async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promise<any[]> {
-  try {
-    const events = await pool.querySync(relayUrls, {
-      kinds: [0, 10002],
-      authors: pubkeys,
-    })
-    return events.filter((ev: any) => {
-      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
-        try { return verifyEvent(ev as any) } catch { return false }
-      }
-      return true
-    })
-  } catch (err) {
-    console.warn('[Worker] Relay error during profile batch fetch:', err)
-    return []
-  }
+function filterVerified(events: any[]): any[] {
+  return events.filter((ev: any) => {
+    if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
+      try { return verifyEvent(ev as any) } catch { return false }
+    }
+    return true
+  })
+}
+
+async function fetchBatch(relayUrls: string[], until: number): Promise<{ events: any[]; unreachable: boolean }> {
+  const { events, unreachable } = await queryRelaysWithRetry(
+    relayUrls,
+    { kinds: [1, 21, 22, 34236], limit: BACKFILL_BATCH_SIZE, until },
+    'fetchBatch'
+  )
+  return { events: filterVerified(events), unreachable }
+}
+
+async function fetchProfileBatch(relayUrls: string[], pubkeys: string[]): Promise<{ events: any[]; unreachable: boolean }> {
+  const { events, unreachable } = await queryRelaysWithRetry(
+    relayUrls,
+    { kinds: [0, 10002], authors: pubkeys },
+    'fetchProfileBatch'
+  )
+  return { events: filterVerified(events), unreachable }
 }
 
 function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Promise<any[]> {
@@ -138,24 +180,13 @@ function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Pro
   })
 }
 
-async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], until: number): Promise<any[]> {
-  try {
-    const events = await pool.querySync(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      authors: pubkeys,
-      limit: BACKFILL_BATCH_SIZE,
-      until,
-    })
-    return events.filter((ev: any) => {
-      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
-        try { return verifyEvent(ev as any) } catch { return false }
-      }
-      return true
-    })
-  } catch (err) {
-    console.warn('[Worker] Relay error during followed video batch fetch:', err)
-    return []
-  }
+async function fetchFollowedVideoBatch(relayUrls: string[], pubkeys: string[], until: number): Promise<{ events: any[]; unreachable: boolean }> {
+  const { events, unreachable } = await queryRelaysWithRetry(
+    relayUrls,
+    { kinds: [1, 21, 22, 34236], authors: pubkeys, limit: BACKFILL_BATCH_SIZE, until },
+    'fetchFollowedVideoBatch'
+  )
+  return { events: filterVerified(events), unreachable }
 }
 
 async function handleStartProfileBackfill(relayUrls: string[], pubkeys: string[]) {
@@ -170,8 +201,10 @@ async function handleStartProfileBackfill(relayUrls: string[], pubkeys: string[]
   try {
     for (let i = 0; i < pubkeys.length; i += PROFILE_BATCH_SIZE) {
       const batch = pubkeys.slice(i, i + PROFILE_BATCH_SIZE)
-      const events = await fetchProfileBatch(effective, batch)
-      if (events.length > 0) {
+      const { events, unreachable } = await fetchProfileBatch(effective, batch)
+      if (unreachable) {
+        console.warn(`[Worker] Profile batch starting at pubkey ${i}: no relay reachable after retries, skipping this batch.`)
+      } else if (events.length > 0) {
         self.postMessage({ type: 'backfillEvents', events })
       }
       await delay(PROFILE_BATCH_DELAY_MS)
@@ -215,9 +248,16 @@ async function handleStartBackfill(relayUrls: string[]) {
           `(cache: ${currentCount}/${MAX_VIDEOS})`
       )
 
-      const events = await fetchBatch(effective, until)
+      const { events, unreachable } = await fetchBatch(effective, until)
       if (events.length === 0) {
-        console.log('[Worker] Relay returned 0 events – history exhausted. Stopping backfill.')
+        if (unreachable) {
+          console.warn(
+            `[Worker] Batch ${batch + 1}: no relay reachable after retries — stopping this backfill session ` +
+            `(transient network issue, NOT history exhaustion; will resume from the same cursor next session).`
+          )
+        } else {
+          console.log('[Worker] Relay returned 0 events – history exhausted. Stopping backfill.')
+        }
         break
       }
 
@@ -264,8 +304,10 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
           `(cache: ${currentCount}/${MAX_VIDEOS})`
       )
 
-      const events = await fetchFollowedVideoBatch(effective, batch, Math.floor(Date.now() / 1000))
-      if (events.length > 0) {
+      const { events, unreachable } = await fetchFollowedVideoBatch(effective, batch, Math.floor(Date.now() / 1000))
+      if (unreachable) {
+        console.warn(`[Worker] Followed-video group ${Math.floor(i / FOLLOWED_PUBKEY_BATCH_SIZE) + 1}: no relay reachable after retries, skipping this group.`)
+      } else if (events.length > 0) {
         console.log(`[Worker] Group received ${events.length} events from relays.`)
         self.postMessage({ type: 'backfillEvents', events })
       }
@@ -288,17 +330,15 @@ async function handleStartFollowBackfill(relayUrls: string[], pubkeys: string[])
   console.log(`[Worker] Starting follow backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
 
   try {
-    const raw = await pool.querySync(effective, {
-      kinds: [3],
-      authors: pubkeys,
-      limit: 50,
-    })
-    const events = raw.filter((ev: any) => {
-      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
-        try { return verifyEvent(ev as any) } catch { return false }
-      }
-      return true
-    })
+    const { events: raw, unreachable } = await queryRelaysWithRetry(
+      effective,
+      { kinds: [3], authors: pubkeys, limit: 50 },
+      'Follow backfill'
+    )
+    if (unreachable) {
+      console.warn('[Worker] Follow backfill: no relay reachable after retries, giving up for this pubkey set.')
+    }
+    const events = filterVerified(raw)
     if (events.length > 0) {
       console.log(`[Worker] Follow backfill received ${events.length} kind:3 events from relays.`)
       self.postMessage({ type: 'backfillEvents', events })
@@ -318,17 +358,15 @@ async function handleStartUserVideoBackfill(relayUrls: string[], pubkeys: string
   console.log(`[Worker] Starting user-video backfill for ${pubkeys.length} pubkeys over relays: ${effective.join(', ')}`)
 
   try {
-    const raw = await pool.querySync(effective, {
-      kinds: [1, 21, 22, 34236],
-      authors: pubkeys,
-      limit: 100,
-    })
-    const events = raw.filter((ev: any) => {
-      if (ev.sig && !ev.sig.startsWith('mock-') && ev.sig !== 'local-preview-sig') {
-        try { return verifyEvent(ev as any) } catch { return false }
-      }
-      return true
-    })
+    const { events: raw, unreachable } = await queryRelaysWithRetry(
+      effective,
+      { kinds: [1, 21, 22, 34236], authors: pubkeys, limit: 100 },
+      'User-video backfill'
+    )
+    if (unreachable) {
+      console.warn('[Worker] User-video backfill: no relay reachable after retries, giving up for this pubkey set.')
+    }
+    const events = filterVerified(raw)
     if (events.length > 0) {
       console.log(`[Worker] User-video backfill received ${events.length} events from relays.`)
       self.postMessage({ type: 'backfillEvents', events })
