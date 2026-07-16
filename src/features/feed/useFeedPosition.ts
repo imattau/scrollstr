@@ -20,11 +20,15 @@ function getMediaStackViewport(): HTMLElement | null {
   return document.querySelector('.media-stack-viewport') as HTMLElement | null
 }
 
-function scrollToIndex(index: number) {
+export function scrollToIndex(index: number, smooth = false) {
   const vp = getMediaStackViewport()
   if (!vp) return
   const height = vp.clientHeight
-  vp.scrollTo({ top: index * height, behavior: 'instant' })
+  if (smooth) {
+    vp.scrollTo({ top: index * height, behavior: 'smooth' })
+  } else {
+    vp.scrollTop = index * height
+  }
 }
 
 export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOutput {
@@ -70,7 +74,15 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
   // Save feed position to sessionStorage on slide change (skip when deep link is active)
   const currentVideoId = videos[activeIndex]?.id
   const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const prevInitialVideoId = useRef(initialVideoId)
   useEffect(() => {
+    // When a deep-link resolves (initialVideoId transitions from truthy to null),
+    // immediately clear stale sessionStorage so the wrong filterTag can't be restored.
+    if (prevInitialVideoId.current && !initialVideoId) {
+      sessionStorage.removeItem('scrollstr-feed-state')
+    }
+    prevInitialVideoId.current = initialVideoId
+
     if (!currentVideoId || initialVideoId) return
     clearTimeout(feedStateTimer.current)
     feedStateTimer.current = setTimeout(() => {
@@ -110,7 +122,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     if (initialTargetIndex === null) return
 
     initialScrollDoneRef.current = true
-    scrollToIndex(initialTargetIndex)
+    scrollToIndex(initialTargetIndex, true)
     setActiveIndex(initialTargetIndex)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, initialTargetIndex])
@@ -138,7 +150,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     const visibleVideo = videos[visibleIndex]
     if (visibleVideo?.id === activeId) return
 
-    scrollToIndex(currentIdx)
+    scrollToIndex(currentIdx, true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, initialVideoId])
 

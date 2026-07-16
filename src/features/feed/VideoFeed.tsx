@@ -9,7 +9,7 @@ import { db } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
 import { subscribeToRelays } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
-import { useFeedPosition } from './useFeedPosition'
+import { useFeedPosition, scrollToIndex } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
 import { loadSettings } from '../../db/local-preferences'
 import { useProfile } from '../../nostr/profile'
@@ -188,7 +188,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const scrollToNewest = useCallback(() => {
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    mediaStackRef.current?.scrollTo('start')
+    scrollToIndex(0)
     setActiveIndex(0)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
@@ -201,6 +201,33 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       onVideoChange(video)
     }
   }, [onVideoChange, videosRef])
+
+  // Scroll to first video when the Home nav button is clicked while already at /
+  useEffect(() => {
+    const handler = () => {
+      scrollToIndex(0)
+      setActiveIndex(0)
+    }
+    window.addEventListener('scrollstr:home', handler)
+    return () => window.removeEventListener('scrollstr:home', handler)
+  }, [])
+
+  // Jump to start when navigating home (tag or deep-link cleared from URL)
+  const prevFilterTag = useRef(filterTag)
+  const prevInitialVideoId = useRef(initialVideoId)
+  useEffect(() => {
+    const shouldReset =
+      (prevFilterTag.current && !filterTag) ||
+      (prevInitialVideoId.current && !initialVideoId)
+
+    prevFilterTag.current = filterTag
+    prevInitialVideoId.current = initialVideoId
+
+    if (shouldReset) {
+      scrollToIndex(0)
+      setActiveIndex(0)
+    }
+  }, [filterTag, initialVideoId])
 
   // Fetch profile for active video — triggers kind:0 relay subscription which
   // updates videoShapes with authorName/authorPicture, flowing into mediaItems.
@@ -277,7 +304,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       <div className="absolute top-0 left-0 right-0 z-40 pointer-events-auto">
         <div className="flex gap-1.5 pt-3 px-4">
           <Link
-            to="/?feed=following"
+            to={`/?feed=following${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
             className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
               feedType === 'following'
                 ? 'bg-purple-500 text-white'
@@ -287,7 +314,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
             Following
           </Link>
           <Link
-            to="/?feed=explore"
+            to={`/?feed=explore${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
             className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
               feedType === 'explore'
                 ? 'bg-purple-500 text-white'

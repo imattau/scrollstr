@@ -58,6 +58,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
                 <Link
                   key={item.path}
                   to={item.path}
+                  onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
                   className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
                     active ? 'text-purple-400' : 'text-neutral-400'
                   }`}
@@ -86,6 +87,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
                       <Link
                         key={item.path}
                         to={item.path}
+                        onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
                         className={[
                           'flex items-center gap-4 rounded-xl px-4 py-3.5 text-base font-medium transition-colors',
                           active ? 'bg-[#222228] font-semibold text-[#f7f7f8]' : 'text-[#a1a1aa]',
@@ -190,6 +192,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
                     <Link
                       key={item.path}
                       to={item.path}
+                      onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
                       className={`flex items-center gap-4 px-4 py-3.5 rounded-xl text-base font-medium transition-all duration-200 ${
                         active
                           ? 'bg-purple-600/10 text-purple-400 font-semibold'
@@ -237,7 +240,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
           </aside>
 
           {/* Main Content Area */}
-          <main className="flex-1 flex justify-center overflow-hidden">
+          <main className="flex-1 flex justify-center overflow-y-auto">
             <div className="w-full max-w-[480px] bg-black border-x border-neutral-900 flex flex-col min-h-0">
               <div className="flex-1 min-h-0">
                 {children}
@@ -265,6 +268,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
             <Link
               key={item.path}
               to={item.path}
+              onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
               className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
                 active ? 'text-purple-400' : 'text-neutral-400'
               }`}
