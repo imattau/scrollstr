@@ -96,10 +96,14 @@ export function addDiscoveredRelays(urls: string[]): void {
     const normalized = url.trim()
     if (!normalized || discoveredRelays.includes(normalized)) continue
     if (discoveredRelays.length >= MAX_DISCOVERED) {
-      const evicted = discoveredRelays.shift()!
-      nip50Capable.delete(evicted)
-      nip50Checked.delete(evicted)
-      nip11Cache.delete(evicted)
+      // Only drop the URL from the small rotating "active discovery" window
+      // here. Do NOT wipe its NIP-50/NIP-11 check result — the same popular
+      // relay hosts recur across many users' kind:10002 lists, so evicting
+      // that memory just because a host briefly cycled out of the top-25
+      // window causes it to be re-fetched (and, if unreachable, re-failed)
+      // every time it cycles back in. evictNipCaches() below is the actual
+      // cache-eviction mechanism (its own size cap, NIP_CACHE_MAX) and TTL.
+      discoveredRelays.shift()
     }
     discoveredRelays.push(normalized)
     changed = true
