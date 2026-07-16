@@ -27,3 +27,6 @@ dist-ssr
 test-results/
 public/ffmpeg-core/
 memory-profile-report-*.json
+
+# Local package tarballs (e.g. npm pack output)
+*.tgz
