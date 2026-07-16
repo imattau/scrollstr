@@ -15,7 +15,7 @@ import { useProfile } from '../../nostr/profile'
 
 
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowUp, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
+import { ArrowDown, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
@@ -188,7 +188,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, feedKey, relayUrls])
 
-  // New-events counter
+  // New-events counter — videos now append at the *end* of the feed (see
+  // useFeedVideos' stable append-only ordering), so "caught up" means being
+  // at/near the last item, not the first.
   const [newEventsCount, setNewEventsCount] = useState(0)
   const seenVideoIdsRef = useRef<Set<string>>(new Set())
 
@@ -200,7 +202,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       return
     }
 
-    if (activeIndexRef.current <= 0) {
+    if (activeIndexRef.current >= videos.length - 1) {
       seenVideoIdsRef.current = new Set(videos.map(v => v.id))
       setNewEventsCount(0)
       return
@@ -217,8 +219,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     flushIndexWrites()
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    mediaStackRef.current?.scrollTo('start')
-    setActiveIndex(0)
+    mediaStackRef.current?.scrollTo('end')
+    setActiveIndex(currentVideos.length - 1)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
   }, [videosRef])
@@ -449,7 +451,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         </div>
       )}
 
-      {newEventsCount > 0 && activeIndex > 0 && !uiHidden && (
+      {newEventsCount > 0 && activeIndex < videos.length - 1 && !uiHidden && (
         <button
           onClick={scrollToNewest}
           className="new-events-pill"
@@ -457,7 +459,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         >
           <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
           <span>{newEventsCount} new</span>
-          <ArrowUp className="w-3.5 h-3.5 flex-shrink-0" />
+          <ArrowDown className="w-3.5 h-3.5 flex-shrink-0" />
         </button>
       )}
 

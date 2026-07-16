@@ -3,8 +3,29 @@ import { graph, useGraphQuery } from '../../graph'
 import type { NodeType, PolyNode } from '../../graph'
 import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
 import { useMuteList } from '../../nostr/useMuteList'
-import { sortByInsertOrder } from './feedSort'
+import { sortByInsertOrder, appendNewItems } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
+
+/**
+ * Session-stable, append-only ordering: once an item is showing, it never
+ * moves — new items (newer live content or older backfilled content alike)
+ * are sorted among themselves and appended at the end. Resets (starting
+ * fresh, newest-first) whenever `resetKey` changes, e.g. on manual refresh.
+ */
+function useStableFeedOrder(items: VideoItemData[], resetKey: string): VideoItemData[] {
+  const orderRef = useRef<string[]>([])
+  const prevResetKeyRef = useRef(resetKey)
+
+  return useMemo(() => {
+    if (resetKey !== prevResetKeyRef.current) {
+      prevResetKeyRef.current = resetKey
+      orderRef.current = []
+    }
+    const byId = new Map(items.map((v) => [v.id, v]))
+    orderRef.current = appendNewItems(orderRef.current, items, sortByInsertOrder)
+    return orderRef.current.map((id) => byId.get(id)).filter((v): v is VideoItemData => !!v)
+  }, [items, resetKey])
+}
 
 const FEED_QUERY_LIMIT = 200
 
@@ -157,13 +178,18 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     return [...list].sort(sortByInsertOrder)
   }, [mutedPubkeys, mutedHashtags])
 
-  const exploreVideos = useMemo(
+  const exploreVideosRaw = useMemo(
     () => injectDeeplink(filterVideos(allShapes)),
     [allShapes, filterVideos, injectDeeplink]
   )
-  const followingVideos = useMemo(
+  const followingVideosRaw = useMemo(
     () => injectDeeplink(filterVideos(followedShapes)),
     [followedShapes, filterVideos, injectDeeplink]
+  )
+  const exploreVideos = useStableFeedOrder(exploreVideosRaw, `explore:${refreshKey}:${filterTag ?? ''}`)
+  const followingVideos = useStableFeedOrder(
+    followingVideosRaw,
+    `following:${sessionPubkey ?? ''}:${refreshKey}:${filterTag ?? ''}`
   )
   const videos = feedType === 'following' && sessionPubkey ? followingVideos : exploreVideos
 

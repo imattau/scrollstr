@@ -127,32 +127,10 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos.length, initialTargetIndex])
 
-  // Restore position when new videos are inserted at the front
-  const prevVideosLengthRef = useRef(0)
-  useEffect(() => {
-    const prevLength = prevVideosLengthRef.current
-    prevVideosLengthRef.current = videos.length
-
-    if (videos.length <= prevLength) return
-    if (initialVideoId) return
-    if (prevLength === 0) return // Skip initial render
-
-    const activeId = activeVideoIdRef.current
-    if (!activeId) return
-
-    const currentIdx = videos.findIndex(v => v.id === activeId)
-    if (currentIdx < 0) return
-
-    // Check if we're still viewing the same video (by checking DOM scroll position)
-    const vp = getMediaStackViewport()
-    if (!vp) return
-    const visibleIndex = Math.round(vp.scrollTop / vp.clientHeight)
-    const visibleVideo = videos[visibleIndex]
-    if (visibleVideo?.id === activeId) return
-
-    scrollToIndex(currentIdx)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videos.length, initialVideoId])
+  // Note: no scroll correction is needed when the feed grows. useFeedVideos
+  // maintains a session-stable, append-only order — new videos (live or
+  // backfilled) are always appended after what's already showing, so an
+  // already-visible item's index never changes underneath the user.
 
   return {
     deeplinkFailed,
