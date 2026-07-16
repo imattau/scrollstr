@@ -86,21 +86,48 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
 
   // Save feed position to localStorage on slide change (skip when deep link
   // is active). localStorage rather than sessionStorage so this survives a
-  // real app restart, not just tab lifetime.
+  // real app restart, not just tab lifetime. The write is debounced to
+  // avoid hammering localStorage while scrolling, but the *cleanup* of a
+  // debounce effect only cancels the pending timer — it never fires it. So
+  // on its own this would silently drop the position update whenever the
+  // user navigates to another screen within the debounce window (e.g.
+  // watching a video then immediately tapping the creator's avatar, well
+  // under 1s), unmounting VideoFeed before the write ever lands. The
+  // separate effect below tracks the latest pending state and guarantees
+  // it's flushed on unmount / tab hide, not just after the debounce fires.
   const currentVideoId = videos[activeIndex]?.id
   const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const pendingFeedStateRef = useRef<{ videoId: string; feedType: string; filterTag: string | null } | null>(null)
+
   useEffect(() => {
     if (!currentVideoId || initialVideoId) return
+    const state = { videoId: currentVideoId, feedType, filterTag }
+    pendingFeedStateRef.current = state
     clearTimeout(feedStateTimer.current)
     feedStateTimer.current = setTimeout(() => {
-      localStorage.setItem(FEED_STATE_KEY, JSON.stringify({
-        videoId: currentVideoId,
-        feedType,
-        filterTag,
-      }))
+      localStorage.setItem(FEED_STATE_KEY, JSON.stringify(state))
+      pendingFeedStateRef.current = null
     }, 1000)
     return () => clearTimeout(feedStateTimer.current)
   }, [currentVideoId, feedType, filterTag, initialVideoId])
+
+  useEffect(() => {
+    const flushFeedState = () => {
+      if (!pendingFeedStateRef.current) return
+      localStorage.setItem(FEED_STATE_KEY, JSON.stringify(pendingFeedStateRef.current))
+      pendingFeedStateRef.current = null
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushFeedState()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pagehide', flushFeedState)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('pagehide', flushFeedState)
+      flushFeedState()
+    }
+  }, [])
 
   // ── "Seen" tracking ──
   // Mark videos as seen once they become active, batched and flushed
