@@ -13,11 +13,17 @@ export function useLiveQuery<T>(
 }
 
 /**
- * React hook that subscribes to graph.changes and re-runs `queryFn` on every
- * emission. When `nodeTypes` is provided, only re-runs for change events whose
- * `nodeType` matches (or for the bulk warm event which has no nodeType).
- * This reduces cascading re-renders when a graph change affects unrelated
- * node types.
+ * React hook that subscribes to graph.changes and re-runs `queryFn` when a
+ * matching change arrives. When `nodeTypes` is provided, only re-runs for
+ * change events whose `nodeType` matches (or for the bulk warm event which
+ * has no nodeType). This reduces cascading re-renders when a graph change
+ * affects unrelated node types.
+ *
+ * Change-triggered reruns are debounced by `delay`: a burst of many change
+ * events (e.g. dozens of individual events landing during backfill) is
+ * coalesced into a single `queryFn()` call after the burst quiets down,
+ * rather than one call per event. The initial mount-time run is not
+ * debounced, so first paint isn't delayed.
  */
 export function useGraphQuery<T>(
   queryFn: () => T | Promise<T>,
@@ -27,6 +33,8 @@ export function useGraphQuery<T>(
 ): T | undefined {
   const [result, setResult] = useState<T | undefined>(undefined)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const changeDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const delayRef = useRef(delay)
   const mountedRef = useRef(true)
   const isFirstRef = useRef(true)
   const nodeTypesRef = useRef(nodeTypes)
@@ -98,6 +106,10 @@ export function useGraphQuery<T>(
   }, [runQuery])
 
   useEffect(() => {
+    delayRef.current = delay
+  }, [delay])
+
+  useEffect(() => {
     mountedRef.current = true
     isFirstRef.current = true
 
@@ -108,7 +120,13 @@ export function useGraphQuery<T>(
       if (types && event.nodeType && !types.includes(event.nodeType)) {
         return
       }
-      runQuery()
+      // Debounce change-triggered reruns: a burst of many change events
+      // (e.g. a bulk backfill flush) collapses into a single queryFn() call
+      // after the burst quiets down, instead of one call per event.
+      clearTimeout(changeDebounceRef.current)
+      changeDebounceRef.current = setTimeout(() => {
+        if (mountedRef.current) runQueryRef.current()
+      }, delayRef.current)
     })
 
     return () => {
@@ -116,6 +134,7 @@ export function useGraphQuery<T>(
       queryEpochRef.current = {}
       rerunPendingRef.current = false
       clearTimeout(timerRef.current)
+      clearTimeout(changeDebounceRef.current)
       subscription.unsubscribe()
     }
   }, [runQuery])

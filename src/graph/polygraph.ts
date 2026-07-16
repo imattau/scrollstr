@@ -39,6 +39,9 @@ export class PolyGraph {
   private _byType = new Map<NodeType, Set<string>>()
   /** pubkey → Set<nodeId> for O(1) lookups of all nodes owned by a pubkey. */
   private _byPubkey = new Map<string, Set<string>>()
+  /** Nostr kind → Set<nodeId> for O(1) lookups of all nodes of a given kind
+   *  (unlike _byKindPubkey, keeps every matching node, not just the latest). */
+  private _byKind = new Map<number, Set<string>>()
   /** Composite key `${kind}:${pubkey}` → node id. Uses most-recent-wins for
    *  replaceable events (kept current by putReplaceable); for non-replaceable
    *  events the first stored entry wins. */
@@ -209,6 +212,11 @@ export class PolyGraph {
     if (!this._byType.has(node.type)) this._byType.set(node.type, new Set())
     this._byType.get(node.type)!.add(id)
 
+    if (kind !== undefined) {
+      if (!this._byKind.has(kind)) this._byKind.set(kind, new Set())
+      this._byKind.get(kind)!.add(id)
+    }
+
     if (pubkey) {
       if (!this._byPubkey.has(pubkey)) this._byPubkey.set(pubkey, new Set())
       this._byPubkey.get(pubkey)!.add(id)
@@ -241,6 +249,14 @@ export class PolyGraph {
     if (typeSet) {
       typeSet.delete(id)
       if (typeSet.size === 0) this._byType.delete(node.type)
+    }
+
+    if (kind !== undefined) {
+      const kindSet = this._byKind.get(kind)
+      if (kindSet) {
+        kindSet.delete(id)
+        if (kindSet.size === 0) this._byKind.delete(kind)
+      }
     }
 
     if (pubkey) {
@@ -670,6 +686,7 @@ export class PolyGraph {
     this.hotCacheOrder.clear()
     this.nodeToEdgeMap.clear()
     this._byType.clear()
+    this._byKind.clear()
     this._byPubkey.clear()
     this._byKindPubkey.clear()
     this._byReplaceableKey.clear()
@@ -783,6 +800,20 @@ export class PolyGraph {
     const id = this._byKindPubkey.get(`${kind}:${pubkey}`)
     if (!id) return undefined
     return this.nodes.get(id)
+  }
+
+  /** Index-backed: O(1) lookup of all nodes by Nostr kind, optionally filtered
+   *  by node type. Returns every matching node (not just the latest) — use
+   *  this instead of whereType(type).filter(kind === ...) for kind lookups. */
+  byKind(kind: number, type?: NodeType): PolyNode[] {
+    const ids = this._byKind.get(kind)
+    if (!ids) return []
+    const results: PolyNode[] = []
+    for (const id of ids) {
+      const node = this.nodes.get(id)
+      if (node && (!type || node.type === type)) results.push(node)
+    }
+    return results
   }
 
   /** Edge-derived: O(degree) lookup of all source event IDs that have a

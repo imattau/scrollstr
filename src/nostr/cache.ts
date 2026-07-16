@@ -355,7 +355,14 @@ class Table<T> {
   where(index: string | Record<string, unknown>): WhereClause<T> | Collection<T> {
     if (typeof index === 'object') {
       const entries = Object.entries(index)
-      const nodes = graph.whereType(this.type).filter(n => {
+      // Fast path: when querying by kind, start from the kind index (which
+      // holds every matching node) instead of scanning every node of this
+      // table's type — cheap even when the type holds thousands of nodes.
+      const kindEntry = entries.find(([k]) => k === 'kind')
+      const base = typeof kindEntry?.[1] === 'number'
+        ? graph.byKind(kindEntry[1], this.type)
+        : graph.whereType(this.type)
+      const nodes = base.filter(n => {
         return entries.every(([k, v]) => (n.data as Record<string, unknown>)[k] === v)
       })
       return new Collection<T>(nodes, this.type)

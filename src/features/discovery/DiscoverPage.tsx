@@ -190,8 +190,7 @@ export const DiscoverPage: React.FC = () => {
   const rawRelayListEvents = useGraphQuery(
     () => {
       if (!graph) return []
-      return graph.whereType('event')
-        .filter(n => (n.data.kind as number) === 10002)
+      return graph.byKind(10002, 'event')
         .sort((a, b) => ((b.data.created_at as number) ?? 0) - ((a.data.created_at as number) ?? 0))
         .slice(0, 200)
         .map(n => n.data)
