@@ -318,6 +318,27 @@ describe('Nostr event cache — realistic scenarios', () => {
     expect(contacts).toHaveLength(1)
   })
 
+  it('rejects kind-1 events without video URLs via the bulk path', async () => {
+    const events = [
+      nip21Event('bulk-note-no-vid', ALICE, 1, [], 'Hello world, no video here!'),
+      nip21Event('bulk-note-vid', ALICE, 1, [], 'Check out this video https://cdn.example.com/clip.mp4'),
+    ]
+
+    await bulkSaveEventsToCache(events)
+
+    const cachedNoVid = await db.cachedEvents.get('bulk-note-no-vid')
+    expect(cachedNoVid).toBeUndefined()
+    const rejection = await db.kindOneRejections.get('bulk-note-no-vid')
+    expect(rejection).toBeDefined()
+    expect(rejection!.reason).toBe('no_video_url')
+
+    const cachedVid = await db.cachedEvents.get('bulk-note-vid')
+    expect(cachedVid).toBeDefined()
+    const shape = await db.videoShapes.get('bulk-note-vid')
+    expect(shape).toBeDefined()
+    expect((shape as any).videoUrl).toBe('https://cdn.example.com/clip.mp4')
+  })
+
   it('updates media status and propagates failure to shapes', async () => {
     const event = nip21Event('vid-media', ALICE, 21, [
       ['title', 'Media Status Test'],

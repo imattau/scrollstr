@@ -898,6 +898,20 @@ export async function bulkSaveEventsToCache(events: any[], relay?: string): Prom
     const isVideo = kind === 1 || kind === 21 || kind === 22 || kind === 34236
     const isReaction = kind === 7 || kind === 16 || kind === 9735 || kind === 1111
 
+    // Kind-1 notes are only worth caching if they actually link a video —
+    // otherwise the firehose feed subscription (kinds: [1,21,22,34236],
+    // no content filter) would fill cachedEvents with ordinary text notes.
+    // Mirrors the check in saveEventToCache.
+    if (kind === 1) {
+      const rejected = await db.kindOneRejections.get(id)
+      if (rejected) continue
+      const videoUrl = extractVideoUrlFromContent(event.content || '')
+      if (!videoUrl) {
+        await db.kindOneRejections.put({ id, reason: 'no_video_url', checkedAt: Date.now() })
+        continue
+      }
+    }
+
     const eTags = (event.tags || []).filter((t: any) => t[0] === 'e').map((t: any) => t[1])
     const pTags = (event.tags || []).filter((t: any) => t[0] === 'p').map((t: any) => t[1])
 
