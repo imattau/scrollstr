@@ -5,13 +5,18 @@ import { runPruneCache } from './pool'
 
 // ── IDs ──
 
-let insertOrderCounter = 0
-let lastInsertOrderTs = 0
-function nextInsertOrder(): number {
-  const now = Date.now() * 1000
-  const ts = now > lastInsertOrderTs ? now : lastInsertOrderTs + 1
-  lastInsertOrderTs = ts
-  return ts + (++insertOrderCounter)
+let insertOrderTieBreaker = 0
+/**
+ * Feed sort key: based on the event's own created_at (content time) rather
+ * than wall-clock arrival time, so backfilled/older content sorts below
+ * what's already in the feed instead of jumping to the top just because the
+ * client fetched it just now. The tie-breaker only disambiguates events
+ * sharing the same created_at second — once assigned it's cached on the
+ * shape and never recomputed, so already-displayed items never reshuffle.
+ */
+function nextInsertOrder(createdAt: number): number {
+  insertOrderTieBreaker = (insertOrderTieBreaker + 1) % 1000
+  return createdAt * 1_000_000 + insertOrderTieBreaker
 }
 
 // ── Types (unchanged) ──
@@ -682,7 +687,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       const shape: VideoShape = {
         id: event.id, kind: event.kind, pubkey: event.pubkey, created_at: event.created_at,
         firstSeen: existing?.firstSeen ?? Date.now(),
-        insertOrder: existing?.insertOrder ?? nextInsertOrder(),
+        insertOrder: existing?.insertOrder ?? nextInsertOrder(event.created_at),
         videoUrl, thumbnailUrl: existing?.thumbnailUrl,
         title: existing?.title ?? '', summary: event.content || (existing?.summary ?? ''),
         hashtags: hashtags.length > 0 ? hashtags : (existing?.hashtags ?? []),
@@ -765,7 +770,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
     const shape: VideoShape = {
       id: event.id, kind: event.kind, pubkey: event.pubkey, created_at: event.created_at,
       firstSeen: existing?.firstSeen ?? Date.now(),
-      insertOrder: existing?.insertOrder ?? nextInsertOrder(),
+      insertOrder: existing?.insertOrder ?? nextInsertOrder(event.created_at),
       videoUrl, thumbnailUrl, title, summary, hashtags: finalHashtags,
       mimeType, size, duration, mediaStatus, isFailed, contentWarning, userState,
       reactionCount: existing?.reactionCount ?? 0, repostCount: existing?.repostCount ?? 0,

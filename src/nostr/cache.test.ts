@@ -318,6 +318,32 @@ describe('Nostr event cache — realistic scenarios', () => {
     expect(contacts).toHaveLength(1)
   })
 
+  it('sorts backfilled older videos below already-cached newer ones (insertOrder tracks created_at, not fetch time)', async () => {
+    const now = Math.floor(Date.now() / 1000)
+
+    // A recent video arrives first, as if via the live feed subscription.
+    const recent = nip21Event('recent-vid', ALICE, 21, [
+      ['title', 'Recent'],
+      ['imeta', 'url https://cdn.example.com/recent.mp4', 'm video/mp4'],
+    ])
+    recent.created_at = now
+    await saveEventToCache(recent)
+
+    // A much older video is discovered afterward, as if via "load more"
+    // pagination (until: oldestCreatedAt). Even though the client sees it
+    // *after* the recent video, its content is older and must sort below it.
+    const older = nip21Event('older-vid', ALICE, 21, [
+      ['title', 'Older'],
+      ['imeta', 'url https://cdn.example.com/older.mp4', 'm video/mp4'],
+    ])
+    older.created_at = now - 60 * 60 * 24 * 7 // one week earlier
+    await saveEventToCache(older)
+
+    const recentShape = await db.videoShapes.get('recent-vid') as any
+    const olderShape = await db.videoShapes.get('older-vid') as any
+    expect(recentShape.insertOrder).toBeGreaterThan(olderShape.insertOrder)
+  })
+
   it('rejects kind-1 events without video URLs via the bulk path', async () => {
     const events = [
       nip21Event('bulk-note-no-vid', ALICE, 1, [], 'Hello world, no video here!'),
