@@ -49,6 +49,7 @@ interface UseFeedVideosInput {
   mutedHashtags: Set<string>
   filterTag: string | null
   refreshKey: number
+  deeplinkVideoId?: string | null
 }
 
 interface UseFeedVideosOutput {
@@ -59,7 +60,7 @@ interface UseFeedVideosOutput {
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
-  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey } = input
+  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId } = input
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
@@ -114,6 +115,32 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
+  // Deep-linked videos (from Profile/Discover) are frequently older than the
+  // FEED_QUERY_LIMIT window above, so they'd never surface via insertOrder
+  // ranking. Look the target up directly by node id, bypassing that window —
+  // getNodeSafe falls back to the graph's IndexedDB persistence for nodes
+  // evicted from the in-memory hot cache.
+  const _deeplinkShape = useGraphQuery(async () => {
+    if (!deeplinkVideoId) return undefined
+    try {
+      const node = await graph.getNodeSafe(deeplinkVideoId)
+      if (!node || node.type !== 'video_shape') return undefined
+      const shape = node.data as unknown as VideoShape
+      if (!shape.videoUrl || shape.mediaStatus === 'failed' || shape.hidden) return undefined
+      const [withCounters] = await mergeCountersIntoShapes([shape])
+      return withCounters
+    } catch (err) {
+      console.error('[VideoFeed] Error fetching deep-linked video shape:', err)
+      return undefined
+    }
+  }, [deeplinkVideoId], 200, ['video_shape'])
+
+  const injectDeeplink = useCallback((list: VideoItemData[]) => {
+    if (!deeplinkVideoId || !_deeplinkShape) return list
+    if (list.some(v => v.id === deeplinkVideoId)) return list
+    return [mapShapeToVideoItem(_deeplinkShape), ...list]
+  }, [deeplinkVideoId, _deeplinkShape])
+
   const filterVideos = useCallback((source: VideoShape[]) => {
     let list = source.map(mapShapeToVideoItem)
 
@@ -130,8 +157,14 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     return [...list].sort(sortByInsertOrder)
   }, [mutedPubkeys, mutedHashtags])
 
-  const exploreVideos = useMemo(() => filterVideos(allShapes), [allShapes, filterVideos])
-  const followingVideos = useMemo(() => filterVideos(followedShapes), [followedShapes, filterVideos])
+  const exploreVideos = useMemo(
+    () => injectDeeplink(filterVideos(allShapes)),
+    [allShapes, filterVideos, injectDeeplink]
+  )
+  const followingVideos = useMemo(
+    () => injectDeeplink(filterVideos(followedShapes)),
+    [followedShapes, filterVideos, injectDeeplink]
+  )
   const videos = feedType === 'following' && sessionPubkey ? followingVideos : exploreVideos
 
   const videosRef = useRef(videos)

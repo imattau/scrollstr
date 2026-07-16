@@ -26,3 +26,4 @@ dist-ssr
 .opencode/
 test-results/
 public/ffmpeg-core/
+memory-profile-report-*.json
