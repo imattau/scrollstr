@@ -837,12 +837,19 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
 }
 
 /**
- * Batched, lean "seen" write for feed resume tracking. Unlike
- * updateUserVideoState this deliberately skips the videoShapes rewrite
- * (no HAS_STATE edge, no video_shape node touch) — nothing needs to react
- * to a video being marked seen, so there's no reason to emit a video_shape
- * change event and trigger feed requeries for every scroll. Callers should
- * accumulate ids client-side and flush this periodically, not per-video.
+ * Batched "seen" write for feed resume tracking and feed-window paging.
+ * Embeds `watched` on the shape itself (in addition to userVideoState) so
+ * useFeedVideos can query "not yet watched" directly instead of a ranked
+ * top-N snapshot that can silently evict whatever the user is currently
+ * viewing when a large batch of new content arrives — watched status is the
+ * feed's cue for what to page in next as the user scrolls through it.
+ *
+ * This does mean marking videos seen now touches video_shape nodes (which
+ * useGraphQuery subscribers, including the feed query, react to) — but
+ * callers accumulate ids client-side and flush this periodically rather
+ * than per-video, and the resulting change events are wrapped in a single
+ * startBatch/endBatch and land within the feed query's own debounce window,
+ * so this doesn't turn into a per-scroll-tick requery storm.
  */
 export async function markVideosSeen(ids: Iterable<string>): Promise<void> {
   const idList = [...new Set(ids)]
@@ -861,6 +868,14 @@ export async function markVideosSeen(ids: Iterable<string>): Promise<void> {
         zapped: existing?.zapped,
         updatedAt: Date.now(),
       })
+      const shape = await db.videoShapes.get(id)
+      if (shape) {
+        await db.videoShapes.put({
+          ...(shape as any),
+          userState: { ...(shape as any).userState, watched: true },
+          updatedAt: Date.now(),
+        })
+      }
     }
   } finally {
     graph.endBatch()

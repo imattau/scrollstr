@@ -247,6 +247,22 @@ describe('Nostr event cache — realistic scenarios', () => {
     expect(seen.has('unseen-c')).toBe(false)
   })
 
+  it('markVideosSeen embeds watched on the video shape itself, for feed query filtering', async () => {
+    const event = nip21Event('seen-shape-vid', ALICE, 21, [
+      ['title', 'Seen Shape Test'],
+      ['imeta', 'url https://cdn.example.com/seen.mp4', 'm video/mp4'],
+    ])
+    await saveEventToCache(event)
+
+    let shape = await db.videoShapes.get('seen-shape-vid') as any
+    expect(shape.userState?.watched).toBeFalsy()
+
+    await markVideosSeen(['seen-shape-vid'])
+
+    shape = await db.videoShapes.get('seen-shape-vid') as any
+    expect(shape.userState?.watched).toBe(true)
+  })
+
   it('markVideosSeen does not clobber existing liked/boosted/zapped state', async () => {
     await updateUserVideoState('vid-with-like', { liked: true })
 

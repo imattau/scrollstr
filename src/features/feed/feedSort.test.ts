@@ -102,4 +102,28 @@ describe('appendNewItems', () => {
     ]
     expect(appendNewItems([], items, byInsertOrder)).toEqual(['b', 'c', 'a'])
   })
+
+  it('retains an already-shown id missing from the batch when isStillValid says so', () => {
+    // e.g. the query now only returns *unwatched* videos, so a watched item
+    // that's still on screen is legitimately absent from `items` without
+    // having been deleted, muted, or hidden.
+    const prevOrder = ['a', 'b', 'c']
+    const items = [
+      { id: 'a', insertOrder: 100 },
+      // 'b' watched, dropped out of the unwatched query — but still valid.
+      { id: 'c', insertOrder: 80 },
+    ]
+    const isStillValid = (id: string) => id === 'b'
+    expect(appendNewItems(prevOrder, items, byInsertOrder, isStillValid)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('drops an already-shown id missing from the batch when isStillValid returns false', () => {
+    const prevOrder = ['a', 'b', 'c']
+    const items = [
+      { id: 'a', insertOrder: 100 },
+      { id: 'c', insertOrder: 80 },
+    ]
+    const isStillValid = () => false // e.g. 'b' was muted or deleted
+    expect(appendNewItems(prevOrder, items, byInsertOrder, isStillValid)).toEqual(['a', 'c'])
+  })
 })

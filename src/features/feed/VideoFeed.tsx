@@ -100,7 +100,6 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     filterTag,
     refreshKey,
     deeplinkVideoId: initialVideoId,
-    activeIndex,
   })
 
   // Feed position: deep link, sessionStorage, initial scroll position
