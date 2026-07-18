@@ -102,10 +102,10 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
   useEffect(() => {
     // When a deep-link resolves (initialVideoId transitions from truthy to null),
     // immediately clear stale sessionStorage so the wrong filterTag can't be restored.
-    if (prevInitialVideoId.current && !initialVideoId) {
+    if (prevInitialVideoIdRef.current && !initialVideoId) {
       sessionStorage.removeItem('scrollstr-feed-state')
     }
-    prevInitialVideoId.current = initialVideoId
+    prevInitialVideoIdRef.current = initialVideoId
 
     if (!currentVideoId || initialVideoId) return
     const state = { videoId: currentVideoId, feedType, filterTag }
