@@ -64,12 +64,28 @@ export const saveSettings = (settings: AppSettings): void => {
   window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT))
 }
 
-// Listen for settings changes from other tabs and invalidate cache
-window.addEventListener('storage', (e) => {
+// Listen for settings changes from other tabs and invalidate cache.
+// Named so it can be removed (e.g. on HMR in dev) instead of an anonymous
+// closure that would accumulate across reloads.
+const onStorageEvent = (e: StorageEvent) => {
   if (e.key === STORAGE_KEY) {
     cachedSettings = null
   }
-})
+}
+window.addEventListener('storage', onStorageEvent)
+
+/** Remove the cross-tab storage listener. Intended for tests / HMR dispose. */
+export function removeSettingsStorageListener(): void {
+  window.removeEventListener('storage', onStorageEvent)
+}
+
+// Vite HMR: dispose the previous module's listener on hot reload so we
+// don't accumulate one listener per reload in dev.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    window.removeEventListener('storage', onStorageEvent)
+  })
+}
 
 // Fields that have their own dedicated Nostr event kinds and are excluded from the
 // encrypted kind-30078 app-settings blob.

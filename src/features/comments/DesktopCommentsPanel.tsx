@@ -4,7 +4,7 @@ import { publishComment } from '../../nostr/events'
 import { useToast } from '../../components/feedback/Toast'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db, saveEventToCache } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../../graph'
 import { useProfile } from '../../nostr/profile'
 
 const EMPTY_COMMENTS: any[] = []

@@ -1,8 +1,9 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
+import { graph } from '../graph'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
-import { getSearchRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
+import { getSearchRelays, getSearchOnlyRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
 const HEX_FIELDS = new Set(['ids', 'authors', '#e', '#p', '#a', '#d'])
 
@@ -34,14 +35,149 @@ export const pool = new SimplePool()
 
 export let activeRelays: string[] = [...DEFAULT_RELAYS]
 
+// ── Deferred index writes ───────────────────────────────────────────────
+// When the user is scrolling or a video is paused, events accumulate in
+// pending batches instead of being written to IndexedDB. This prevents
+// feed flicker from liveQuery re-renders during active viewing. Batches
+// are flushed when the user settles on a video for SCROLL_SETTLE_MS.
+let indexWritesDeferred = false
+let pendingSubscriptionBatch: any[] = []
+let pendingBackfillBatch: any[] = []
+
+export function setIndexWritesDeferred(deferred: boolean): void {
+  if (indexWritesDeferred === deferred) return
+  indexWritesDeferred = deferred
+  if (!deferred) {
+    void flushPendingIndexWrites()
+  }
+}
+
+export function flushIndexWrites(): void {
+  if (pendingSubscriptionBatch.length > 0 || pendingBackfillBatch.length > 0) {
+    void flushPendingIndexWrites()
+  }
+}
+
+async function flushPendingIndexWrites(): Promise<void> {
+  const subBatch = pendingSubscriptionBatch
+  pendingSubscriptionBatch = []
+  if (subBatch.length > 0) {
+    const noRelay: any[] = []
+    const byRelay = new Map<string, any[]>()
+    for (const item of subBatch) {
+      if (item.relay) {
+        const relay = item.relay as string
+        if (!byRelay.has(relay)) byRelay.set(relay, [])
+        byRelay.get(relay)!.push(item.event ?? item)
+      } else {
+        noRelay.push(item.event ?? item)
+      }
+    }
+    if (noRelay.length > 0) {
+      await bulkSaveEventsToCache(noRelay).catch((err) =>
+        console.warn(`[pool] Failed to cache deferred subscription batch (${noRelay.length} events):`, err)
+      )
+    }
+    for (const [relay, events] of byRelay) {
+      await bulkSaveEventsToCache(events, relay).catch((err) =>
+        console.warn(`[pool] Failed to cache deferred subscription batch for ${relay} (${events.length} events):`, err)
+      )
+    }
+  }
+
+  const backBatch = pendingBackfillBatch
+  pendingBackfillBatch = []
+  if (backBatch.length > 0) {
+    await processBackfillEvents(backBatch).catch((err) =>
+      console.warn(`[pool] Failed to cache deferred backfill batch (${backBatch.length} events):`, err)
+    )
+  }
+}
+
 // ── Web Worker ───────────────────────────────────────────────────────────
 
-const worker = new Worker(
-  new URL('./backfill.worker.ts', import.meta.url),
-  { type: 'module' }
-)
+let worker: Worker | null = null
 
-export { worker as backfillWorker }
+function handleWorkerMessage(e: MessageEvent): void {
+  const msg = e.data
+  switch (msg.type) {
+    case 'backfillEvents': {
+      pushBackfillEvents((msg as any).events)
+      break
+    }
+    case 'subscriptionEvent': {
+      const event = (msg as any).event
+      const relay = (msg as any).relay as string | undefined
+      pushSubscriptionEvent(event, relay)
+      break
+    }
+    case 'backfillComplete':
+      break
+    case 'searchResults': {
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { console.log('[Pool] Search', msg.id, 'resolved with', msg.events?.length ?? 0, 'events'); cb.resolve(msg.events); searchCallbacks.delete(msg.id) }
+      break
+    }
+    case 'searchError': {
+      console.error('[Pool] Search', msg.id, 'failed:', msg.error)
+      const cb = searchCallbacks.get(msg.id)
+      if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
+      break
+    }
+    case 'pruneResult': {
+      const resolvePrune = pruneCacheResolve
+      if (resolvePrune) {
+        pruneCacheResolve = null
+        resolvePrune(msg.removedIds)
+      }
+      break
+    }
+    case 'vectorSearchResult': {
+      const cb = vectorSearchCallbacks.get(msg.searchId)
+      if (cb) {
+        cb.resolve(msg.results)
+        vectorSearchCallbacks.delete(msg.searchId)
+      }
+      break
+    }
+  }
+}
+
+function createBackfillWorker(): Worker {
+  const w = new Worker(
+    new URL('./backfill.worker.ts', import.meta.url),
+    { type: 'module' }
+  )
+  w.addEventListener('message', handleWorkerMessage)
+  return w
+}
+
+/** Returns the current backfill worker, creating one lazily if needed. */
+export function getBackfillWorker(): Worker {
+  let w = worker
+  if (!w) {
+    w = createBackfillWorker()
+    w.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+    worker = w
+  }
+  return w
+}
+
+/** Terminate and discard the current worker. Safe to call multiple times. */
+function terminateBackfillWorker(): void {
+  if (!worker) return
+  worker.postMessage({ type: 'cleanup' })
+  worker.removeEventListener('message', handleWorkerMessage)
+  worker.terminate()
+  worker = null
+}
+
+// Lazily initialize on module load so existing call sites that use the worker
+// before getBackfillWorker() is first called still work.
+// Guard Worker constructor for test environments (jsdom/node).
+if (typeof Worker !== 'undefined') {
+  worker = createBackfillWorker()
+}
 
 // When new search-capable relays are discovered, update the worker's relay set
 setOnDiscoveredChange(() => syncSearchRelaysToWorker())
@@ -58,11 +194,16 @@ function flushBackfillBuffer(): void {
   backfillFlushTimer = null
   const batch = backfillBuffer
   backfillBuffer = []
-  if (batch.length > 0) {
-    void processBackfillEvents(batch).catch((err) =>
-      console.warn(`[pool] Failed to cache backfill buffer (${batch.length} events):`, err)
-    )
+  if (batch.length === 0) return
+
+  if (indexWritesDeferred) {
+    pendingBackfillBatch.push(...batch)
+    return
   }
+
+  void processBackfillEvents(batch).catch((err) =>
+    console.warn(`[pool] Failed to cache backfill buffer (${batch.length} events):`, err)
+  )
 }
 
 function pushBackfillEvents(events: any[]): void {
@@ -95,15 +236,39 @@ function flushSubscriptionBatch(): void {
   subscriptionFlushTimer = null
   const batch = subscriptionBatch
   subscriptionBatch = []
-  if (batch.length > 0) {
-    void bulkSaveEventsToCache(batch).catch((err) =>
-      console.warn(`[pool] Failed to cache subscription batch (${batch.length} events):`, err)
+  if (batch.length === 0) return
+
+  if (indexWritesDeferred) {
+    pendingSubscriptionBatch.push(...batch)
+    return
+  }
+
+  // Group events by relay for bulkSaveEventsToCache, or batch without relay.
+  const noRelay: any[] = []
+  const byRelay = new Map<string, any[]>()
+  for (const item of batch) {
+    if (item.relay) {
+      const relay = item.relay as string
+      if (!byRelay.has(relay)) byRelay.set(relay, [])
+      byRelay.get(relay)!.push(item.event)
+    } else {
+      noRelay.push(item.event ?? item)
+    }
+  }
+  if (noRelay.length > 0) {
+    void bulkSaveEventsToCache(noRelay).catch((err) =>
+      console.warn(`[pool] Failed to cache subscription batch (${noRelay.length} events):`, err)
+    )
+  }
+  for (const [relay, events] of byRelay) {
+    void bulkSaveEventsToCache(events, relay).catch((err) =>
+      console.warn(`[pool] Failed to cache subscription batch for ${relay} (${events.length} events):`, err)
     )
   }
 }
 
-function pushSubscriptionEvent(event: any): void {
-  subscriptionBatch.push(event)
+function pushSubscriptionEvent(event: any, relay?: string): void {
+  subscriptionBatch.push(relay ? { event, relay } : event)
   if (subscriptionBatch.length >= SUBSCRIPTION_FLUSH_MAX) {
     if (subscriptionFlushTimer) {
       clearTimeout(subscriptionFlushTimer)
@@ -115,45 +280,19 @@ function pushSubscriptionEvent(event: any): void {
   }
 }
 
-worker.onmessage = (e: MessageEvent) => {
-  const msg = e.data
-  switch (msg.type) {
-    case 'backfillEvents': {
-      pushBackfillEvents((msg as any).events)
-      break
-    }
-    case 'subscriptionEvent': {
-      const event = (msg as any).event
-      pushSubscriptionEvent(event)
-      break
-    }
-    case 'backfillComplete':
-      break
-    case 'searchResults': {
-      const cb = searchCallbacks.get(msg.id)
-      if (cb) { console.log('[Pool] Search', msg.id, 'resolved with', msg.events?.length ?? 0, 'events'); cb.resolve(msg.events); searchCallbacks.delete(msg.id) }
-      break
-    }
-    case 'searchError': {
-      console.error('[Pool] Search', msg.id, 'failed:', msg.error)
-      const cb = searchCallbacks.get(msg.id)
-      if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
-      break
-    }
-  }
-}
+
 
 export const setActiveRelays = (urls: string[]) => {
   const base = urls.length > 0 ? urls : [...DEFAULT_RELAYS]
   activeRelays = getSearchRelays(base)
-  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+  getBackfillWorker().postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
 }
 
 /** Re-sync the worker's relay set — call after new search-capable relays are discovered */
 export function syncSearchRelaysToWorker(): void {
   const base = activeRelays.length > 0 ? activeRelays : [...DEFAULT_RELAYS]
   activeRelays = getSearchRelays(base)
-  worker.postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
+  getBackfillWorker().postMessage({ type: 'setActiveRelays', relayUrls: activeRelays })
 }
 
 // ── Mock events (seed cache with local preview data) ─────────────────────
@@ -278,7 +417,7 @@ function processQueue() {
     }
     subQueue.splice(bestIdx, 1)
     subMetadata.set(item.id, 'active')
-    worker.postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
+    getBackfillWorker().postMessage({ type: 'subscribe', id: item.id, relays: item.relays, filters: item.filters })
   }
 }
 
@@ -286,17 +425,28 @@ function processQueue() {
 
 let subIdCounter = 0
 const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
+
+let pruneCacheResolve: ((removedIds: string[]) => void) | null = null
+const vectorSearchCallbacks = new Map<string, { resolve: (results: any) => void }>()
 // Periodically purge search callbacks older than 30s to prevent leaks
 const SEARCH_CALLBACK_TTL = 30000
-setInterval(() => {
-  const now = Date.now()
-  for (const [id, cb] of searchCallbacks) {
-    if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
-      cb.reject(new Error('Search timed out'))
-      searchCallbacks.delete(id)
+let searchPurgeInterval: ReturnType<typeof setInterval> | null = null
+function ensureSearchPurgeInterval(): void {
+  if (searchPurgeInterval) return
+  searchPurgeInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [id, cb] of searchCallbacks) {
+      if (now - cb.createdAt > SEARCH_CALLBACK_TTL) {
+        cb.reject(new Error('Search timed out'))
+        searchCallbacks.delete(id)
+      }
     }
-  }
-}, SEARCH_CALLBACK_TTL)
+    if (searchCallbacks.size === 0) {
+      clearInterval(searchPurgeInterval!)
+      searchPurgeInterval = null
+    }
+  }, SEARCH_CALLBACK_TTL)
+}
 
 export function subscribeToRelays(
   relays: string[],
@@ -315,14 +465,14 @@ export function subscribeToRelays(
     }
     if (subMetadata.get(id) === 'active') {
       subMetadata.delete(id)
-      worker.postMessage({ type: 'unsubscribe', id })
+      getBackfillWorker().postMessage({ type: 'unsubscribe', id })
       processQueue()
     }
   }
 
   if (subMetadata.size < MAX_CONCURRENT_SUBS) {
     subMetadata.set(id, 'active')
-    worker.postMessage({ type: 'subscribe', id, relays, filters: filterList })
+    getBackfillWorker().postMessage({ type: 'subscribe', id, relays, filters: filterList })
   } else if (subQueue.length < MAX_QUEUE_SIZE) {
     subMetadata.set(id, 'queued')
     subQueue.push({ id, relays, filters: filterList, priority })
@@ -377,20 +527,22 @@ export async function fetchFromRelays(relays: string[], filters: any | any[]): P
 }
 
 export async function searchRelays(
-  relays: string[],
+  _relays: string[],
   query: string,
   options?: { kinds?: number[]; limit?: number; until?: number; signal?: AbortSignal }
 ): Promise<any[]> {
-  const expandedRelays = getSearchRelays(relays)
-  if (expandedRelays.length > relays.length) {
-    console.log(`[Pool] Expanded search relays: ${relays.length} → ${expandedRelays.length} relays`)
+  const expandedRelays = getSearchOnlyRelays()
+  if (expandedRelays.length === 0) {
+    console.warn('[Pool] No search-capable relays available for query')
+    return []
   }
   const safeQuery = sanitizeSearchQuery(query)
   if (!safeQuery) return Promise.resolve([])
   const id = `search_${++subIdCounter}`
   return new Promise<any[]>((resolve, reject) => {
     searchCallbacks.set(id, { resolve, reject, createdAt: Date.now() })
-    worker.postMessage({
+    ensureSearchPurgeInterval()
+    getBackfillWorker().postMessage({
       type: 'search',
       id,
       relays: expandedRelays,
@@ -402,13 +554,13 @@ export async function searchRelays(
 
     if (options?.signal) {
       if (options.signal.aborted) {
-        worker.postMessage({ type: 'abortSearch', id })
+        getBackfillWorker().postMessage({ type: 'abortSearch', id })
         searchCallbacks.delete(id)
         reject(new DOMException('Aborted', 'AbortError'))
         return
       }
       options.signal.addEventListener('abort', () => {
-        worker.postMessage({ type: 'abortSearch', id })
+        getBackfillWorker().postMessage({ type: 'abortSearch', id })
         const cb = searchCallbacks.get(id)
         if (cb) {
           cb.reject(new DOMException('Aborted', 'AbortError'))
@@ -417,6 +569,63 @@ export async function searchRelays(
       }, { once: true })
     }
   })
+}
+
+/**
+ * Delegate pruneCache to the backfill worker.
+ * The in-memory graph must be flushed before calling so IDB is consistent.
+ * Returns the list of node IDs removed from persistence.
+ */
+export async function runPruneCache(): Promise<string[]> {
+  if (typeof Worker === 'undefined') return []
+  await graph.flush()
+  return new Promise<string[]>((resolve) => {
+    pruneCacheResolve = resolve
+    getBackfillWorker().postMessage({ type: 'pruneCache' })
+  })
+}
+
+/**
+ * Delegate vector similarity search to the backfill worker.
+ * @param queryVec - the query vector to search with
+ * @param topK - number of results to return
+ * @param threshold - minimum similarity score
+ */
+export async function runVectorSearch(
+  queryVec: number[],
+  topK = 10,
+  threshold = 0.3
+): Promise<Array<{ id: string; score: number }>> {
+  if (typeof Worker === 'undefined') return []
+  const searchId = `vec_${++subIdCounter}`
+  return new Promise<Array<{ id: string; score: number }>>((resolve) => {
+    vectorSearchCallbacks.set(searchId, { resolve })
+    getBackfillWorker().postMessage({ type: 'vectorSearch', searchId, queryVec, topK, threshold })
+  })
+}
+
+/** Clean up all pool resources — call on logout / unmount */
+export function cleanupPool(): void {
+  if (searchPurgeInterval) clearInterval(searchPurgeInterval)
+  searchPurgeInterval = null
+  terminateBackfillWorker()
+  searchCallbacks.clear()
+  vectorSearchCallbacks.clear()
+  pruneCacheResolve = null
+  pendingSubscriptionBatch = []
+  pendingBackfillBatch = []
+  backfillBuffer = []
+  subscriptionBatch = []
+  if (backfillFlushTimer) {
+    clearTimeout(backfillFlushTimer)
+    backfillFlushTimer = null
+  }
+  if (subscriptionFlushTimer) {
+    clearTimeout(subscriptionFlushTimer)
+    subscriptionFlushTimer = null
+  }
+  subMetadata.clear()
+  subQueue.length = 0
 }
 
 export { addDiscoveredRelays, fetchRelayDirectory }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { graph } from '../../graph'
 import { subscribeToRelays, setActiveRelays } from '../../nostr/pool'
-import { db } from '../../nostr/cache'
 import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVideoBackfill, maybeResumeFollowBackfill, maybeResumeUserVideoBackfill } from '../../nostr/cacheBackfill'
 
 const PAGE_SIZE = 50
@@ -46,13 +46,15 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     if (initialBackfillsFiredRef.current) return
 
     let cancelled = false
+    let unsub: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     async function bootstrapMetadata() {
-      const cached = await Promise.all([
-        db.cachedEvents.where({ kind: 0, pubkey: sessionPubkey }).first(),
-        db.cachedEvents.where({ kind: 3, pubkey: sessionPubkey }).first(),
-        db.cachedEvents.where({ kind: 10002, pubkey: sessionPubkey }).first(),
-      ])
+      const cached = sessionPubkey ? [
+        graph.byKindPubkey(0, sessionPubkey)?.data,
+        graph.byKindPubkey(3, sessionPubkey)?.data,
+        graph.byKindPubkey(10002, sessionPubkey)?.data,
+      ] : [null, null, null]
       if (cancelled) return
       if (cached[0] && cached[1] && cached[2]) return
 
@@ -63,15 +65,19 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
         'wss://relay.snort.social',
       ]
       console.log(`[VideoFeed] Fetching user metadata for ${sessionPubkey} over bootstrap relays`)
-      const unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [sessionPubkey], limit: 3 })
-      await new Promise<void>(resolve => {
-        const timer = setTimeout(() => resolve(), 1500)
-        return () => { clearTimeout(timer); unsub() }
-      })
+      timer = setTimeout(() => {
+        unsub?.()
+        unsub = undefined
+      }, 1500)
+      unsub = subscribeToRelays(bootstrapRelays, { kinds: [0, 3, 10002], authors: [sessionPubkey], limit: 3 })
     }
 
     void bootstrapMetadata()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      unsub?.()
+    }
   }, [sessionPubkey])
 
   // Backfill: follow + user-video + general cache (once per session)

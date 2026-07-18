@@ -15,6 +15,8 @@ export function isSupportedVideo(file: File): boolean {
 
 let ffmpegInstance: FFmpeg | null = null
 let ffmpegReady: Promise<FFmpeg> | null = null
+let ffmpegCoreURL: string | null = null
+let ffmpegWasmURL: string | null = null
 
 async function getFFmpeg(): Promise<FFmpeg> {
   if (ffmpegInstance) return ffmpegInstance
@@ -29,9 +31,11 @@ async function getFFmpeg(): Promise<FFmpeg> {
     const ffmpeg = new FFmpeg()
 
     const base = '/ffmpeg-core'
+    ffmpegCoreURL = await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript')
+    ffmpegWasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm')
     await ffmpeg.load({
-      coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+      coreURL: ffmpegCoreURL,
+      wasmURL: ffmpegWasmURL,
     })
 
     ffmpegInstance = ffmpeg
@@ -39,6 +43,28 @@ async function getFFmpeg(): Promise<FFmpeg> {
   })()
 
   return ffmpegReady
+}
+
+/** Terminate the cached FFmpeg WASM instance, release its worker, and revoke
+ *  the blob URLs created during `load()`. Safe to call when no instance exists. */
+export function terminateFFmpeg(): void {
+  if (ffmpegInstance) {
+    try {
+      ffmpegInstance.terminate()
+    } catch (err) {
+      console.warn('[convertVideo] FFmpeg terminate failed:', err)
+    }
+  }
+  if (ffmpegCoreURL) {
+    URL.revokeObjectURL(ffmpegCoreURL)
+    ffmpegCoreURL = null
+  }
+  if (ffmpegWasmURL) {
+    URL.revokeObjectURL(ffmpegWasmURL)
+    ffmpegWasmURL = null
+  }
+  ffmpegInstance = null
+  ffmpegReady = null
 }
 
 export interface ConversionProgress {

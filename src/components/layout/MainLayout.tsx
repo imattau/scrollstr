@@ -45,12 +45,12 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     <>
       {immersive ? (
         <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
-        <div className="md:hidden h-dvh flex flex-col bg-[#1b1327] relative">
-          <div className="flex-1 min-h-0 overflow-hidden pb-16">
+        <div className="md:hidden h-dvh bg-[#1b1327] relative">
+          <div className="absolute inset-0 bottom-16 overflow-hidden">
             {children}
           </div>
           {/* Mobile Navigation (Bottom) */}
-          <nav className="fixed bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
+          <nav className="absolute bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
             {mobileNavItems.map((item) => {
               const Icon = item.icon
               const active = isActive(item.path)

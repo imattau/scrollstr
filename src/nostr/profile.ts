@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { subscribeToRelays } from './pool'
 import { useNostr } from '../app/providers'
 import { useUserRelayUrls } from './relays'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from './cache'
+import { graph, useGraphQuery } from '../graph'
 import type { CreatorProfile } from '../features/feed/VideoFeedItem'
 
 // Parse metadata JSON content from kind:0 event
@@ -77,6 +76,21 @@ function cancelProfileFetch(pubkey: string) {
   }
 }
 
+/** Tear down the module-level profile batch state. Closes any in-flight
+ *  nostr subscription, clears the pending set, and stops the timer.
+ *  Call on logout / teardown. */
+export function resetProfileBatch(): void {
+  if (batchUnsub) {
+    batchUnsub()
+    batchUnsub = null
+  }
+  pendingPubkeys.clear()
+  if (batchTimer) {
+    clearTimeout(batchTimer)
+    batchTimer = null
+  }
+}
+
 // React hook to fetch creator profile reactively from Dexie cache
 // Pass refreshKey to force a re-fetch even when the profile is cached.
 export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile => {
@@ -87,10 +101,16 @@ export const useProfile = (pubkey: string, refreshKey?: number): CreatorProfile 
   const pubkeyRef = useRef(pubkey)
   useEffect(() => { pubkeyRef.current = pubkey }, [pubkey])
 
-  const cachedProfile = useLiveQuery(async () => {
-    if (!pubkey) return null
-    return await db.authorProfiles.get(pubkey)
-  }, [pubkey])
+  const cachedProfile = useGraphQuery(
+    () => {
+      if (!pubkey) return null
+      const node = graph.getNode(`pro:${pubkey}`)
+      return node?.data as CreatorProfile | undefined
+    },
+    [pubkey, refreshKey],
+    200,
+    ['profile'],
+  )
 
   useEffect(() => {
     if (pubkey) {
