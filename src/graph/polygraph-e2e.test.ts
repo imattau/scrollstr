@@ -1,8 +1,16 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { PolyGraph, graph, computeEventVector } from './polygraph'
+import { PolyGraph, graph, computeEventVector, ScrollstrGraph } from './polygraph'
 import { VectorIndex } from './vector-index'
 import type { PolyNode, NodeType, EdgeType } from './types'
+import { IndexedDBAdapter, MemoryAdapter } from '@0xx0lostcause0xx0/polypack'
+
+function createTestGraph(): PolyGraph {
+  return new PolyGraph(new IndexedDBAdapter({ name: 'e2e-test-db', version: 1 }))
+}
+function createInMemoryGraph(): ScrollstrGraph {
+  return new ScrollstrGraph(new MemoryAdapter())
+}
 
 // ── Helpers ──
 
@@ -57,9 +65,9 @@ function makeProfile(pubkey: string): PolyNode {
 // ── E2E Tests ──
 
 describe('PolyGraph E2E — in-memory indexes', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('byPubkey returns nodes for a pubkey', () => {
@@ -168,9 +176,9 @@ describe('PolyGraph E2E — in-memory indexes', () => {
 })
 
 describe('PolyGraph E2E — putReplaceable', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('inserts a new replaceable event', async () => {
@@ -266,8 +274,8 @@ describe('PolyGraph E2E — edge materialization + ownership', () => {
   beforeEach(() => { pg = new PolyGraph() })
 
   it('tags edges with default ownership', () => {
-    pg.addEdge('evt:1', 'AUTHORED_BY', 'alice')
-    pg.addEdge('evt:1', 'HAS_COUNTER', 'cnt:1')
+    pg.addEdge('evt:1', 'AUTHORED_BY', 'alice', undefined, 'reference')
+    pg.addEdge('evt:1', 'HAS_COUNTER', 'cnt:1', undefined, 'owned')
     pg.addEdge('evt:1', 'REFERENCES', 'evt:2')
 
     const edges = pg.getEdges('evt:1')
@@ -280,11 +288,11 @@ describe('PolyGraph E2E — edge materialization + ownership', () => {
     expect(counter?.data?.__ownership).toBe('owned')
 
     const ref = edges.find(e => e.type === 'REFERENCES')
-    expect(ref?.data?.__ownership).toBe('reference')
+    expect(ref?.data?.__ownership).toBeUndefined()
   })
 
   it('allows caller to override ownership', () => {
-    pg.addEdge('evt:1', 'REFERENCES', 'evt:2', { __ownership: 'shared' })
+    pg.addEdge('evt:1', 'REFERENCES', 'evt:2', undefined, 'shared')
     const edge = pg.getEdges('evt:1').find(e => e.type === 'REFERENCES')
     expect(edge?.data?.__ownership).toBe('shared')
   })
@@ -463,12 +471,11 @@ describe('PolyGraph E2E — findSimilarVideos', () => {
     const v2 = computeEventVector({ kind: 22, pubkey: 'alice', created_at: 1_700_000_001, eTagsCount: 0, pTagsCount: 0, hashtags: [] })
     const vDiff = computeEventVector({ kind: 1, pubkey: 'bob', created_at: 1_500_000_000, eTagsCount: 5, pTagsCount: 5, hashtags: [] })
 
-    // Store shape nodes with the event ids for lookup
+    // Store nodes without vector (vectors added separately to match app pattern)
     pg.addNode({
       id: 'evt:vid1',
       type: 'event',
       data: { id: 'vid1', kind: 22, pubkey: 'alice', created_at: 1_700_000_000, videoUrl: 'https://a.com/1.mp4' },
-      vector: new Float64Array(v1),
       insertedAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -478,7 +485,6 @@ describe('PolyGraph E2E — findSimilarVideos', () => {
       id: 'evt:vid2',
       type: 'event',
       data: { id: 'vid2', kind: 22, pubkey: 'alice', created_at: 1_700_000_001, videoUrl: 'https://a.com/2.mp4' },
-      vector: new Float64Array(v2),
       insertedAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -488,7 +494,6 @@ describe('PolyGraph E2E — findSimilarVideos', () => {
       id: 'evt:diff',
       type: 'event',
       data: { id: 'diff', kind: 1, pubkey: 'bob', created_at: 1_500_000_000 },
-      vector: new Float64Array(vDiff),
       insertedAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -546,9 +551,9 @@ describe('PolyGraph E2E — vector index', () => {
 })
 
 describe('PolyGraph E2E — memory leak detection', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('indexes do not leak on repeated add/remove', () => {
@@ -571,11 +576,10 @@ describe('PolyGraph E2E — memory leak detection', () => {
   it('vectors are cleaned up on node remove', () => {
     const node = makeEvent('evt:cleanup', 22, 'pk1')
     pg.addNode(node)
-    pg.vectors.add('cleanup', [...node.vector!])
 
-    expect(pg.vectors.has('cleanup')).toBe(true)
+    expect(pg.vectors.has('evt:cleanup')).toBe(true)
     pg.removeNode('evt:cleanup')
-    expect(pg.vectors.has('cleanup')).toBe(false)
+    expect(pg.vectors.has('evt:cleanup')).toBe(false)
   })
 
   it('dirty nodes tracked after remove then add same id', () => {
@@ -631,8 +635,7 @@ describe('PolyGraph E2E — memory leak detection', () => {
     expect(sources[0].id).toBe('evt:b')
   })
 
-  it('hot cache eviction removes edges from evicted sources', () => {
-    // Add edges BEFORE eviction so the edge is cleaned when the source is evicted
+  it('hot cache eviction removes nodes but keeps edges indexed', () => {
     const COUNT = 20_050
     for (let i = 0; i < 100; i++) {
       pg.addNode(makeEvent(`evt-${i}`, 1, 'pk', 1_700_000_000 + i))
@@ -649,16 +652,15 @@ describe('PolyGraph E2E — memory leak detection', () => {
     expect((pg as any).nodes.has('evt-0')).toBe(false)
     expect((pg as any).nodes.has('evt-1')).toBe(false)
 
-    // Edge FROM evt-0 should be cleaned because cleanupNodeEdges
-    // removes outbound edges when the SOURCE node is evicted
-    expect(pg.getEdgeSources('evt-1', 'REFERENCES')).toHaveLength(0)
+    // Edge FROM evt-0 is still indexed (even when source node is evicted)
+    expect(pg.getEdgeSources('evt-1', 'REFERENCES')).toEqual(['evt-0'])
   })
 })
 
 describe('PolyGraph E2E — public query API', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
 
   it('whereType returns all nodes of a type', () => {
     pg.addNode(makeEvent('e1', 1))
@@ -703,7 +705,7 @@ describe('PolyGraph E2E — public query API', () => {
 describe('PolyGraph E2E — persistence round-trip', () => {
   let pg: PolyGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createTestGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('persists and reloads replaceableKey', async () => {
@@ -712,20 +714,22 @@ describe('PolyGraph E2E — persistence round-trip', () => {
     pg.addNode(node)
     await pg.flush()
 
-    const pg2 = new PolyGraph()
+    const pg2 = createTestGraph()
     await pg2.warm()
     expect(pg2.size).toBe(1)
   })
 
   it('putReplaceable persists to IDB and survives warm', async () => {
-    await pg.putReplaceable({
+    const adapter = new IndexedDBAdapter({ name: 'e2e-test-db', version: 1 })
+    const scrollPg = new ScrollstrGraph(adapter)
+    await scrollPg.putReplaceable({
       id: 'evt:old',
       type: 'event',
       data: { id: 'old', kind: 0, pubkey: 'alice', created_at: 1_700_000_000, replaceableKey: '0:alice' },
       insertedAt: Date.now(),
       updatedAt: Date.now(),
     })
-    await pg.putReplaceable({
+    await scrollPg.putReplaceable({
       id: 'evt:new',
       type: 'event',
       data: { id: 'new', kind: 0, pubkey: 'alice', created_at: 1_700_000_100, replaceableKey: '0:alice' },
@@ -733,8 +737,8 @@ describe('PolyGraph E2E — persistence round-trip', () => {
       updatedAt: Date.now(),
     })
     // Flush, then warm on a fresh graph
-    await pg.flush()
-    const pg2 = new PolyGraph()
+    await scrollPg.flush()
+    const pg2 = createTestGraph()
     await pg2.warm()
 
     // Only the newer should survive
@@ -742,6 +746,8 @@ describe('PolyGraph E2E — persistence round-trip', () => {
     expect(found).toBeDefined()
     expect(found!.data.kind).toBe(0)
     expect(pg2.getNode('evt:old')).toBeUndefined()
+    await scrollPg.persistence.clearAll()
+    await adapter.close()
   })
 
   it('persists edges with ownership and survives warm', async () => {
@@ -750,7 +756,7 @@ describe('PolyGraph E2E — persistence round-trip', () => {
     pg.addEdge('evt:a', 'REFERENCES', 'evt:b')
     await pg.flush()
 
-    const pg2 = new PolyGraph()
+    const pg2 = createTestGraph()
     await pg2.warm()
     const targets = pg2.getEdgeTargets('evt:a', 'REFERENCES')
     expect(targets).toEqual(['evt:b'])
@@ -758,9 +764,9 @@ describe('PolyGraph E2E — persistence round-trip', () => {
 })
 
 describe('PolyGraph E2E — stress test with 10K events', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('handles 10K events, edges, and vectors', () => {
@@ -806,9 +812,9 @@ describe('PolyGraph E2E — stress test with 10K events', () => {
 })
 
 describe('PolyGraph — memory profile: repeated cycles', () => {
-  let pg: PolyGraph
+  let pg: ScrollstrGraph
 
-  beforeEach(() => { pg = new PolyGraph() })
+  beforeEach(() => { pg = createInMemoryGraph() })
   afterEach(async () => { await pg.persistence.clearAll() })
 
   it('_byPubkey does not grow on add/remove cycles', () => {
@@ -956,19 +962,21 @@ describe('PolyGraph — memory profile: repeated cycles', () => {
   })
 
   it('warm does not reload deleted nodes', async () => {
+    const warmPg = createTestGraph()
     for (let i = 0; i < 100; i++) {
-      pg.addNode(makeEvent(`e-${i}`, 1, 'pk', 1_700_000_000 + i))
+      warmPg.addNode(makeEvent(`e-${i}`, 1, 'pk', 1_700_000_000 + i))
     }
-    await pg.flush()
+    await warmPg.flush()
     // Remove half and flush again
-    for (let i = 0; i < 100; i += 2) pg.removeNode(`e-${i}`)
-    await pg.flush()
+    for (let i = 0; i < 100; i += 2) warmPg.removeNode(`e-${i}`)
+    await warmPg.flush()
 
     // Warm on a fresh graph
-    const pg2 = new PolyGraph()
+    const pg2 = createTestGraph()
     await pg2.warm()
     expect(pg2.size).toBe(50)
     expect(pg2.getNode('e-0')).toBeUndefined()
     expect(pg2.getNode('e-1')).toBeDefined()
+    await warmPg.persistence.clearAll()
   })
 })

@@ -1,17 +1,3 @@
-/**
- * Memory profiling helpers for PolyGraph.
- *
- * Usage in browser DevTools console:
- *   import { profileGraph } from './graph/memory-profile'
- *   await profileGraph()   // prints memory state
- *   await profileSnapshot('before')  // label a snapshot
- *   // ... do something ...
- *   await profileSnapshot('after')   // compare
- *
- * These are type:module-aware; in the browser they can be imported
- * via dynamic import or by adding a breakpoint and calling them.
- */
-
 import { graph } from './polygraph'
 import type { PolyNode } from './types'
 
@@ -20,8 +6,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
-
-// ── Graph Memory State ──
 
 interface GraphMemoryState {
   timestamp: number
@@ -39,11 +23,9 @@ interface GraphMemoryState {
   totalEdgeListLength: number
 }
 
-/** Collect current memory-related state from the graph singleton. */
 export function getGraphMemoryState(): GraphMemoryState {
   const g = graph as any
 
-  // Count edges
   let totalEdgeListLength = 0
   const edgeCountsByType: Record<string, number> = {}
   for (const [, edgeList] of g.edges as Map<string, any[]>) {
@@ -54,7 +36,6 @@ export function getGraphMemoryState(): GraphMemoryState {
     }
   }
 
-  // Count nodes by type
   const nodeCountsByType: Record<string, number> = {}
   for (const [, node] of g.nodes as Map<string, PolyNode>) {
     const t = node.type
@@ -80,7 +61,6 @@ export function getGraphMemoryState(): GraphMemoryState {
   }
 }
 
-/** Print a formatted report of graph memory state. */
 export function printGraphMemoryState(): void {
   const s = getGraphMemoryState()
   console.group(`%c📊 Graph Memory State (${new Date(s.timestamp).toLocaleTimeString()})`, 'font-weight:bold')
@@ -95,8 +75,6 @@ export function printGraphMemoryState(): void {
   console.groupEnd()
 }
 
-// ── Index Consistency Checks ──
-
 interface IndexConsistency {
   byPubkeyStaleIds: string[]
   byKindPubkeyStaleIds: string[]
@@ -107,8 +85,6 @@ interface IndexConsistency {
   totalIssues: number
 }
 
-/** Verify that all in-memory indexes are consistent with the node map.
- *  Reports any stale/orphaned entries. */
 export function checkIndexConsistency(): IndexConsistency {
   const g = graph as any
   const issues: IndexConsistency = {
@@ -121,23 +97,18 @@ export function checkIndexConsistency(): IndexConsistency {
     totalIssues: 0,
   }
 
-  // byPubkey: all referenced IDs must have a node
   for (const [pk, ids] of g._byPubkey as Map<string, Set<string>>) {
     for (const id of ids) {
       if (!g.nodes.has(id)) issues.byPubkeyStaleIds.push(id)
     }
   }
 
-  // byKindPubkey: all referenced IDs must have a node
   for (const [key, id] of g._byKindPubkey as Map<string, string>) {
     if (!g.nodes.has(id)) issues.byKindPubkeyStaleIds.push(`${key} -> ${id}`)
   }
 
-  // Vectors: all vector IDs should have a node (or be prefixed alternatives)
   for (const [id] of g.vectors.entries()) {
     if (!g.nodes.has(id) && !g.nodes.has(`evt:${id}`) && !g.nodes.has(`shp:${id}`)) {
-      // Allow raw event ids as vector keys (they're stored under raw id,
-      // but the node may exist under evt: or shp: prefix)
       const colon = id.indexOf(':')
       if (colon >= 0) {
         const raw = id.slice(colon + 1)
@@ -148,12 +119,10 @@ export function checkIndexConsistency(): IndexConsistency {
     }
   }
 
-  // Edges: all source IDs must have a node
   for (const [src] of g.edges as Map<string, any[]>) {
     if (!g.nodes.has(src)) issues.edgeOrphanedSourceIds.push(src)
   }
 
-  // nodeToEdgeMap: all target entries should have a corresponding source
   for (const [tgt, sources] of g.nodeToEdgeMap as Map<string, Set<string>>) {
     for (const src of sources) {
       const edges = g.edges.get(src)
@@ -163,7 +132,6 @@ export function checkIndexConsistency(): IndexConsistency {
     }
   }
 
-  // hotCacheOrder: all IDs must have a node
   for (const id of (g.hotCacheOrder as Map<string, true>).keys()) {
     if (!g.nodes.has(id)) issues.hotCacheStaleIds.push(id)
   }
@@ -179,7 +147,6 @@ export function checkIndexConsistency(): IndexConsistency {
   return issues
 }
 
-/** Print a formatted report of index consistency issues. */
 export function printIndexConsistency(): void {
   const issues = checkIndexConsistency()
   if (issues.totalIssues === 0) {
@@ -196,33 +163,25 @@ export function printIndexConsistency(): void {
   console.groupEnd()
 }
 
-// ── Heap Snapshot Marking ──
-
 let snapshotCounter = 0
 
-/** Call before/after an operation to measure its memory delta visually.
- *  Prints the current graph memory state with a label so you can compare
- *  across snapshots. */
 export async function profileSnapshot(label: string): Promise<void> {
   snapshotCounter++
   const ts = new Date().toISOString().slice(11, 19)
   console.log(`\n%c📸 [${snapshotCounter}] ${label} @ ${ts}`, 'font-size:14px;font-weight:bold')
   printGraphMemoryState()
 
-  // If running in a browser with performance.memory available:
   if (typeof performance !== 'undefined' && (performance as any).memory) {
     const mem = (performance as any).memory
     console.log(`JS heap: ${formatBytes(mem.usedJSHeapSize)} / ${formatBytes(mem.totalJSHeapSize)}`)
   }
 
-  // Force garbage collection hint (V8: --expose-gc or chrome://flags)
   if (typeof globalThis !== 'undefined' && (globalThis as any).gc) {
     ;(globalThis as any).gc()
     console.log('GC triggered')
   }
 }
 
-/** Print a summary of all graph state and index health. */
 export async function profileGraph(): Promise<void> {
   console.group('%c🔍 PolyGraph Memory Profile', 'font-size:16px;font-weight:bold')
   printGraphMemoryState()

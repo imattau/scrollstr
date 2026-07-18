@@ -1,4 +1,4 @@
-import type { PolyNode } from './types'
+export { VectorIndex, cosineSimilarity } from '@0xx0lostcause0xx0/polypack'
 
 export function computeEventVector(event: {
   kind: number
@@ -29,70 +29,4 @@ export function computeEventVector(event: {
     isVideo,
     isReaction,
   ]
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0
-  let na = 0
-  let nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb)
-  return denom === 0 ? 0 : dot / denom
-}
-
-export class VectorIndex {
-  private vectors = new Map<string, number[]>()
-  private onChange?: (id: string) => void
-
-  constructor(onChange?: (id: string) => void) {
-    this.onChange = onChange
-  }
-
-  add(id: string, vector: number[]): void {
-    this.vectors.set(id, vector)
-    this.onChange?.(id)
-  }
-
-  remove(id: string): void {
-    this.vectors.delete(id)
-  }
-
-  query(
-    vector: number[],
-    topK: number,
-    threshold = 0
-  ): Array<{ id: string; score: number }> {
-    const results: Array<{ id: string; score: number }> = []
-    for (const [id, v] of this.vectors) {
-      const score = cosineSimilarity(vector, v)
-      if (score < threshold) continue
-      results.push({ id, score })
-    }
-    results.sort((a, b) => b.score - a.score)
-    return results.slice(0, topK)
-  }
-
-  clear(): void {
-    this.vectors.clear()
-  }
-
-  get size(): number {
-    return this.vectors.size
-  }
-
-  entries(): IterableIterator<[string, number[]]> {
-    return this.vectors.entries()
-  }
-
-  has(id: string): boolean {
-    return this.vectors.has(id)
-  }
-
-  get(id: string): number[] | undefined {
-    return this.vectors.get(id)
-  }
 }

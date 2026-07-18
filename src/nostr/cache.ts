@@ -596,7 +596,7 @@ async function recordMediaEdge(url: string, eventId: string, pubkey: string): Pr
   const data = mediaNode.data as Record<string, unknown>
 
   // Add HAS_MEDIA edge: event → media
-  graph.addEdge(eventId, 'HAS_MEDIA', url)
+  graph.addEdge(eventId, 'HAS_MEDIA', url, undefined, 'shared')
   // Add AUTHORED_BY edge: event → pubkey (if not already present)
   graph.addEdge(eventId, 'AUTHORED_BY', pubkey)
 
@@ -604,17 +604,12 @@ async function recordMediaEdge(url: string, eventId: string, pubkey: string): Pr
   const canonicalId = data.canonicalShapeId as string | null
 
   if (canonicalId && canonicalId !== eventId) {
-    // This is a duplicate — increment sharer count
-    data.sharerCount = ((data.sharerCount as number) ?? 1) + 1
-    mediaNode.updatedAt = Date.now()
-    graph.updateNode(mediaNodeId, { sharerCount: data.sharerCount, updatedAt: Date.now() })
+    const prevCount = (data.sharerCount as number) ?? 1
+    graph.updateNode(mediaNodeId, { sharerCount: prevCount + 1, updatedAt: Date.now() })
     return canonicalId
   }
 
   // First event for this URL — make this the canonical shape
-  data.canonicalShapeId = eventId
-  data.sharerCount = 1
-  mediaNode.updatedAt = Date.now()
   graph.updateNode(mediaNodeId, { canonicalShapeId: eventId, sharerCount: 1, updatedAt: Date.now() })
   return null
 }
@@ -818,7 +813,7 @@ export async function updateUserVideoState(id: string, state: Partial<Omit<UserV
     updatedAt: Date.now()
   }
   await db.userVideoState.put(updatedRec)
-  graph.addEdge(`shp:${id}`, 'HAS_STATE', `sta:${id}`)
+  graph.addEdge(`shp:${id}`, 'HAS_STATE', `sta:${id}`, undefined, 'owned')
 
   const shape = await db.videoShapes.get(id)
   if (shape) {
@@ -1142,10 +1137,6 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
         graph.updateNode(shapeNode.id, { hidden: true, hiddenAt: Date.now() })
         const counterNode = graph.getNode(`cnt:${targetId}`)
         if (counterNode) {
-          Object.assign(counterNode.data, {
-            reactionCount: 0, repostCount: 0, replyCount: 0,
-            zapCount: 0, zapTotalSats: 0,
-          })
           graph.updateNode(counterNode.id, { reactionCount: 0, repostCount: 0, replyCount: 0, zapCount: 0, zapTotalSats: 0 })
         }
       }
@@ -1236,7 +1227,7 @@ async function incrementVideoCounts(videoId: string, reactionEvent: any): Promis
   }
 
   await db.videoCounters.put(existing)
-  graph.addEdge(`shp:${videoId}`, 'HAS_COUNTER', `cnt:${videoId}`)
+  graph.addEdge(`shp:${videoId}`, 'HAS_COUNTER', `cnt:${videoId}`, undefined, 'owned')
 }
 
 export async function mergeCountersIntoShape(shape: VideoShape): Promise<VideoShape> {
