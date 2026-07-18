@@ -1,7 +1,12 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { PolyGraph, computeEventVector } from './polygraph'
+import { PolyGraph, IndexedDBAdapter } from '@0xx0lostcause0xx0/polypack'
+import { computeEventVector } from './polygraph'
 import type { PolyNode } from './types'
+
+function createTestGraph(): PolyGraph {
+  return new PolyGraph(new IndexedDBAdapter({ name: 'test-db', version: 1 }))
+}
 
 function makeEvent(id: string, kind: number, pubkey = 'pk1', ts = 1_700_000_000): PolyNode {
   const vec = computeEventVector({ kind, pubkey, created_at: ts, eTagsCount: 0, pTagsCount: 0, hashtags: [] })
@@ -204,7 +209,7 @@ describe('PolyGraph — persistence round-trip', () => {
   let graph: PolyGraph
 
   beforeEach(() => {
-    graph = new PolyGraph()
+    graph = createTestGraph()
   })
 
   afterEach(async () => {
@@ -217,7 +222,7 @@ describe('PolyGraph — persistence round-trip', () => {
     graph.vectors.add(node.id, [...node.vector!])
     await graph.flush()
 
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     expect(graph2.size).toBe(1)
     const loaded = graph2.getNode('persist-1')
@@ -231,7 +236,7 @@ describe('PolyGraph — persistence round-trip', () => {
     graph.addEdge('e1', 'REFERENCES', 'e2')
     await graph.flush()
 
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     const edgeTargets = graph2.getEdgeTargets('e1', 'REFERENCES')
     expect(edgeTargets).toEqual(['e2'])
@@ -243,7 +248,7 @@ describe('PolyGraph — persistence round-trip', () => {
     graph.vectors.add(node.id, [...node.vector!])
     await graph.flush()
 
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     expect(graph2.vectors.size).toBe(1)
     expect(graph2.vectors.has('v-test')).toBe(true)
@@ -257,7 +262,7 @@ describe('PolyGraph — persistence round-trip', () => {
     graph.addNode(makeEvent('c', 34236))
     await graph.flush()
 
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     expect(graph2.size).toBe(3)
   })
@@ -268,13 +273,13 @@ describe('PolyGraph — persistence round-trip', () => {
     graph.removeNode('del-test')
     await graph.flush()
 
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     expect(graph2.getNode('del-test')).toBeUndefined()
   })
 
   it('handles empty graph warm-up', async () => {
-    const graph2 = new PolyGraph()
+    const graph2 = createTestGraph()
     await graph2.warm()
     expect(graph2.size).toBe(0)
   })

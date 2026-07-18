@@ -12,6 +12,7 @@
     "postinstall": "bash scripts/copy-ffmpeg-core.sh"
   },
   "dependencies": {
+    "@0xx0lostcause0xx0/polypack": "^2.1.0",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@hookform/resolvers": "^5.4.0",

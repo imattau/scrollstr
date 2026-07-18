@@ -1,4 +1,14 @@
-export type EdgeOwnership = 'owned' | 'shared' | 'derived' | 'reference'
+import type {
+  PolyNode as LibPolyNode,
+  PolyEdge as LibPolyEdge,
+  EdgeOwnership as LibEdgeOwnership,
+  GraphChangeEvent,
+  SerializedNode,
+  SerializedEdge,
+  VectorQuery,
+} from '@0xx0lostcause0xx0/polypack'
+
+export type EdgeOwnership = LibEdgeOwnership
 
 export type NodeType =
   | 'event'
@@ -11,14 +21,7 @@ export type NodeType =
   | 'user_state'
   | 'relay'
 
-export interface PolyNode {
-  id: string
-  type: NodeType
-  data: Record<string, unknown>
-  vector?: Float64Array
-  insertedAt: number
-  updatedAt: number
-}
+export type PolyNode<TData extends Record<string, unknown> = Record<string, unknown>> = LibPolyNode<TData>
 
 export type EdgeType =
   | 'AUTHORED_BY'
@@ -32,8 +35,6 @@ export type EdgeType =
   | 'OBSERVED_ON'
   | 'AUTHORED_ON'
 
-/** Default ownership class per EdgeType. Most edges of a given type share the
- *  same semantics — individual edges can override via `data.__ownership`. */
 export const EDGE_OWNERSHIP: Record<EdgeType, EdgeOwnership> = {
   AUTHORED_BY: 'reference',
   REFERENCES: 'reference',
@@ -44,17 +45,10 @@ export const EDGE_OWNERSHIP: Record<EdgeType, EdgeOwnership> = {
   HAS_STATE: 'owned',
   HAS_REJECTION: 'owned',
   OBSERVED_ON: 'reference',
-  AUTHORED_ON: 'derived',
+  AUTHORED_ON: 'reference',
 }
 
-export interface PolyEdge {
-  id: string
-  source: string
-  target: string
-  type: EdgeType
-  data?: Record<string, unknown>
-  createdAt: number
-}
+export type PolyEdge<TData extends Record<string, unknown> = Record<string, unknown>> = LibPolyEdge<TData>
 
 export interface QueryOptions {
   nodeTypes?: NodeType[]
@@ -68,40 +62,4 @@ export interface QueryOptions {
   offset?: number
 }
 
-export interface VectorQuery {
-  vector: number[]
-  threshold?: number
-  topK: number
-}
-
-export interface GraphChangeEvent {
-  type: 'node_added' | 'node_updated' | 'node_removed' | 'edge_added' | 'edge_removed'
-  nodeId?: string
-  nodeType?: NodeType
-  edgeId?: string
-  edgeType?: EdgeType
-  source?: string
-  target?: string
-}
-
-export interface SerializedNode {
-  id: string
-  type: NodeType
-  data: Record<string, unknown>
-  vector: number[] | null
-  insertedAt: number
-  updatedAt: number
-  /** For replaceable Nostr events (kind 0, 3, 10002, and NIP-33 range):
-   *  `${kind}:${pubkey}[:${dTag}]`. Used by the `by_replaceable` IDB index
-   *  so putReplaceable can find and overwrite older versions. */
-  replaceableKey?: string
-}
-
-export interface SerializedEdge {
-  id: string
-  source: string
-  target: string
-  type: EdgeType
-  data: Record<string, unknown> | null
-  createdAt: number
-}
+export type { GraphChangeEvent, SerializedNode, SerializedEdge, VectorQuery }

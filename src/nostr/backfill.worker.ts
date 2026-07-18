@@ -1,20 +1,15 @@
 import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
-import { PolyPersistence } from '../graph/persistence'
+import { IndexedDBAdapter } from '@0xx0lostcause0xx0/polypack'
+import type { PersistenceAdapter, PersistedNodeQuery } from '@0xx0lostcause0xx0/polypack'
 import type { NodeType } from '../graph/types'
 
-const persistence = new PolyPersistence()
+const persistence: PersistenceAdapter = new IndexedDBAdapter({ name: 'scrollstr-polypack', version: 1, nodeIndexes: ['kind', 'pubkey', 'replaceableKey'] })
 const MAX_VIDEOS = 10000
 const MAX_EVENT_NODES = 30000
 const VIDEO_KINDS = new Set([1, 21, 22, 34236])
 
-/**
- * Count persisted video events by scanning all event nodes from IndexedDB.
- * The main thread's in-memory graph is not accessible from this worker, so
- * we read directly from the shared IndexedDB persistence layer instead.
- */
 async function getCacheVideoCount(): Promise<number> {
-  const ids = await persistence.allNodeIds()
-  const nodes = await persistence.getNodes(ids)
+  const nodes = await loadNodesByType('event')
   let count = 0
   for (const n of nodes) {
     const kind = n.data.kind as number | undefined
@@ -24,8 +19,7 @@ async function getCacheVideoCount(): Promise<number> {
 }
 
 async function getCacheOldestVideoTimestamp(): Promise<number | null> {
-  const ids = await persistence.allNodeIds()
-  const nodes = await persistence.getNodes(ids)
+  const nodes = await loadNodesByType('event')
   let oldest: number | null = null
   for (const n of nodes) {
     const ts = n.data.created_at as number | undefined
@@ -53,17 +47,8 @@ const PROFILE_BATCH_DELAY_MS = 300
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-// Bounded, exponential backoff used only when NO relay could be reached at
-// all. Deliberately short — this recovers from a transient blip within a
-// single batch's lifetime, it isn't a long-lived retry queue.
 const RECONNECT_RETRY_DELAYS_MS = [500, 1000, 2000, 4000]
 
-/**
- * Resolve true as soon as any relay in `relayUrls` is reachable, false only
- * once every relay's connection attempt has failed. pool.ensureRelay() is
- * cheap to call even when already connected — SimplePool memoizes the
- * connection and AbstractRelay.connect() returns the cached promise.
- */
 function anyRelayReachable(relayUrls: string[]): Promise<boolean> {
   return new Promise((resolve) => {
     if (relayUrls.length === 0) { resolve(false); return }
@@ -77,14 +62,6 @@ function anyRelayReachable(relayUrls: string[]): Promise<boolean> {
   })
 }
 
-/**
- * Shared retry-with-backoff wrapper for backfill relay queries.
- * pool.querySync() never rejects — even when every relay is unreachable it
- * resolves via onclose with an empty array — so an empty result alone can't
- * tell us "nothing more to fetch" from "couldn't reach anything." We check
- * reachability directly first; only when nothing is reachable do we back off
- * and retry. A result from a reachable relay is trusted as-is, even if empty.
- */
 async function queryRelaysWithRetry(
   relayUrls: string[],
   filter: Filter,
@@ -158,8 +135,6 @@ function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Pro
       return sub
     })
 
-    // First-result window: resolve as soon as one relay has answered and we
-    // have at least some results, giving stragglers a short grace period.
     const graceTimer = setTimeout(() => {
       if (!finished && allEvents.length > 0) {
         finished = true
@@ -168,7 +143,6 @@ function queryWithTimeout(relays: string[], filter: any, timeoutMs: number): Pro
       }
     }, Math.min(timeoutMs, 2000))
 
-    // Hard timeout: resolve with whatever we have
     setTimeout(() => {
       if (!finished) {
         finished = true
@@ -253,7 +227,7 @@ async function handleStartBackfill(relayUrls: string[]) {
         if (unreachable) {
           console.warn(
             `[Worker] Batch ${batch + 1}: no relay reachable after retries — stopping this backfill session ` +
-            `(transient network issue, NOT history exhaustion; will resume from the same cursor next session).`
+            `(transient network issue, NOT history exhausted; will resume from the same cursor next session).`
           )
         } else {
           console.log('[Worker] Relay returned 0 events – history exhausted. Stopping backfill.')
@@ -456,22 +430,19 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom
 }
 
-/** Load all nodes of a given type from IDB. */
 async function loadNodesByType(type: NodeType): Promise<any[]> {
-  const ids = await persistence.allNodeIds(type)
-  if (ids.length === 0) return []
-  return persistence.getNodes(ids)
+  const query: PersistedNodeQuery = { nodeTypes: [type] }
+  if (persistence.queryNodes) {
+    return persistence.queryNodes(query)
+  }
+  const ids = await persistence.allNodeIds()
+  const nodes = await persistence.getNodes(ids)
+  return nodes.filter(n => n.type === type)
 }
 
-/**
- * Prune excess videos and orphan data from IndexedDB.
- * The main thread must call flush() before invoking this so IDB is consistent
- * with the in-memory graph. Returns the list of removed node IDs.
- */
 async function handlePruneCache(): Promise<void> {
   const removedIds: string[] = []
 
-  // 1. Load all video shapes sorted by insertOrder
   const shapes = (await loadNodesByType('video_shape'))
     .map((n: any) => ({ id: n.id, data: n.data }))
     .sort((a: any, b: any) => (a.data.insertOrder ?? 0) - (b.data.insertOrder ?? 0))
@@ -486,7 +457,6 @@ async function handlePruneCache(): Promise<void> {
   const oldestIdSet = new Set(oldestShapes.map((s: any) => s.id.replace('shp:', '')))
   const videoUrls = oldestShapes.filter((s: any) => s.data.videoUrl).map((s: any) => s.data.videoUrl)
 
-  // 2. Find reaction events referencing the oldest shapes
   const events = await loadNodesByType('event')
   const reactionIds: string[] = []
   for (const node of events) {
@@ -499,14 +469,12 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
-  // 3. Remove reaction events + oldest shapes from IDB
   const toRemove = [...reactionIds, ...oldestShapes.map((s: any) => s.id)]
   for (const id of toRemove) {
     await persistence.deleteNode(id)
     removedIds.push(id)
   }
 
-  // 4. Remove stale rejection nodes (>30 days)
   const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
   const rejections = await loadNodesByType('rejection')
   for (const node of rejections) {
@@ -517,7 +485,6 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
-  // 5. Remove orphan media nodes
   const urlSet = new Set(videoUrls)
   const mediaNodes = await loadNodesByType('media')
   for (const node of mediaNodes) {
@@ -527,7 +494,6 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
-  // 6. Remove orphan profiles
   const remainingPubkeys = new Set<string>()
   for (const s of shapes) {
     if (s.data.pubkey) remainingPubkeys.add(s.data.pubkey)
@@ -543,7 +509,6 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
-  // 7. Remove orphan reaction events (no remaining shape)
   const remainingShapeIds = new Set(shapes.map((s: any) => s.id))
   for (const node of events) {
     const kind = node.data.kind as number | undefined
@@ -556,21 +521,19 @@ async function handlePruneCache(): Promise<void> {
     }
   }
 
-  // 8. Cap total event nodes
-  const allEventIds = await persistence.allNodeIds('event')
-  if (allEventIds.length > MAX_EVENT_NODES) {
-    const eventNodes = await persistence.getNodes(allEventIds)
-    const excessEvents = eventNodes
+  const allEventIds = await persistence.allNodeIds()
+  const allEventNodes = await persistence.getNodes(allEventIds)
+  const typedEventNodes = allEventNodes.filter(n => n.type === 'event')
+  if (typedEventNodes.length > MAX_EVENT_NODES) {
+    const excessEvents = typedEventNodes
       .sort((a: any, b: any) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0))
-      .slice(0, allEventIds.length - MAX_EVENT_NODES)
+      .slice(0, typedEventNodes.length - MAX_EVENT_NODES)
     for (const node of excessEvents) {
       await persistence.deleteNode(node.id)
       removedIds.push(node.id)
     }
   }
 
-  // 9. Remove orphan "seen" state (no remaining shape) — user_state records
-  // have no cap of their own, so they'd otherwise accumulate forever.
   const userStates = await loadNodesByType('user_state')
   for (const node of userStates) {
     const rawId = node.id.startsWith('sta:') ? node.id.slice(4) : node.id
