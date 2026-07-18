@@ -1,7 +1,10 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { nip19 } from 'nostr-tools'
-import { pool } from '../nostr/pool'
-import { startCacheBackfill } from '../nostr/cacheBackfill'
+import { pool, cleanupPool } from '../nostr/pool'
+import { startCacheBackfill, resetBackfillState } from '../nostr/cacheBackfill'
+import { resetProfileBatch } from '../nostr/profile'
+import { terminateFFmpeg } from '../features/post/convertVideo'
+import { graph } from '../graph/polygraph'
 import {
   readStoredPasskeyIdentity,
   unlockPasskeyIdentity,
@@ -185,10 +188,24 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [])
 
   const logout = useCallback(() => {
+    // NIP-46: close the remote signer's relay subscriptions.
+    if (session?.method === 'nip46' && session.signer && typeof (session.signer as any).close === 'function') {
+      void (session.signer as any).close().catch((err: unknown) =>
+        console.warn('[logout] NIP-46 signer close failed:', err)
+      )
+    }
     clearPasskeyIdentity()
     setSession(null)
     localStorage.removeItem('scrollstr_session')
-  }, [])
+    // Reset module-level state BEFORE terminating the worker.
+    resetBackfillState()
+    resetProfileBatch()
+    terminateFFmpeg()
+    void graph.dispose().catch((err: unknown) =>
+      console.warn('[logout] graph.dispose failed:', err)
+    )
+    cleanupPool()
+  }, [session])
 
   const signEvent = useCallback(async (eventTemplate: any): Promise<any> => {
     if (!session) throw new Error('No active Nostr session')

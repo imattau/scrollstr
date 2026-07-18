@@ -4,6 +4,7 @@ import { AppRouter } from './router'
 import { NostrProvider, useNostr } from './providers'
 import { publishLike, publishBoost, publishFollow, parseVideoEvent } from '../nostr/events'
 import { db, saveEventToCache, updateUserVideoState } from '../nostr/cache'
+import { graph } from '../graph'
 import { ToastProvider, useToast } from '../components/feedback/Toast'
 
 const LoginSheet = React.lazy(() => import('../features/auth/LoginSheet').then(m => ({ default: m.LoginSheet })))
@@ -116,7 +117,7 @@ function AppContent() {
     } else {
       console.log(`Triggered guest action: ${actionType}`)
     }
-  }, [session, signEvent, activeVideoKind, isMuted])
+  }, [session, signEvent, activeVideoKind, isMuted, toast])
 
   // Sync ref after commit so pending post-login actions use the latest closure.
   useEffect(() => {
@@ -187,6 +188,10 @@ function AppContent() {
 }
 
 function App() {
+  useEffect(() => {
+    graph.warm().catch((err) => console.warn('[App] Graph warm-up:', err))
+  }, [])
+
   return (
     <NostrProvider>
       <ToastProvider>

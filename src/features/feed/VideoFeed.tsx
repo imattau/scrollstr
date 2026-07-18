@@ -4,10 +4,9 @@ import type { MediaItemData, MediaStackRef } from 'react-media-stack'
 import { VideoItemData } from './VideoFeedItem'
 import { useNostr } from '../../app/providers'
 import { useUserRelayUrls } from '../../nostr/relays'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../../nostr/cache'
+import { graph, useGraphQuery } from '../../graph'
 import { useMuteList } from '../../nostr/useMuteList'
-import { subscribeToRelays } from '../../nostr/pool'
+import { subscribeToRelays, setIndexWritesDeferred, flushIndexWrites } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
 import { useFeedPosition } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
@@ -16,7 +15,7 @@ import { useProfile } from '../../nostr/profile'
 
 
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
-import { ArrowUp, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
+import { ArrowDown, Sparkles, AlertTriangle, SkipForward } from 'lucide-react'
 
 interface VideoFeedProps {
   onActionTrigger: (actionType: string, videoId: string, creatorPubkey?: string, videoKind?: number) => void
@@ -35,6 +34,32 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const mediaStackRef = useRef<MediaStackRef>(null)
   const activeIndexRef = useRef(activeIndex)
   useEffect(() => { activeIndexRef.current = activeIndex }, [activeIndex])
+
+  // Defer index writes while scrolling — when activeIndex changes frequently,
+  // events accumulate in a pending batch instead of being written to IndexedDB.
+  // Once the index is stable for SCROLL_SETTLE_MS, pending events are flushed.
+  // This prevents feed flicker and video resets during rapid scrolling.
+  const prevScrollIdxRef = useRef(activeIndex)
+  useEffect(() => {
+    if (prevScrollIdxRef.current !== activeIndex) {
+      prevScrollIdxRef.current = activeIndex
+      setIndexWritesDeferred(true)
+
+      const timer = setTimeout(() => {
+        setIndexWritesDeferred(false)
+      }, 1500)
+
+      return () => clearTimeout(timer)
+    }
+  }, [activeIndex])
+
+  // Flush any pending index writes when the component unmounts
+  useEffect(() => {
+    return () => {
+      setIndexWritesDeferred(false)
+    }
+  }, [])
+
   const [uiHidden, setUiHidden] = useState(false)
   const [refreshKey] = useState(0)
 
@@ -47,14 +72,16 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [])
 
   // Reactively query the user's kind:3 contact list from Dexie cache
-  const contactListEvents = useLiveQuery(
-    () => session?.pubkey
-      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
-      : Promise.resolve([] as any[]),
-    [session?.pubkey ?? '']
-  ) ?? []
-
-  const contactListEvent = contactListEvents.toSorted((a, b) => b.created_at - a.created_at)[0]?.event
+  const contactListEvent = useGraphQuery(
+    () => {
+      if (!session?.pubkey) return undefined
+      const node = graph.byKindPubkey(3, session.pubkey)
+      return (node?.data as any)?.event
+    },
+    [session?.pubkey],
+    200,
+    ['event'],
+  )
 
   const followingPubkeys = useMemo(() => {
     if (!contactListEvent) return []
@@ -72,6 +99,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     mutedHashtags,
     filterTag,
     refreshKey,
+    deeplinkVideoId: initialVideoId,
   })
 
   // Feed position: deep link, sessionStorage, initial scroll position
@@ -160,7 +188,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, feedKey, relayUrls])
 
-  // New-events counter
+  // New-events counter — videos now append at the *end* of the feed (see
+  // useFeedVideos' stable append-only ordering), so "caught up" means being
+  // at/near the last item, not the first.
   const [newEventsCount, setNewEventsCount] = useState(0)
   const seenVideoIdsRef = useRef<Set<string>>(new Set())
 
@@ -172,7 +202,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       return
     }
 
-    if (activeIndexRef.current <= 0) {
+    if (activeIndexRef.current >= videos.length - 1) {
       seenVideoIdsRef.current = new Set(videos.map(v => v.id))
       setNewEventsCount(0)
       return
@@ -186,10 +216,11 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }, [videos.length])
 
   const scrollToNewest = useCallback(() => {
+    flushIndexWrites()
     const currentVideos = videosRef.current
     if (currentVideos.length === 0) return
-    mediaStackRef.current?.scrollTo('start')
-    setActiveIndex(0)
+    mediaStackRef.current?.scrollTo('end')
+    setActiveIndex(currentVideos.length - 1)
     setNewEventsCount(0)
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
   }, [videosRef])
@@ -233,7 +264,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       nsfw: !!(settingsRef.current.nsfwBlur && (v.contentWarning || settingsRef.current.nsfwPubkeys?.includes(v.creator.pubkey))),
       customData: v,
     })),
-    [videos, settingsRef.current.nsfwBlur, settingsRef.current.nsfwPubkeys]
+    [videos]
   )
 
   if (videos.length === 0) {
@@ -302,6 +333,9 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       <MediaStack
         ref={mediaStackRef}
         items={mediaItems}
+        preFetchAhead={1}
+        preFetchBehind={0}
+        cacheLimit={4}
         direction="vertical"
         autoPlay
         muted={isMuted}
@@ -417,7 +451,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         </div>
       )}
 
-      {newEventsCount > 0 && activeIndex > 0 && !uiHidden && (
+      {newEventsCount > 0 && activeIndex < videos.length - 1 && !uiHidden && (
         <button
           onClick={scrollToNewest}
           className="new-events-pill"
@@ -425,7 +459,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         >
           <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
           <span>{newEventsCount} new</span>
-          <ArrowUp className="w-3.5 h-3.5 flex-shrink-0" />
+          <ArrowDown className="w-3.5 h-3.5 flex-shrink-0" />
         </button>
       )}
 

@@ -5,14 +5,15 @@ import { useNostr } from '../../app/providers'
 import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
-import { db, VideoShape, saveEventToCache } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { VideoShape, saveEventToCache } from '../../nostr/cache'
+import { graph, useGraphQuery, useLiveQuery } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
 import { useNavigate } from 'react-router-dom'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { useMuteList } from '../../nostr/useMuteList'
+import { useSimilarVideos } from './useSimilarVideos'
 
 const EMPTY_VIDEOS: any[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
@@ -136,6 +137,17 @@ export const DiscoverPage: React.FC = () => {
   const seenSearchIds = useRef(new Set<string>())
   const searchPageCount = useRef(0)
   const searchResultCache = useRef(new Map<string, { results: VideoItemData[]; cursor: number | undefined }>())
+
+  // Clear the refresh-state timer on unmount so it can't fire setState
+  // after the component is gone.
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+        refreshTimerRef.current = undefined
+      }
+    }
+  }, [])
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -148,13 +160,8 @@ export const DiscoverPage: React.FC = () => {
   useEffect(() => {
     if (!relayUrls.length) return
     let current = true
-    db.videoShapes
-      .where('created_at')
-      .above(Math.floor(Date.now() / 1000) - 3600)
-      .count()
-      .then((count) => {
-        if (current && count < 20) setCacheSeemsStale(true)
-      })
+    const count = graph.countByFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 3600 }, 'video_shape')
+    if (current && count < 20) setCacheSeemsStale(true)
     return () => {
       current = false
     }
@@ -178,11 +185,24 @@ export const DiscoverPage: React.FC = () => {
   // Watch for kind:10002 relay-list events arriving in the Dexie cache
   // (from backfill, profile subscriptions, bootstrap, etc.) and feed them
   // into the search relay pool for future queries.
-  const rawRelayListEvents = useLiveQuery(
-    () => db.cachedEvents.where({ kind: 10002 }).toArray(),
-    []
+  // Use created_at index with a hard limit so we don't load every cached
+  // event into memory on every liveQuery re-fire.
+  const rawRelayListEvents = useGraphQuery(
+    () => {
+      if (!graph) return []
+      return graph.byKind(10002, 'event')
+        .sort((a, b) => ((b.data.created_at as number) ?? 0) - ((a.data.created_at as number) ?? 0))
+        .slice(0, 200)
+        .map(n => n.data)
+    },
+    [],
+    200,
+    ['event'],
   )
-  const relayListEvents = useMemo(() => rawRelayListEvents ?? [], [rawRelayListEvents])
+  const relayListEvents = useMemo(() => {
+    if (!rawRelayListEvents) return []
+    return rawRelayListEvents
+  }, [rawRelayListEvents])
 
   useEffect(() => {
     const events = relayListEvents as any[]
@@ -222,22 +242,34 @@ export const DiscoverPage: React.FC = () => {
     return () => unsub()
   }, [accumulatedResults, relayUrls])
 
-  // Query all video shapes from the full Dexie cache (no time limit)
-  const rawVideoShapes = useLiveQuery(
-    () => db.videoShapes
-      .filter(shape => shape.mediaStatus !== 'failed')
-      .toArray(),
-    []
+  // Query video shapes from the Dexie cache — bounded to avoid loading
+  // thousands of cached shapes into memory on every liveQuery re-fire.
+  const rawVideoShapes = useGraphQuery(
+    () => {
+      if (!graph) return []
+      return graph.recentBy('insertOrder', 1000, 'video_shape')
+        .map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
+    },
+    [],
+    200,
+    ['video_shape'],
   ) ?? EMPTY_VIDEOS
 
-  // Query recent video shapes (last 48 hours) — for trending creators
-  const rawRecentVideoShapes = useLiveQuery(
-    () => db.videoShapes
-      .where('created_at')
-      .above(Math.floor(Date.now() / 1000) - 48 * 3600)
-      .filter(shape => shape.mediaStatus !== 'failed')
-      .toArray(),
-    []
+  // Query recent video shapes (last 48 hours) — for trending creators.
+  // Use created_at index with a hard limit so it stays memory-bounded.
+  const rawRecentVideoShapes = useGraphQuery(
+    () => {
+      if (!graph) return []
+      return graph.whereFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 48 * 3600 }, 'video_shape')
+        .slice(0, 1000)
+        .map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
+        .slice(0, 500)
+    },
+    [],
+    200,
+    ['video_shape'],
   ) ?? EMPTY_VIDEOS
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
@@ -246,7 +278,7 @@ export const DiscoverPage: React.FC = () => {
     createdAt: shape.created_at,
     title: shape.title ?? '',
     description: shape.summary ?? '',
-    url: shape.videoUrl,
+    url: shape.videoUrl ?? '',
     poster: shape.thumbnailUrl,
     creator: {
       pubkey: shape.pubkey,
@@ -269,15 +301,20 @@ export const DiscoverPage: React.FC = () => {
   }, [rawVideoShapes, mutedPubkeys])
 
   // Load author profiles into a lookup map for richer search
-  const _authorProfileMap = useLiveQuery(
-    () => db.authorProfiles.toArray().then(profiles => {
+  const _authorProfileMap = useGraphQuery(
+    () => {
+      if (!graph) return {}
       const map: Record<string, { name: string; displayName?: string; nip05?: string }> = {}
-      for (const p of profiles) {
-        map[p.pubkey] = { name: p.name, displayName: p.displayName, nip05: p.nip05 }
+      for (const node of graph.whereType('profile')) {
+        const p = node.data as Record<string, unknown>
+        const pubkey = (p.pubkey as string) || node.id.replace('pro:', '')
+        map[pubkey] = { name: p.name as string, displayName: p.displayName as string | undefined, nip05: p.nip05 as string | undefined }
       }
       return map
-    }),
-    []
+    },
+    [],
+    200,
+    ['profile'],
   )
   const authorProfileMap = useMemo(() => _authorProfileMap ?? {}, [_authorProfileMap])
 
@@ -290,6 +327,10 @@ export const DiscoverPage: React.FC = () => {
     const sorted = mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
     return sorted.slice(0, 300)
   }, [rawRecentVideoShapes, mutedPubkeys])
+
+  // Vector-similar videos based on the top cached video
+  const referenceVideo = (videos as VideoItemData[])?.[0]
+  const similarVideos = useSimilarVideos(referenceVideo?.id, 8, 0.35)
 
   // Extract unique hashtags/topics dynamically from all videos
   const topics = useMemo(() => {
@@ -364,20 +405,14 @@ export const DiscoverPage: React.FC = () => {
     const unsubRef: { current: (() => void) | undefined } = { current: undefined }
     let current = true
 
-    db.authorProfiles
-      .where('pubkey')
-      .anyOf(realCreators)
-      .primaryKeys()
-      .then((cachedPubkeys) => {
-        if (!current) return
-        const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
-        if (uncached.length === 0) return
-        unsubRef.current = subscribeToRelays(relayUrls, {
-          kinds: [0, 10002],
-          authors: uncached,
-          limit: 2,
-        })
-      })
+    const cachedPubkeys = realCreators.filter(pk => !!graph.getNode(`pro:${pk}`))
+    const uncached = realCreators.filter((pk) => !cachedPubkeys.includes(pk))
+    if (uncached.length === 0) return
+    unsubRef.current = subscribeToRelays(relayUrls, {
+      kinds: [0, 10002],
+      authors: uncached,
+      limit: 2,
+    })
 
     return () => {
       current = false
@@ -386,13 +421,16 @@ export const DiscoverPage: React.FC = () => {
   }, [creators, relayUrls])
 
   // Get logged-in user's contact list to determine follow state
-  const myContactListEvents = useLiveQuery(
-    () => session?.pubkey
-      ? db.cachedEvents.where({ kind: 3, pubkey: session.pubkey }).toArray()
-      : [],
-    [session?.pubkey]
-  ) ?? []
-  const myContactListEvent = (myContactListEvents as any[]).toSorted((a: any, b: any) => b.created_at - a.created_at)[0]
+  const myContactListNode = useGraphQuery(
+    () => {
+      if (!session?.pubkey) return undefined
+      return graph.byKindPubkey(3, session.pubkey)
+    },
+    [session?.pubkey],
+    200,
+    ['event'],
+  )
+  const myContactListEvent = (myContactListNode?.data as any) as { event?: { tags: string[][] } } | undefined
 
   const isFollowingPubkeys = useMemo(() => {
     if (!myContactListEvent?.event) return new Set<string>()
@@ -481,23 +519,22 @@ export const DiscoverPage: React.FC = () => {
     }))
   }, [videos, authorProfileMap])
 
+  const fuse = useMemo(() => new Fuse(searchCorpus, {
+    keys: [
+      { name: 'title', weight: 0.3 },
+      { name: 'description', weight: 0.2 },
+      { name: 'hashtags', weight: 0.4 },
+      { name: 'creator.name', weight: 0.5 },
+      { name: 'creator.pubkey', weight: 0.1 },
+      { name: 'displayName', weight: 0.5 },
+      { name: 'nip05', weight: 0.1 },
+    ],
+    threshold: 0.4,
+  }), [searchCorpus])
   const filteredVideos = useMemo(() => {
-    if (!debouncedSearch.trim()) return []
-    if (searchCorpus.length === 0) return []
-    const fuse = new Fuse(searchCorpus, {
-      keys: [
-        { name: 'title', weight: 0.3 },
-        { name: 'description', weight: 0.2 },
-        { name: 'hashtags', weight: 0.4 },
-        { name: 'creator.name', weight: 0.5 },
-        { name: 'creator.pubkey', weight: 0.1 },
-        { name: 'displayName', weight: 0.5 },
-        { name: 'nip05', weight: 0.1 },
-      ],
-      threshold: 0.4,
-    })
+    if (!debouncedSearch.trim() || searchCorpus.length === 0) return []
     return fuse.search(debouncedSearch).map(r => r.item)
-  }, [debouncedSearch, searchCorpus])
+  }, [debouncedSearch, fuse, searchCorpus.length])
 
   // Merge relay results (first) with local Fuse results, dedup by id
   const combinedResults = useMemo(() => {
@@ -595,7 +632,7 @@ export const DiscoverPage: React.FC = () => {
       console.error('Follow toggle failed:', err)
       toast('Failed to update follow status', 'error')
     }
-  }, [session, signEvent, myContactListEvent])
+  }, [session, signEvent, myContactListEvent, toast])
 
   return (
     <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
@@ -730,6 +767,36 @@ export const DiscoverPage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {similarVideos.length > 0 && (
+              <div className="space-y-4 pb-8">
+                <h3 className="text-[18px] font-semibold">Similar to top video</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {similarVideos.map((video) => (
+                    <div
+                      key={video.id}
+                      onClick={() => navigate(`/?v=${video.id}`)}
+                      className="group relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[16px] bg-[#18181d] transition-all duration-200 hover:scale-[1.02]"
+                    >
+                      {video.poster ? (
+                        <img src={video.poster} alt={video.title || 'Video'} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-purple-900/20 text-[#a78bfa] text-[24px]">
+                          ▶
+                        </div>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#09090b]/80 via-[#09090b]/20 to-transparent opacity-90" />
+                      <div className="absolute bottom-3 left-3 right-3 space-y-1">
+                        <p className="line-clamp-2 text-[11px] font-semibold leading-tight text-[#f7f7f8]">
+                          {video.description || video.title}
+                        </p>
+                        <p className="text-[9px] text-[#a78bfa] font-medium">@{video.creator.name}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

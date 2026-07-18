@@ -5,7 +5,7 @@ import { useNostr } from '../../app/providers'
 import { subscribeToRelays } from '../../nostr/pool'
 import { useUserRelayUrls } from '../../nostr/relays'
 import { db } from '../../nostr/cache'
-import { useLiveQuery } from 'dexie-react-hooks'
+import { useLiveQuery } from '../../graph'
 import { useProfile } from '../../nostr/profile'
 import { useNavigate } from 'react-router-dom'
 

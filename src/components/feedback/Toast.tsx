@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react'
 
 type ToastType = 'success' | 'error' | 'info'
 
@@ -43,13 +43,25 @@ const TEXT_COLORS: Record<ToastType, string> = {
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
   const idRef = useRef(0)
+  // Track pending per-toast timer IDs so we can clear them on unmount.
+  const timersRef = useRef(new Set<ReturnType<typeof setTimeout>>())
 
   const toast = useCallback((message: string, type: ToastType = 'info') => {
     const id = ++idRef.current
     setToasts(prev => [...prev, { id, message, type }])
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id))
+      timersRef.current.delete(timer)
     }, 4000)
+    timersRef.current.add(timer)
+  }, [])
+
+  useEffect(() => {
+    const timers = timersRef.current
+    return () => {
+      for (const t of timers) clearTimeout(t)
+      timers.clear()
+    }
   }, [])
 
   return (
