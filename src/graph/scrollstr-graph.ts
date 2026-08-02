@@ -1,11 +1,17 @@
 import { PolyGraph } from '@0xx0lostcause0xx0/polypack'
-import { IndexedDBAdapter } from '@0xx0lostcause0xx0/polypack'
+import { BinaryStoreAdapter } from '@0xx0lostcause0xx0/polypack/persistence/opfs'
 import type { PersistenceAdapter } from '@0xx0lostcause0xx0/polypack'
 import type { PolyNode, NodeType } from './types'
 
 const DB_NAME = 'scrollstr-polypack'
-const DB_VERSION = 1
 const HOT_CACHE_MAX = 10000
+
+let testPersistenceFactory: ((storeDir: string) => PersistenceAdapter) | null = null
+
+/** Test-only hook: overrides the default persistence backend. */
+export function setPersistenceFactory(factory: ((storeDir: string) => PersistenceAdapter) | null): void {
+  testPersistenceFactory = factory
+}
 
 export class ScrollstrGraph extends PolyGraph {
   private _byPubkey = new Map<string, Set<string>>()
@@ -15,7 +21,9 @@ export class ScrollstrGraph extends PolyGraph {
 
   constructor(adapter?: PersistenceAdapter) {
     super(
-      adapter ?? new IndexedDBAdapter({ name: DB_NAME, version: DB_VERSION, nodeIndexes: ['kind', 'pubkey', 'replaceableKey'] }),
+      adapter ?? (testPersistenceFactory
+        ? testPersistenceFactory(DB_NAME)
+        : new BinaryStoreAdapter({ storeDir: DB_NAME })),
       HOT_CACHE_MAX,
     )
   }
@@ -133,6 +141,15 @@ export class ScrollstrGraph extends PolyGraph {
     return true
   }
 
+  /** Restore persisted vectors too — the app keys vectors by event id, not node id, so the base warm's hot-cache-only hydration would drop them. */
+  override async warm(): Promise<void> {
+    await super.warm()
+    const allVectors = await this.persistence.getAllVectors()
+    for (const { id, vector } of allVectors) {
+      if (!this.vectors.has(id)) this.vectors.hydrate(id, vector)
+    }
+  }
+
   byPubkey(pubkey: string, type?: NodeType): PolyNode[] {
     const ids = this._byPubkey.get(pubkey)
     if (!ids) return []
@@ -168,7 +185,7 @@ export class ScrollstrGraph extends PolyGraph {
     const results: PolyNode[] = []
     for (const src of sources) {
       const srcEdges = this.edges.get(src)
-      if (srcEdges && srcEdges.some(e => e.type === 'REFERENCES' && e.target === targetId)) {
+      if (srcEdges && [...srcEdges.values()].some(e => e.type === 'REFERENCES' && e.target === targetId)) {
         const node = this.nodes.get(src)
         if (node) results.push(node as unknown as PolyNode)
       }

@@ -59,7 +59,7 @@ export async function findVideosSimilarToAuthor(
     if (data.videoUrl) {
       const rawId = node.id.includes(':') ? node.id.slice(node.id.indexOf(':') + 1) : node.id
       const vec = graph.vectors.get(rawId)
-      if (vec) authorVectors.push(vec)
+      if (vec) authorVectors.push([...vec])
     }
   }
   if (authorVectors.length === 0) return []

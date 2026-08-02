@@ -1,12 +1,24 @@
-import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { PolyGraph, graph, computeEventVector, ScrollstrGraph } from './polygraph'
 import { VectorIndex } from './vector-index'
 import type { PolyNode, NodeType, EdgeType } from './types'
-import { IndexedDBAdapter, MemoryAdapter } from '@0xx0lostcause0xx0/polypack'
+import { MemoryAdapter } from '@0xx0lostcause0xx0/polypack'
+import { BinaryStoreAdapter } from '@0xx0lostcause0xx0/polypack/persistence/opfs'
+import { MemoryFileIO } from '@0xx0lostcause0xx0/polypack/persistence'
+
+const testStores = new Map<string, MemoryFileIO>()
+
+function testFileIO(storeDir: string): MemoryFileIO {
+  let io = testStores.get(storeDir)
+  if (!io) {
+    io = new MemoryFileIO()
+    testStores.set(storeDir, io)
+  }
+  return io
+}
 
 function createTestGraph(): PolyGraph {
-  return new PolyGraph(new IndexedDBAdapter({ name: 'e2e-test-db', version: 1 }))
+  return new PolyGraph(new BinaryStoreAdapter({ storeDir: 'e2e-test-db', fileIO: testFileIO('e2e-test-db') }))
 }
 function createInMemoryGraph(): ScrollstrGraph {
   return new ScrollstrGraph(new MemoryAdapter())
@@ -529,7 +541,7 @@ describe('PolyGraph E2E — vector index', () => {
     const v = computeEventVector({ kind: 22, pubkey: 'pk', created_at: 1_700_000_000, eTagsCount: 1, pTagsCount: 0, hashtags: [] })
     vi.add('vid1', v)
     expect(vi.has('vid1')).toBe(true)
-    expect(vi.get('vid1')).toEqual(v)
+    expect([...vi.get('vid1')!]).toEqual(v)
     expect(vi.size).toBe(1)
 
     vi.remove('vid1')
@@ -719,8 +731,8 @@ describe('PolyGraph E2E — persistence round-trip', () => {
     expect(pg2.size).toBe(1)
   })
 
-  it('putReplaceable persists to IDB and survives warm', async () => {
-    const adapter = new IndexedDBAdapter({ name: 'e2e-test-db', version: 1 })
+  it('putReplaceable persists and survives warm', async () => {
+    const adapter = new BinaryStoreAdapter({ storeDir: 'e2e-test-db', fileIO: testFileIO('e2e-test-db') })
     const scrollPg = new ScrollstrGraph(adapter)
     await scrollPg.putReplaceable({
       id: 'evt:old',

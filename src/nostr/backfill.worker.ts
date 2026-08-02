@@ -1,31 +1,23 @@
 import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
-import { IndexedDBAdapter } from '@0xx0lostcause0xx0/polypack'
-import type { PersistenceAdapter, PersistedNodeQuery } from '@0xx0lostcause0xx0/polypack'
-import type { NodeType } from '../graph/types'
 
-const persistence: PersistenceAdapter = new IndexedDBAdapter({ name: 'scrollstr-polypack', version: 1, nodeIndexes: ['kind', 'pubkey', 'replaceableKey'] })
 const MAX_VIDEOS = 10000
-const MAX_EVENT_NODES = 30000
 const VIDEO_KINDS = new Set([1, 21, 22, 34236])
 
-async function getCacheVideoCount(): Promise<number> {
-  const nodes = await loadNodesByType('event')
-  let count = 0
-  for (const n of nodes) {
-    const kind = n.data.kind as number | undefined
-    if (kind && VIDEO_KINDS.has(kind)) count++
-  }
-  return count
+interface CacheStats {
+  videoCount: number
+  oldestTs: number | null
 }
 
-async function getCacheOldestVideoTimestamp(): Promise<number | null> {
-  const nodes = await loadNodesByType('event')
-  let oldest: number | null = null
-  for (const n of nodes) {
-    const ts = n.data.created_at as number | undefined
-    if (ts && (oldest === null || ts < oldest)) oldest = ts
-  }
-  return oldest
+let statsReqIdCounter = 0
+const pendingCacheStats = new Map<number, (stats: CacheStats) => void>()
+
+/** Ask the main thread for current cache stats (it owns the graph persistence). */
+function requestCacheStats(): Promise<CacheStats> {
+  return new Promise((resolve) => {
+    const reqId = ++statsReqIdCounter
+    pendingCacheStats.set(reqId, resolve)
+    self.postMessage({ type: 'getCacheStats', reqId })
+  })
 }
 
 type SubCloser = { close: (reason?: string) => void }
@@ -203,14 +195,13 @@ async function handleStartBackfill(relayUrls: string[]) {
 
   try {
     for (let batch = 0; batch < MAX_BATCHES; batch++) {
-      const currentCount = await getCacheVideoCount()
+      const { videoCount: currentCount, oldestTs } = await requestCacheStats()
       const remaining = MAX_VIDEOS - currentCount
       if (remaining <= 0) {
         console.log(`[Worker] Cache is full (${currentCount}/${MAX_VIDEOS}). Stopping backfill.`)
         break
       }
 
-      const oldestTs = await getCacheOldestVideoTimestamp()
       const until =
         oldestTs != null
           ? oldestTs - 1
@@ -245,7 +236,7 @@ async function handleStartBackfill(relayUrls: string[]) {
     console.error('[Worker] Unexpected error during backfill:', err)
   } finally {
     isBackfillRunning = false
-    const finalCount = await getCacheVideoCount()
+    const { videoCount: finalCount } = await requestCacheStats()
     console.log(`[Worker] Backfill complete. Cache now holds ${finalCount} video events.`)
     self.postMessage({ type: 'backfillComplete' })
   }
@@ -264,7 +255,7 @@ async function handleStartFollowedVideoBackfill(relayUrls: string[], pubkeys: st
 
   try {
     for (let i = 0; i < pubkeys.length; i += FOLLOWED_PUBKEY_BATCH_SIZE) {
-      const currentCount = await getCacheVideoCount()
+      const { videoCount: currentCount } = await requestCacheStats()
       if (currentCount >= MAX_VIDEOS) {
         console.log(`[Worker] Cache is full (${currentCount}/${MAX_VIDEOS}). Stopping followed-video backfill.`)
         break
@@ -419,145 +410,6 @@ async function handleSearch(id: string, relays: string[], query: string, kinds?:
   }
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    na += a[i] * a[i]
-    nb += b[i] * b[i]
-  }
-  const denom = Math.sqrt(na) * Math.sqrt(nb)
-  return denom === 0 ? 0 : dot / denom
-}
-
-async function loadNodesByType(type: NodeType): Promise<any[]> {
-  const query: PersistedNodeQuery = { nodeTypes: [type] }
-  if (persistence.queryNodes) {
-    return persistence.queryNodes(query)
-  }
-  const ids = await persistence.allNodeIds()
-  const nodes = await persistence.getNodes(ids)
-  return nodes.filter(n => n.type === type)
-}
-
-async function handlePruneCache(): Promise<void> {
-  const removedIds: string[] = []
-
-  const shapes = (await loadNodesByType('video_shape'))
-    .map((n: any) => ({ id: n.id, data: n.data }))
-    .sort((a: any, b: any) => (a.data.insertOrder ?? 0) - (b.data.insertOrder ?? 0))
-
-  const excess = shapes.length - MAX_VIDEOS
-  if (excess <= 0) {
-    self.postMessage({ type: 'pruneResult', removedIds })
-    return
-  }
-
-  const oldestShapes = shapes.slice(0, excess)
-  const oldestIdSet = new Set(oldestShapes.map((s: any) => s.id.replace('shp:', '')))
-  const videoUrls = oldestShapes.filter((s: any) => s.data.videoUrl).map((s: any) => s.data.videoUrl)
-
-  const events = await loadNodesByType('event')
-  const reactionIds: string[] = []
-  for (const node of events) {
-    const kind = node.data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = (node.data.eTags as string[]) ?? []
-      if (eTags.some((eid: string) => oldestIdSet.has(eid))) {
-        reactionIds.push(node.id)
-      }
-    }
-  }
-
-  const toRemove = [...reactionIds, ...oldestShapes.map((s: any) => s.id)]
-  for (const id of toRemove) {
-    await persistence.deleteNode(id)
-    removedIds.push(id)
-  }
-
-  const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
-  const rejections = await loadNodesByType('rejection')
-  for (const node of rejections) {
-    const checkedAt = node.data.checkedAt as number | undefined
-    if (checkedAt !== undefined && checkedAt < oldThreshold) {
-      await persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  const urlSet = new Set(videoUrls)
-  const mediaNodes = await loadNodesByType('media')
-  for (const node of mediaNodes) {
-    if (urlSet.has(node.id)) {
-      await persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  const remainingPubkeys = new Set<string>()
-  for (const s of shapes) {
-    if (s.data.pubkey) remainingPubkeys.add(s.data.pubkey)
-  }
-  for (const node of events) {
-    if (node.data.pubkey) remainingPubkeys.add(node.data.pubkey)
-  }
-  const profiles = await loadNodesByType('profile')
-  for (const node of profiles) {
-    if (!remainingPubkeys.has(node.data.pubkey as string)) {
-      await persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  const remainingShapeIds = new Set(shapes.map((s: any) => s.id))
-  for (const node of events) {
-    const kind = node.data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = (node.data.eTags as string[]) ?? []
-      if (eTags.length && !eTags.some((eid: string) => remainingShapeIds.has(`shp:${eid}`))) {
-        await persistence.deleteNode(node.id)
-        removedIds.push(node.id)
-      }
-    }
-  }
-
-  const allEventIds = await persistence.allNodeIds()
-  const allEventNodes = await persistence.getNodes(allEventIds)
-  const typedEventNodes = allEventNodes.filter(n => n.type === 'event')
-  if (typedEventNodes.length > MAX_EVENT_NODES) {
-    const excessEvents = typedEventNodes
-      .sort((a: any, b: any) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0))
-      .slice(0, typedEventNodes.length - MAX_EVENT_NODES)
-    for (const node of excessEvents) {
-      await persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  const userStates = await loadNodesByType('user_state')
-  for (const node of userStates) {
-    const rawId = node.id.startsWith('sta:') ? node.id.slice(4) : node.id
-    if (!remainingShapeIds.has(`shp:${rawId}`)) {
-      await persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  self.postMessage({ type: 'pruneResult', removedIds })
-}
-
-async function handleVectorSearch(msg: { queryVec: number[]; topK: number; threshold: number; searchId: string }): Promise<void> {
-  const vectors = await persistence.getAllVectors()
-  const results: Array<{ id: string; score: number }> = []
-  for (const { id, vector } of vectors) {
-    const score = cosineSimilarity(msg.queryVec, vector)
-    if (score >= msg.threshold) results.push({ id, score })
-  }
-  results.sort((a, b) => b.score - a.score)
-  const top = results.slice(0, msg.topK)
-  self.postMessage({ type: 'vectorSearchResult', searchId: msg.searchId, results: top })
-}
-
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data
   switch (msg.type) {
@@ -591,19 +443,22 @@ self.onmessage = (e: MessageEvent) => {
     case 'abortSearch':
       searchedIdsAborted.add(msg.id)
       break
+    case 'cacheStatsResult': {
+      const resolveStats = pendingCacheStats.get(msg.reqId)
+      if (resolveStats) {
+        pendingCacheStats.delete(msg.reqId)
+        resolveStats({ videoCount: msg.videoCount, oldestTs: msg.oldestTs })
+      }
+      break
+    }
     case 'cleanup':
       for (const [, entries] of subs) {
         for (const e of entries) e.close()
       }
       subs.clear()
       searchedIdsAborted.clear()
+      pendingCacheStats.clear()
       pool.close([])
-      break
-    case 'pruneCache':
-      void handlePruneCache()
-      break
-    case 'vectorSearch':
-      void handleVectorSearch(msg)
       break
   }
 }

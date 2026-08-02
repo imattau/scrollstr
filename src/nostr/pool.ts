@@ -1,7 +1,7 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
-import { graph } from '../graph'
+import { graph, cosineSimilarity } from '../graph'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
 import { getSearchRelays, getSearchOnlyRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
@@ -124,20 +124,13 @@ function handleWorkerMessage(e: MessageEvent): void {
       if (cb) { cb.reject(new Error(msg.error)); searchCallbacks.delete(msg.id) }
       break
     }
-    case 'pruneResult': {
-      const resolvePrune = pruneCacheResolve
-      if (resolvePrune) {
-        pruneCacheResolve = null
-        resolvePrune(msg.removedIds)
-      }
-      break
-    }
-    case 'vectorSearchResult': {
-      const cb = vectorSearchCallbacks.get(msg.searchId)
-      if (cb) {
-        cb.resolve(msg.results)
-        vectorSearchCallbacks.delete(msg.searchId)
-      }
+    case 'getCacheStats': {
+      void getCacheStats()
+        .then((stats) => getBackfillWorker().postMessage({ type: 'cacheStatsResult', reqId: msg.reqId, ...stats }))
+        .catch((err) => {
+          console.warn('[Pool] getCacheStats failed:', err)
+          getBackfillWorker().postMessage({ type: 'cacheStatsResult', reqId: msg.reqId, videoCount: 0, oldestTs: null })
+        })
       break
     }
   }
@@ -426,8 +419,6 @@ function processQueue() {
 let subIdCounter = 0
 const searchCallbacks = new Map<string, { resolve: (events: any[]) => void; reject: (err: any) => void; createdAt: number }>()
 
-let pruneCacheResolve: ((removedIds: string[]) => void) | null = null
-const vectorSearchCallbacks = new Map<string, { resolve: (results: any) => void }>()
 // Periodically purge search callbacks older than 30s to prevent leaks
 const SEARCH_CALLBACK_TTL = 30000
 let searchPurgeInterval: ReturnType<typeof setInterval> | null = null
@@ -572,21 +563,150 @@ export async function searchRelays(
 }
 
 /**
- * Delegate pruneCache to the backfill worker.
- * The in-memory graph must be flushed before calling so IDB is consistent.
+ * Prune the persisted graph cache directly on the main thread. The in-memory
+ * graph must be flushed before calling so persistence is consistent.
  * Returns the list of node IDs removed from persistence.
  */
 export async function runPruneCache(): Promise<string[]> {
-  if (typeof Worker === 'undefined') return []
   await graph.flush()
-  return new Promise<string[]>((resolve) => {
-    pruneCacheResolve = resolve
-    getBackfillWorker().postMessage({ type: 'pruneCache' })
-  })
+  return prunePersistedCache()
+}
+
+// ── Main-thread cache management (persisted graph) ──────────────────────
+
+const VIDEO_KINDS = new Set([1, 21, 22, 34236])
+const PRUNE_MAX_VIDEOS = 10000
+const PRUNE_MAX_EVENT_NODES = 30000
+
+async function queryPersistedNodesByType(type: string): Promise<any[]> {
+  const nodes = await graph.persistence.queryNodes?.({ nodeTypes: [type] })
+  if (nodes) return nodes
+  const ids = await graph.persistence.allNodeIds()
+  const all = await graph.persistence.getNodes(ids)
+  return all.filter(n => n.type === type)
+}
+
+/** Video count + oldest event timestamp across the persisted graph store. */
+async function getCacheStats(): Promise<{ videoCount: number; oldestTs: number | null }> {
+  const nodes = await queryPersistedNodesByType('event')
+  let videoCount = 0
+  let oldestTs: number | null = null
+  for (const n of nodes) {
+    const kind = n.data.kind as number | undefined
+    if (kind && VIDEO_KINDS.has(kind)) videoCount++
+    const ts = n.data.created_at as number | undefined
+    if (ts && (oldestTs === null || ts < oldestTs)) oldestTs = ts
+  }
+  return { videoCount, oldestTs }
+}
+
+async function prunePersistedCache(): Promise<string[]> {
+  const removedIds: string[] = []
+
+  const shapes = (await queryPersistedNodesByType('video_shape'))
+    .map((n: any) => ({ id: n.id, data: n.data }))
+    .sort((a: any, b: any) => (a.data.insertOrder ?? 0) - (b.data.insertOrder ?? 0))
+
+  const excess = shapes.length - PRUNE_MAX_VIDEOS
+  if (excess <= 0) {
+    return removedIds
+  }
+
+  const oldestShapes = shapes.slice(0, excess)
+  const oldestIdSet = new Set(oldestShapes.map((s: any) => s.id.replace('shp:', '')))
+  const videoUrls = oldestShapes.filter((s: any) => s.data.videoUrl).map((s: any) => s.data.videoUrl)
+
+  const events = await queryPersistedNodesByType('event')
+  const reactionIds: string[] = []
+  for (const node of events) {
+    const kind = node.data.kind as number | undefined
+    if (kind && [7, 16, 9735, 1111].includes(kind)) {
+      const eTags = (node.data.eTags as string[]) ?? []
+      if (eTags.some((eid: string) => oldestIdSet.has(eid))) {
+        reactionIds.push(node.id)
+      }
+    }
+  }
+
+  const toRemove = [...reactionIds, ...oldestShapes.map((s: any) => s.id)]
+  for (const id of toRemove) {
+    await graph.persistence.deleteNode(id)
+    removedIds.push(id)
+  }
+
+  const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
+  const rejections = await queryPersistedNodesByType('rejection')
+  for (const node of rejections) {
+    const checkedAt = node.data.checkedAt as number | undefined
+    if (checkedAt !== undefined && checkedAt < oldThreshold) {
+      await graph.persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  const urlSet = new Set(videoUrls)
+  const mediaNodes = await queryPersistedNodesByType('media')
+  for (const node of mediaNodes) {
+    if (urlSet.has(node.id)) {
+      await graph.persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  const remainingPubkeys = new Set<string>()
+  for (const s of shapes) {
+    if (s.data.pubkey) remainingPubkeys.add(s.data.pubkey)
+  }
+  for (const node of events) {
+    if (node.data.pubkey) remainingPubkeys.add(node.data.pubkey)
+  }
+  const profiles = await queryPersistedNodesByType('profile')
+  for (const node of profiles) {
+    if (!remainingPubkeys.has(node.data.pubkey as string)) {
+      await graph.persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  const remainingShapeIds = new Set(shapes.map((s: any) => s.id))
+  for (const node of events) {
+    const kind = node.data.kind as number | undefined
+    if (kind && [7, 16, 9735, 1111].includes(kind)) {
+      const eTags = (node.data.eTags as string[]) ?? []
+      if (eTags.length && !eTags.some((eid: string) => remainingShapeIds.has(`shp:${eid}`))) {
+        await graph.persistence.deleteNode(node.id)
+        removedIds.push(node.id)
+      }
+    }
+  }
+
+  const allEventIds = await graph.persistence.allNodeIds()
+  const allEventNodes = await graph.persistence.getNodes(allEventIds)
+  const typedEventNodes = allEventNodes.filter(n => n.type === 'event')
+  if (typedEventNodes.length > PRUNE_MAX_EVENT_NODES) {
+    const excessEvents = typedEventNodes
+      .sort((a: any, b: any) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0))
+      .slice(0, typedEventNodes.length - PRUNE_MAX_EVENT_NODES)
+    for (const node of excessEvents) {
+      await graph.persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  const userStates = await queryPersistedNodesByType('user_state')
+  for (const node of userStates) {
+    const rawId = node.id.startsWith('sta:') ? node.id.slice(4) : node.id
+    if (!remainingShapeIds.has(`shp:${rawId}`)) {
+      await graph.persistence.deleteNode(node.id)
+      removedIds.push(node.id)
+    }
+  }
+
+  return removedIds
 }
 
 /**
- * Delegate vector similarity search to the backfill worker.
+ * Cosine vector similarity search across the persisted graph store.
  * @param queryVec - the query vector to search with
  * @param topK - number of results to return
  * @param threshold - minimum similarity score
@@ -596,12 +716,14 @@ export async function runVectorSearch(
   topK = 10,
   threshold = 0.3
 ): Promise<Array<{ id: string; score: number }>> {
-  if (typeof Worker === 'undefined') return []
-  const searchId = `vec_${++subIdCounter}`
-  return new Promise<Array<{ id: string; score: number }>>((resolve) => {
-    vectorSearchCallbacks.set(searchId, { resolve })
-    getBackfillWorker().postMessage({ type: 'vectorSearch', searchId, queryVec, topK, threshold })
-  })
+  const vectors = await graph.persistence.getAllVectors()
+  const results: Array<{ id: string; score: number }> = []
+  for (const { id, vector } of vectors) {
+    const score = cosineSimilarity(queryVec, vector)
+    if (score >= threshold) results.push({ id, score })
+  }
+  results.sort((a, b) => b.score - a.score)
+  return results.slice(0, topK)
 }
 
 /** Clean up all pool resources — call on logout / unmount */
@@ -610,8 +732,6 @@ export function cleanupPool(): void {
   searchPurgeInterval = null
   terminateBackfillWorker()
   searchCallbacks.clear()
-  vectorSearchCallbacks.clear()
-  pruneCacheResolve = null
   pendingSubscriptionBatch = []
   pendingBackfillBatch = []
   backfillBuffer = []

@@ -180,7 +180,6 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
       if (!cancelled) setSeenIds(ids)
     })
     return () => { cancelled = true }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videos, feedType, filterTag])
 
   // Compute initial scroll target and scroll on mount

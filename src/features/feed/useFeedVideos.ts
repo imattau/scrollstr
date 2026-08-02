@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { graph, useGraphQuery } from '../../graph'
 import type { NodeType, PolyNode } from '../../graph'
 import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
@@ -28,8 +28,12 @@ function useStableFeedOrder(
   const orderRef = useRef<string[]>([])
   const dataRef = useRef<Map<string, VideoItemData>>(new Map())
   const prevResetKeyRef = useRef(resetKey)
+  const [ordered, setOrdered] = useState<VideoItemData[]>([])
 
-  return useMemo(() => {
+  // Accumulate the session-stable ordering off the render path (refs must not
+  // be read/written during render). useLayoutEffect runs before paint, so the
+  // feed never flashes a stale ordering while new batches are merged in.
+  useLayoutEffect(() => {
     if (resetKey !== prevResetKeyRef.current) {
       prevResetKeyRef.current = resetKey
       orderRef.current = []
@@ -50,8 +54,10 @@ function useStableFeedOrder(
       if (!orderSet.has(id)) dataRef.current.delete(id)
     }
 
-    return orderRef.current.map((id) => dataRef.current.get(id)).filter((v): v is VideoItemData => !!v)
+    setOrdered(orderRef.current.map((id) => dataRef.current.get(id)).filter((v): v is VideoItemData => !!v))
   }, [items, resetKey, isStillVisible])
+
+  return ordered
 }
 
 // A generous, fixed cap on how many *unwatched* candidates the query

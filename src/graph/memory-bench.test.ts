@@ -1,4 +1,3 @@
-import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { PolyGraph, computeEventVector } from './polygraph'
 import type { PolyNode } from './types'

@@ -1,11 +1,23 @@
-import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { PolyGraph, IndexedDBAdapter } from '@0xx0lostcause0xx0/polypack'
+import { PolyGraph } from '@0xx0lostcause0xx0/polypack'
+import { BinaryStoreAdapter } from '@0xx0lostcause0xx0/polypack/persistence/opfs'
+import { MemoryFileIO } from '@0xx0lostcause0xx0/polypack/persistence'
 import { computeEventVector } from './polygraph'
 import type { PolyNode } from './types'
 
+const testStores = new Map<string, MemoryFileIO>()
+
+function testFileIO(storeDir: string): MemoryFileIO {
+  let io = testStores.get(storeDir)
+  if (!io) {
+    io = new MemoryFileIO()
+    testStores.set(storeDir, io)
+  }
+  return io
+}
+
 function createTestGraph(): PolyGraph {
-  return new PolyGraph(new IndexedDBAdapter({ name: 'test-db', version: 1 }))
+  return new PolyGraph(new BinaryStoreAdapter({ storeDir: 'test-db', fileIO: testFileIO('test-db') }))
 }
 
 function makeEvent(id: string, kind: number, pubkey = 'pk1', ts = 1_700_000_000): PolyNode {

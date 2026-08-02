@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     exclude: ['tests/**'],
+    setupFiles: ['./src/graph/setup-test.ts'],
   },
 })
