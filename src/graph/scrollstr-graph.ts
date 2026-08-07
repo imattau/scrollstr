@@ -4,7 +4,11 @@ import type { PersistenceAdapter } from '@0xx0lostcause0xx0/polypack'
 import type { PolyNode, NodeType } from './types'
 
 const DB_NAME = 'scrollstr-polypack'
-const HOT_CACHE_MAX = 10000
+// Shared LRU across every node type (events, profiles, reactions, zaps,
+// video shapes, edges, ...). Was capped well below polypack's own default
+// (50000), which caused frequent eviction of video_shape nodes under normal
+// relay activity even when they were still on-screen.
+const HOT_CACHE_MAX = 50000
 
 let testPersistenceFactory: ((storeDir: string) => PersistenceAdapter) | null = null
 

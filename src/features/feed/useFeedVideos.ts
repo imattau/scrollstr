@@ -193,7 +193,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
   const _deeplinkShape = useGraphQuery(async () => {
     if (!deeplinkVideoId) return undefined
     try {
-      const node = await graph.getNodeSafe(deeplinkVideoId)
+      const node = await graph.getNodeSafe(`shp:${deeplinkVideoId}`)
       if (!node || node.type !== 'video_shape') return undefined
       const shape = node.data as unknown as VideoShape
       if (!shape.videoUrl || shape.mediaStatus === 'failed' || shape.hidden) return undefined
@@ -230,10 +230,21 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
   // Direct existence/visibility check for an already-shown id that's absent
   // from the latest (unwatched-only) query batch — used by useStableFeedOrder
   // to tell "watched, still valid" apart from "actually deleted/hidden/muted".
-  const isStillVisible = useCallback((id: string): boolean => {
-    const node = graph.getNode(`shp:${id}`)
-    if (!node) return false
-    const data = node.data as Record<string, unknown>
+  //
+  // The hot cache is a shared, capped LRU across every node type, so an
+  // already-shown (or even currently active) video can get evicted purely
+  // from unrelated cache pressure (profiles, reactions, zaps, ...) without
+  // meaning it was actually deleted. getNode only sees hot-cache-resident
+  // nodes, so on a miss we can't yet tell "evicted" apart from "gone" —
+  // assume still visible and restore it from persistence in the background
+  // via getNodeSafe, correcting the verdict (and bumping `restoreVersion` to
+  // give this callback a new identity, so useStableFeedOrder's effect reruns
+  // and picks up the corrected answer) once we actually know.
+  const [restoreVersion, setRestoreVersion] = useState(0)
+  const pendingRestoreRef = useRef<Set<string>>(new Set())
+  const knownGoneRef = useRef<Set<string>>(new Set())
+
+  const isNodeDataVisible = useCallback((data: Record<string, unknown>): boolean => {
     if (data.hidden || data.mediaStatus === 'failed') return false
     const pubkey = data.pubkey as string | undefined
     if (pubkey && mutedPubkeys.has(pubkey)) return false
@@ -241,6 +252,27 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     if (hashtags.some((t) => mutedHashtags.has(t.toLowerCase()))) return false
     return true
   }, [mutedPubkeys, mutedHashtags])
+
+  const isStillVisible = useCallback((id: string): boolean => {
+    if (knownGoneRef.current.has(id)) return false
+    const node = graph.getNode(`shp:${id}`)
+    if (node) return isNodeDataVisible(node.data as Record<string, unknown>)
+
+    if (!pendingRestoreRef.current.has(id)) {
+      pendingRestoreRef.current.add(id)
+      graph.getNodeSafe(`shp:${id}`)
+        .then((restored) => {
+          const visible = !!restored && isNodeDataVisible(restored.data as Record<string, unknown>)
+          if (!visible) knownGoneRef.current.add(id)
+        })
+        .catch(() => knownGoneRef.current.add(id))
+        .finally(() => {
+          pendingRestoreRef.current.delete(id)
+          setRestoreVersion(v => v + 1)
+        })
+    }
+    return true
+  }, [isNodeDataVisible, restoreVersion])
 
   const exploreVideosRaw = useMemo(
     () => injectDeeplink(filterVideos(allShapes)),

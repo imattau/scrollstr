@@ -144,16 +144,16 @@ describe('PolyGraph E2E — in-memory indexes', () => {
   })
 
   it('indexes cleaned up on eviction', () => {
-    // Add more than HOT_CACHE_MAX (20000) nodes to trigger eviction
-    const COUNT = 20_050
+    // Add more than HOT_CACHE_MAX (50000) nodes to trigger eviction
+    const COUNT = 50_050
     for (let i = 0; i < COUNT; i++) {
       const pk = `pk${i % 100}`
       pg.addNode(makeEvent(`evict-${i}`, 1, pk, 1_700_000_000 + i))
     }
 
-    // HOT_CACHE_MAX is 20000, so ~50 nodes should have been evicted
+    // HOT_CACHE_MAX is 50000, so ~50 nodes should have been evicted
     const totalNodes = (pg as any).nodes.size
-    expect(totalNodes).toBeLessThanOrEqual(20000)
+    expect(totalNodes).toBeLessThanOrEqual(50000)
 
     // The index should have been cleaned up too — querying a pubkey
     // whose events were evicted should return nothing
@@ -648,7 +648,7 @@ describe('PolyGraph E2E — memory leak detection', () => {
   })
 
   it('hot cache eviction removes nodes but keeps edges indexed', () => {
-    const COUNT = 20_050
+    const COUNT = 50_050
     for (let i = 0; i < 100; i++) {
       pg.addNode(makeEvent(`evt-${i}`, 1, 'pk', 1_700_000_000 + i))
     }
