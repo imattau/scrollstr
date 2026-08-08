@@ -4,12 +4,14 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
+const isTauriBuild = process.env.TAURI_ENV === 'true'
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
+    ...(isTauriBuild ? [] : [VitePWA({
       registerType: 'prompt',
       includeAssets: ['favicon.svg', 'icons.svg'],
       manifest: {
@@ -76,12 +78,13 @@ export default defineConfig({
       devOptions: {
         enabled: false,
       },
-    }),
+    })]),
   ],
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {
       '@': path.resolve(__dirname, './src'),
+      ...(isTauriBuild ? { 'virtual:pwa-register': path.resolve(__dirname, './src/tauri/pwa-stub.ts') } : {}),
     },
   },
   optimizeDeps: {

@@ -17,6 +17,15 @@ export function setPersistenceFactory(factory: ((storeDir: string) => Persistenc
   testPersistenceFactory = factory
 }
 
+/** Production hook: allow the Tauri env to inject a custom adapter factory. */
+let persistenceFactory: (() => PersistenceAdapter | Promise<PersistenceAdapter>) | null = (() =>
+  Promise.resolve(new BinaryStoreAdapter({ storeDir: DB_NAME }))
+)
+
+export function setPersistenceFactoryAsync(factory: () => PersistenceAdapter | Promise<PersistenceAdapter>): void {
+  persistenceFactory = factory
+}
+
 export class ScrollstrGraph extends PolyGraph {
   private _byPubkey = new Map<string, Set<string>>()
   private _byKind = new Map<number, Set<string>>()

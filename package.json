@@ -6,10 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:tauri": "export TAURI_ENV=true && tsc -b && vite build",
     "test": "vitest run",
     "lint": "eslint .",
     "preview": "vite preview",
-    "postinstall": "bash scripts/copy-ffmpeg-core.sh"
+    "postinstall": "bash scripts/copy-ffmpeg-core.sh",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@0xx0lostcause0xx0/polypack": "^2.5.0",
@@ -20,6 +24,10 @@
     "@radix-ui/react-tabs": "^1.1.15",
     "@tailwindcss/vite": "^4.3.1",
     "@tanstack/react-virtual": "^3.14.6",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-stronghold": "^2.3.1",
     "applesauce-accounts": "^6.0.0",
     "applesauce-signers": "^6.0.1",
     "date-fns": "^4.4.0",
@@ -43,6 +51,7 @@
     "@eslint/js": "^10.0.1",
     "@ffmpeg/core": "^0.12.10",
     "@playwright/test": "^1.61.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^24.12.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

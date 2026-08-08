@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { ArrowRight, Eye, Key, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ArrowRight, Eye, Key, ShieldCheck, Sparkles, X, Lock } from 'lucide-react'
 import { Drawer } from 'vaul'
 import { useNostr } from '../../app/providers'
 import { hasStoredPasskeyIdentity } from 'nostr-passkey'
+import { isTauri } from '../../tauri/env'
 
 interface LoginSheetProps {
   isOpen: boolean
@@ -63,16 +64,23 @@ function OptionCard({
 }
 
 export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess }) => {
-  const { loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey } = useNostr()
+  const { loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, loginWithNative, registerNative } = useNostr()
   const [npub, setNpub] = useState('')
   const [nsec, setNsec] = useState('')
   const [nip46Address, setNip46Address] = useState('')
   const [error, setError] = useState('')
   const [hasPasskey, setHasPasskey] = useState(false)
+  const [hasNativeKey, setHasNativeKey] = useState(false)
+  const [nativeNsec, setNativeNsec] = useState('')
 
   React.useEffect(() => {
     if (isOpen) {
       setHasPasskey(hasStoredPasskeyIdentity())
+      if (isTauri()) {
+        import('../../tauri/signer').then(({ hasKey }) =>
+          hasKey().then(setHasNativeKey).catch(() => setHasNativeKey(false))
+        )
+      }
     }
   }, [isOpen])
 
@@ -129,6 +137,27 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
     } catch (err: any) {
       console.error(err)
       setError(err.message || 'Passkey authentication failed')
+    }
+  }
+
+  const handleNativeLogin = async () => {
+    setError('')
+    try {
+      await loginWithNative()
+      onLoginSuccess()
+    } catch (err: any) {
+      setError(err.message || 'Native key unlock failed')
+    }
+  }
+
+  const handleNativeRegister = async () => {
+    setError('')
+    try {
+      const trimmedNsec = nativeNsec.trim()
+      await registerNative(trimmedNsec || undefined)
+      onLoginSuccess()
+    } catch (err: any) {
+      setError(err.message || 'Failed to create native key')
     }
   }
 
@@ -228,6 +257,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
               ) : null}
 
               <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 pb-4 md:px-8 md:pb-8 min-h-0 h-0">
+                {!isTauri() && (
                 <div className="order-3 md:order-1">
                   <OptionCard
                     title="Browser extension"
@@ -236,6 +266,64 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
                     onClick={handleNip07Login}
                   />
                 </div>
+                )}
+
+                {isTauri() && (
+                <div className="order-1 md:order-2">
+                  {hasNativeKey ? (
+                    <OptionCard
+                      title="Unlock Native Key"
+                      description="Sign in using your device-encrypted Nostr key."
+                      icon={<Lock className="h-5 w-5 text-[#22c55e]" />}
+                      onClick={handleNativeLogin}
+                      subtle
+                    />
+                  ) : (
+                    <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
+                      <div className="flex items-start gap-4 px-4 py-4">
+                        <div className="mt-0.5 flex size-[42px] shrink-0 items-center justify-center rounded-[14px] border border-[#3b3b47] bg-[#222228] text-[#f7f7f8]">
+                          <Lock className="h-5 w-5 text-[#22c55e]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="text-[15px] font-semibold text-[#f7f7f8]">Native Key</p>
+                            <span className="rounded-full border border-[#3b3b47] bg-[#222228] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#d4d4d8]">
+                              Desktop
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[12px] leading-normal text-[#a1a1aa]">
+                            Generate a new Nostr key stored securely on your device.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="space-y-3 border-t border-[#23232a] px-4 pb-4 pt-3">
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#71717a]">
+                            Import existing key (Optional)
+                          </label>
+                          <input
+                            type="password"
+                            value={nativeNsec}
+                            onChange={(e) => setNativeNsec(e.target.value)}
+                            placeholder="nsec1..."
+                            className="w-full rounded-[14px] border border-[#2a2a31] bg-[#09090b] px-3 py-2.5 text-[12px] text-[#f7f7f8] outline-none placeholder:text-[#71717a] transition-all focus:border-[#22c55e]/40"
+                          />
+                          <p className="text-[11px] leading-normal text-[#71717a]">
+                            Enter an nsec or hex key to import. Leave empty to generate a new identity.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleNativeRegister}
+                          className="w-full rounded-[14px] bg-[#22c55e] px-4 py-2.5 text-[13px] font-semibold text-[#09090b] transition-opacity hover:opacity-90"
+                        >
+                          {nativeNsec.trim() ? 'Import Key' : 'Generate New Key'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )}
 
                 <div className="order-1 md:order-2">
                   {hasPasskey ? (

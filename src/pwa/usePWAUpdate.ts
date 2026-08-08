@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { isTauri } from '../tauri/env'
 
 export function usePWAUpdate() {
   const [needRefresh, setNeedRefresh] = useState(false)
   const updateRef = useRef<((reloadPage?: boolean) => Promise<void>) | undefined>(undefined)
 
   useEffect(() => {
+    if (isTauri()) return
+
     import('virtual:pwa-register').then(({ registerSW }) => {
       const updateSW = registerSW({
         onNeedRefresh() {
@@ -15,7 +18,7 @@ export function usePWAUpdate() {
         },
       })
       updateRef.current = updateSW
-    })
+    }).catch(() => {})
   }, [])
 
   const update = useCallback(() => {

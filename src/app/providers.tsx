@@ -17,6 +17,7 @@ import { NostrContext, type UserSession } from './nostrContext'
 import { NostrConnectSigner, parseBunkerUrl } from '../nostr/nip46'
 import { loadSettings, saveSettings, mergeSettings } from '../db/local-preferences'
 import { loadRawSettingsEvent, decryptSettingsJson, getNip44, getNip44FromSigner } from '../nostr/events/settings'
+import { isTauri } from '../tauri/env'
 
 export const useNostr = () => {
   const context = useContext(NostrContext)
@@ -41,7 +42,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (method === 'readonly') {
           setSession({ pubkey, method })
         } else if (method === 'nip07') {
-          setSession({ pubkey, method })
+          if (isTauri()) {
+            localStorage.removeItem('scrollstr_session')
+          } else {
+            setSession({ pubkey, method })
+          }
         } else if (method === 'passkey') {
           setSession({ pubkey, method, signer: null })
         } else if (method === 'nip46') {
@@ -49,7 +54,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const relayUrl = parsed.relayUrl || parsed.bunkerUrl
           const signerPubkey = parsed.signerPubkey || pubkey
           if (relayUrl && signerPubkey) {
-            // Reconstruct bunker URI without the secret (intentionally omitted on save)
             const reconnectUri = `bunker://${signerPubkey}?relay=${encodeURIComponent(relayUrl)}`
             NostrConnectSigner.fromBunkerURI(reconnectUri)
               .then(async (signer) => {
@@ -62,6 +66,18 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               })
           } else {
             setSession({ pubkey, method: 'nip46', signer: null })
+          }
+        } else if (method === 'native') {
+          if (isTauri()) {
+            import('../tauri/signer').then(({ getPubkey }) =>
+              getPubkey().then(({ pubkey: restoredPubkey }) => {
+                setSession({ pubkey: restoredPubkey, method: 'native' })
+              }).catch(() => {
+                localStorage.removeItem('scrollstr_session')
+              })
+            )
+          } else {
+            localStorage.removeItem('scrollstr_session')
           }
         }
       } catch (e) {
@@ -87,7 +103,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const current = loadSettings()
       const merged = mergeSettings(current, decrypted)
       saveSettings(merged)
-      console.log('[settings] Synced settings from Nostr kind-30078')
     }
 
     trySync().catch((err) => console.warn('[settings] Failed to sync from Nostr:', err))
@@ -95,6 +110,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [session?.pubkey, session?.method])
 
   const loginWithNip07 = useCallback(async (): Promise<string> => {
+    if (isTauri()) {
+      throw new Error('NIP-07 browser extensions are not supported in the desktop app')
+    }
     if (!window.nostr) {
       throw new Error('NIP-07 Extension not found')
     }
@@ -118,7 +136,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       signer,
     }
     setSession(newSession)
-    // Store only the relay URL and signer pubkey — omit the secret to limit exposure
     const parsed = parseBunkerUrl(bunkerUrl)
     localStorage.setItem(
       'scrollstr_session',
@@ -129,7 +146,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const loginReadOnly = useCallback((npubOrPubkey: string) => {
     let pubkey = npubOrPubkey
-    // Try decoding npub (bech32) to hex; fall back to raw hex string
     if (pubkey.startsWith('npub1')) {
       try {
         const decoded = nip19.decode(pubkey)
@@ -153,7 +169,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!record) {
       throw new Error('No passkey identity found on this device. Please register first.')
     }
-    console.log('Unlocking passkey identity for login...')
     const result = await unlockPasskeyIdentity(record)
     const signer = new PasskeySigner(result.record, { key: result.secretKey })
     const pubkey = result.pubkey
@@ -167,7 +182,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [])
 
   const registerPasskey = useCallback(async (nsec?: string): Promise<string> => {
-    console.log(nsec ? 'Registering passkey from existing nsec...' : 'Registering new passkey identity...')
     const options = {
       rpName: 'Nostr Clips',
       userName: 'nostrclips_user_' + Math.floor(Math.random() * 1000000),
@@ -187,8 +201,27 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return pubkey
   }, [])
 
+  const loginWithNative = useCallback(async (): Promise<string> => {
+    const { getPubkey, hasKey } = await import('../tauri/signer')
+    const exists = await hasKey()
+    if (!exists) {
+      throw new Error('No native key stored. Please generate or import a key first.')
+    }
+    const { pubkey } = await getPubkey()
+    setSession({ pubkey, method: 'native' })
+    localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'native' }))
+    return pubkey
+  }, [])
+
+  const registerNative = useCallback(async (nsec?: string): Promise<string> => {
+    const { generateKey, importKey } = await import('../tauri/signer')
+    const { pubkey } = nsec ? await importKey(nsec) : await generateKey()
+    setSession({ pubkey, method: 'native' })
+    localStorage.setItem('scrollstr_session', JSON.stringify({ pubkey, method: 'native' }))
+    return pubkey
+  }, [])
+
   const logout = useCallback(() => {
-    // NIP-46: close the remote signer's relay subscriptions.
     if (session?.method === 'nip46' && session.signer && typeof (session.signer as any).close === 'function') {
       void (session.signer as any).close().catch((err: unknown) =>
         console.warn('[logout] NIP-46 signer close failed:', err)
@@ -197,7 +230,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     clearPasskeyIdentity()
     setSession(null)
     localStorage.removeItem('scrollstr_session')
-    // Reset module-level state BEFORE terminating the worker.
     resetBackfillState()
     resetProfileBatch()
     terminateFFmpeg()
@@ -209,7 +241,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const signEvent = useCallback(async (eventTemplate: any): Promise<any> => {
     if (!session) throw new Error('No active Nostr session')
-    
+
     const event = {
       ...eventTemplate,
       pubkey: session.pubkey,
@@ -219,12 +251,12 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
 
     if (session.method === 'nip07') {
+      if (isTauri()) throw new Error('NIP-07 not available in desktop app')
       if (!window.nostr) throw new Error('NIP-07 extension not found')
       return await window.nostr.signEvent(event)
     } else if (session.method === 'passkey') {
       let activeSigner = session.signer
       if (!activeSigner) {
-        console.log('Passkey signer locked, unlocking...')
         const record = readStoredPasskeyIdentity()
         if (!record) throw new Error('No passkey identity record found on device')
         const result = await unlockPasskeyIdentity(record)
@@ -242,6 +274,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         throw new Error('NIP-46 remote signer is not connected')
       }
       return await remoteSigner.signEvent(event)
+    } else if (session.method === 'native') {
+      const { signEvent: tauriSignEvent } = await import('../tauri/signer')
+      const signedJson = await tauriSignEvent(JSON.stringify(event))
+      return JSON.parse(signedJson)
     } else {
       throw new Error('Signing is not supported in read-only mode')
     }
@@ -256,9 +292,11 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loginReadOnly,
     loginWithPasskey,
     registerPasskey,
+    loginWithNative,
+    registerNative,
     logout,
     signEvent,
-  }), [isConnected, session, loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, logout, signEvent])
+  }), [isConnected, session, loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, loginWithNative, registerNative, logout, signEvent])
 
   return (
     <NostrContext.Provider value={contextValue}>

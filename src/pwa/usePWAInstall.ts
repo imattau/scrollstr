@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { isTauri } from '../tauri/env'
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: Array<string>
@@ -14,8 +15,9 @@ export function usePWAInstall() {
   const [isInstallable, setIsInstallable] = useState(false)
 
   useEffect(() => {
-    // Check if app is already running as standalone (installed)
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
+    if (isTauri()) return
+
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
                          (window.navigator as any).standalone === true
 
     if (isStandalone) {
@@ -40,14 +42,12 @@ export function usePWAInstall() {
     const handleAppInstalled = () => {
       setInstallPromptEvent(null)
       setIsInstallable(false)
-      console.log('PWA was installed')
     }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
     window.addEventListener('pwa-installable', handleCustomPWAInstallable)
     window.addEventListener('appinstalled', handleAppInstalled)
 
-    // Check if prompt was already captured by window before hook registered listeners
     if ((window as any).deferredInstallPrompt) {
       setInstallPromptEvent((window as any).deferredInstallPrompt)
       setIsInstallable(true)
@@ -62,17 +62,14 @@ export function usePWAInstall() {
 
   const installApp = async () => {
     if (!installPromptEvent) {
-      console.warn('Install prompt is not available')
       return false
     }
 
     try {
       await installPromptEvent.prompt()
       const choiceResult = await installPromptEvent.userChoice
-      console.log(`User response to install prompt: ${choiceResult.outcome}`)
 
       if (choiceResult.outcome === 'accepted') {
-        // Clear cached prompt
         ;(window as any).deferredInstallPrompt = null
         setInstallPromptEvent(null)
         setIsInstallable(false)

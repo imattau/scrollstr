@@ -8,9 +8,9 @@
     <meta http-equiv="Content-Security-Policy" content="
       default-src 'self';
       script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval';
-      connect-src 'self' wss:* https:;
-      media-src 'self' https: blob:;
-      img-src 'self' https: data:;
+      connect-src 'self' tauri: ipc: https: wss:;
+      media-src 'self' https: blob: tauri: ipc:;
+      img-src 'self' https: data: tauri: ipc:;
       style-src 'self' 'unsafe-inline';
       font-src 'self' data:;
       frame-src 'none';

@@ -3,8 +3,8 @@ import type { SimplePool } from 'nostr-tools'
 
 export interface UserSession {
   pubkey: string
-  method: 'nip07' | 'nip46' | 'readonly' | 'passkey'
-  signer?: any // PasskeySigner, or window.nostr (NIP-07)
+  method: 'nip07' | 'nip46' | 'readonly' | 'passkey' | 'native'
+  signer?: any // PasskeySigner, TauriNativeSigner, or window.nostr (NIP-07)
 }
 
 export interface NostrContextProps {
@@ -16,6 +16,8 @@ export interface NostrContextProps {
   loginReadOnly: (npubOrPubkey: string) => void
   loginWithPasskey: () => Promise<string>
   registerPasskey: (nsec?: string) => Promise<string>
+  loginWithNative: () => Promise<string>
+  registerNative: (nsec?: string) => Promise<string>
   logout: () => void
   signEvent: (eventTemplate: any) => Promise<any>
 }
