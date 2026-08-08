@@ -51,9 +51,6 @@
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"
-    },
-    "iOS": {
-      "developmentTeam": "-"
     }
   }
 }

@@ -81,10 +81,17 @@ jobs:
 
       - name: Setup Android SDK
         run: |
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
-          unset ANDROID_SDK_ROOT
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973" > /dev/null 2>&1
+          export ANDROID_HOME=$HOME/Android/Sdk
+          mkdir -p "$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd /tmp
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
+          unzip -qo cmdline-tools.zip
+          mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;27.0.12077973" > /dev/null 2>&1
 
       - name: Install Linux deps
         run: |
@@ -103,6 +110,7 @@ jobs:
 
       - name: Build Android release
         run: |
+          export ANDROID_HOME=$HOME/Android/Sdk
           unset ANDROID_SDK_ROOT
           npx tauri android build
         env:
