@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "export TAURI_ENV=true && tsc -b && vite build"
+    "beforeBuildCommand": "cross-env TAURI_ENV=true tsc -b && cross-env TAURI_ENV=true vite build"
   },
   "app": {
     "windows": [
