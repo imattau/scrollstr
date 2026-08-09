@@ -26,6 +26,7 @@ interface VideoFeedProps {
 export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoChange, isMuted }) => {
   const { session } = useNostr()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
   const feedType = searchParams.get('feed') || 'explore'
@@ -233,6 +234,10 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     seenVideoIdsRef.current = new Set(currentVideos.map(v => v.id))
   }, [videosRef])
 
+  const stopMediaStackGesture = useCallback((e: React.SyntheticEvent) => {
+    e.stopPropagation()
+  }, [])
+
   const handleActiveIndexChange = useCallback((index: number) => {
     setActiveIndex(index)
     const video = videosRef.current[index]
@@ -398,13 +403,20 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         }}
         onAuthorClick={(item: MediaItemData) => {
           const v = item.customData as VideoItemData
-          window.location.href = `/profile/${v.creator.pubkey}`
+          navigate(`/profile/${v.creator.pubkey}`)
         }}
 
         renderLikeButton={(isActive, onClick) => {
           const v = videos[activeIndex] as VideoItemData | undefined
           return (
-            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Like">
+            <button
+              type="button"
+              className="media-stack-icon-btn rvf:pointer-events-auto"
+              onMouseDown={stopMediaStackGesture}
+              onTouchStart={stopMediaStackGesture}
+              onClick={(e) => { e.stopPropagation(); onClick() }}
+              aria-label="Like"
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill={v?.hasLiked ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
               </svg>
@@ -413,7 +425,14 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         }}
         renderCommentButton={(onClick) => {
           return (
-            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Comment">
+            <button
+              type="button"
+              className="media-stack-icon-btn rvf:pointer-events-auto"
+              onMouseDown={stopMediaStackGesture}
+              onTouchStart={stopMediaStackGesture}
+              onClick={(e) => { e.stopPropagation(); onClick() }}
+              aria-label="Comment"
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
@@ -422,7 +441,14 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         }}
         renderShareButton={(onClick) => {
           return (
-            <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" onClick={onClick} aria-label="Share">
+            <button
+              type="button"
+              className="media-stack-icon-btn rvf:pointer-events-auto"
+              onMouseDown={stopMediaStackGesture}
+              onTouchStart={stopMediaStackGesture}
+              onClick={(e) => { e.stopPropagation(); onClick() }}
+              aria-label="Share"
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
                 <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
@@ -436,6 +462,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
             <>
               <div className="media-stack-action-item">
                 <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label="Boost"
+                  onMouseDown={stopMediaStackGesture}
+                  onTouchStart={stopMediaStackGesture}
                   onClick={(e) => { e.stopPropagation(); onActionTrigger('boost', v.id, v.creator.pubkey, v.kind) }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill={v.hasBoosted ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                     <path d="M17 1l4 4-4 4M7 23l-4-4 4-4M7 5l10 14"/>
@@ -445,6 +473,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
               </div>
               <div className="media-stack-action-item">
                 <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label="Zap"
+                  onMouseDown={stopMediaStackGesture}
+                  onTouchStart={stopMediaStackGesture}
                   onClick={(e) => { e.stopPropagation(); onActionTrigger('zap', v.id, v.creator.pubkey, v.kind) }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f5b942" strokeWidth="2">
                     <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
@@ -454,6 +484,8 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
               </div>
               <div className="media-stack-action-item">
                 <button type="button" className="media-stack-icon-btn rvf:pointer-events-auto" aria-label={isMuted ? 'Unmute' : 'Mute'}
+                  onMouseDown={stopMediaStackGesture}
+                  onTouchStart={stopMediaStackGesture}
                   onClick={(e) => { e.stopPropagation(); onActionTrigger('mute', v.id) }}>
                   {isMuted ? (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
