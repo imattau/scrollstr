@@ -5,10 +5,25 @@ import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVid
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
+const VIDEO_KINDS = [1, 21, 22, 34236]
+const AUTHOR_FILTER_BATCH_SIZE = 20
+
+function authorScopedVideoFilters(pubkeys: string[], extra: Record<string, unknown>) {
+  const filters = []
+  for (let i = 0; i < pubkeys.length; i += AUTHOR_FILTER_BATCH_SIZE) {
+    filters.push({
+      kinds: VIDEO_KINDS,
+      authors: pubkeys.slice(i, i + AUTHOR_FILTER_BATCH_SIZE),
+      ...extra,
+    })
+  }
+  return filters
+}
 
 interface UseFeedSubscriptionsInput {
   relayUrls: string[]
   sessionPubkey?: string
+  feedType: string
   followingPubkeys: string[]
   mutedPubkeys: Set<string>
   activeIndex: number
@@ -18,7 +33,7 @@ interface UseFeedSubscriptionsInput {
 }
 
 export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
-  const { relayUrls, sessionPubkey, followingPubkeys, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
+  const { relayUrls, sessionPubkey, feedType, followingPubkeys, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
 
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const lastOlderFetchAtRef = useRef(0)
@@ -110,16 +125,27 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followingPubkeys, relayUrls, refreshKey])
 
-  // Feed subscription: fetch recent videos from all relays into the cache.
+  // Feed subscription: fetch recent videos from relays into the cache.
+  // The following feed must be author-scoped; otherwise it can only show
+  // followed creators after some other view, such as Profile, has already
+  // populated those authors' video shapes.
   useEffect(() => {
     if (relayUrls.length === 0) return
+    if (feedType === 'following' && (!sessionPubkey || followingPubkeys.length === 0)) return
+
     console.log('[VideoFeed] Fetching videos...')
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30
-    }, 'high')
+    const filters = feedType === 'following'
+      ? authorScopedVideoFilters(followingPubkeys, {
+          since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30,
+          limit: PAGE_SIZE,
+        })
+      : [{
+          kinds: VIDEO_KINDS,
+          since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30,
+        }]
+    const unsub = subscribeToRelays(relayUrls, filters, 'high')
     return () => { unsub() }
-  }, [relayUrls, refreshKey])
+  }, [relayUrls, feedType, sessionPubkey, followingPubkeys, refreshKey])
 
   // Load more older content when approaching the end of the feed
   useEffect(() => {
@@ -135,11 +161,17 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     setIsFetchingOlder(true)
 
     console.log(`Loading older videos before ${oldestCreatedAt}...`)
-    const unsub = subscribeToRelays(relayUrls, {
-      kinds: [1, 21, 22, 34236],
-      limit: PAGE_SIZE,
-      until: oldestCreatedAt - 1,
-    }, 'low')
+    const filters = feedType === 'following' && sessionPubkey
+      ? authorScopedVideoFilters(followingPubkeys, {
+          limit: PAGE_SIZE,
+          until: oldestCreatedAt - 1,
+        })
+      : [{
+          kinds: VIDEO_KINDS,
+          limit: PAGE_SIZE,
+          until: oldestCreatedAt - 1,
+        }]
+    const unsub = subscribeToRelays(relayUrls, filters, 'low')
     const doneTimer = setTimeout(() => setIsFetchingOlder(false), 3000)
 
     return () => {
@@ -147,5 +179,5 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
       clearTimeout(doneTimer)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIndex, videosLength, oldestCreatedAt, relayUrls])
+  }, [activeIndex, videosLength, oldestCreatedAt, relayUrls, feedType, sessionPubkey, followingPubkeys])
 }

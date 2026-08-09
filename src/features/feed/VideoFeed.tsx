@@ -137,6 +137,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   useFeedSubscriptions({
     relayUrls,
     sessionPubkey: session?.pubkey,
+    feedType,
     followingPubkeys,
     mutedPubkeys,
     activeIndex,

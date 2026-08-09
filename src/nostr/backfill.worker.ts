@@ -367,19 +367,21 @@ function handleSubscribe(id: string, relays: string[], rawFilters: any[]) {
   if (filters.length === 0) return
   const entries: Array<{ close: (reason?: string) => void; relay: string }> = []
   for (const relay of relays) {
-    const sub = pool.subscribe([relay], filters[0] as Filter, {
-      onevent: (event: any) => {
-        if (event.sig && !event.sig.startsWith('mock-') && event.sig !== 'local-preview-sig') {
-          try {
-            if (!verifyEvent(event as any)) return
-          } catch {
-            return
+    for (const filter of filters) {
+      const sub = pool.subscribe([relay], filter as Filter, {
+        onevent: (event: any) => {
+          if (event.sig && !event.sig.startsWith('mock-') && event.sig !== 'local-preview-sig') {
+            try {
+              if (!verifyEvent(event as any)) return
+            } catch {
+              return
+            }
           }
-        }
-        self.postMessage({ type: 'subscriptionEvent', event, relay })
-      },
-    })
-    entries.push({ close: (reason?: string) => sub.close(reason), relay })
+          self.postMessage({ type: 'subscriptionEvent', event, relay })
+        },
+      })
+      entries.push({ close: (reason?: string) => sub.close(reason), relay })
+    }
   }
   subs.set(id, entries)
 }
