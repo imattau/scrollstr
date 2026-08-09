@@ -5,6 +5,21 @@ import { markVideosSeen, getSeenVideoIds } from '../../nostr/cache'
 const FEED_STATE_KEY = 'scrollstr-feed-state'
 const SEEN_FLUSH_INTERVAL_MS = 5000
 
+export interface SavedFeedState {
+  videoId: string
+  feedType: string
+  filterTag: string | null
+}
+
+export function readSavedFeedState(): SavedFeedState | null {
+  try {
+    const raw = localStorage.getItem(FEED_STATE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
 interface UseFeedPositionInput {
   initialVideoId: string | null
   feedType: string
@@ -188,12 +203,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
       const idx = videos.findIndex(v => v.id === initialVideoId)
       return idx >= 0 ? idx : null
     }
-    const saved = (() => {
-      try {
-        const raw = localStorage.getItem(FEED_STATE_KEY)
-        return raw ? JSON.parse(raw) : null
-      } catch { return null }
-    })()
+    const saved = readSavedFeedState()
     if (saved?.videoId && saved.feedType === feedType && saved.filterTag === filterTag) {
       const idx = videos.findIndex(v => v.id === saved.videoId)
       if (idx >= 0) return idx

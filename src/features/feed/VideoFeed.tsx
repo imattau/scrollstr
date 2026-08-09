@@ -8,7 +8,7 @@ import { graph, useGraphQuery } from '../../graph'
 import { useMuteList } from '../../nostr/useMuteList'
 import { subscribeToRelays, setIndexWritesDeferred, flushIndexWrites } from '../../nostr/pool'
 import { useFeedVideos } from './useFeedVideos'
-import { useFeedPosition, scrollToIndex } from './useFeedPosition'
+import { useFeedPosition, scrollToIndex, readSavedFeedState } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
 import { loadSettings } from '../../db/local-preferences'
 import { useProfile } from '../../nostr/profile'
@@ -29,6 +29,12 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
   const feedType = searchParams.get('feed') || 'explore'
+  const resumeVideoId = useMemo(() => {
+    if (initialVideoId) return null
+    const saved = readSavedFeedState()
+    if (saved?.feedType === feedType && saved.filterTag === filterTag) return saved.videoId
+    return null
+  }, [initialVideoId, feedType, filterTag])
 
   const [activeIndex, setActiveIndex] = useState(0)
   const mediaStackRef = useRef<MediaStackRef>(null)
@@ -100,6 +106,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     filterTag,
     refreshKey,
     deeplinkVideoId: initialVideoId,
+    resumeVideoId,
   })
 
   // Feed position: deep link, sessionStorage, initial scroll position

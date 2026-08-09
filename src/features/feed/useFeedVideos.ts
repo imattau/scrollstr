@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } fr
 import { graph, useGraphQuery } from '../../graph'
 import type { NodeType, PolyNode } from '../../graph'
 import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
-import { useMuteList } from '../../nostr/useMuteList'
 import { sortByInsertOrder, appendNewItems } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
@@ -12,13 +11,11 @@ import type { VideoItemData } from './VideoFeedItem'
  * are sorted among themselves and appended at the end. Resets (starting
  * fresh, newest-first) whenever `resetKey` changes, e.g. on manual refresh.
  *
- * `items` is only ever a *batch* — the feed query below returns unwatched
- * videos, so an already-shown id legitimately drops out of it once the
- * user watches it, without meaning it was deleted. Retention of
- * already-shown ids is decoupled from batch membership: an id missing from
- * `items` is kept (using its last-known data) as long as `isStillVisible`
- * says so, and only actually dropped for a real reason (deleted, hidden,
- * newly muted).
+ * `items` is only ever a *window* over the cache, so an already-shown id can
+ * legitimately fall outside it without meaning it was deleted. Retention is
+ * decoupled from query-window membership: an id missing from `items` is kept
+ * (using its last-known data) as long as `isStillVisible` says so, and only
+ * actually dropped for a real reason (deleted, hidden, newly muted).
  */
 function useStableFeedOrder(
   items: VideoItemData[],
@@ -60,14 +57,13 @@ function useStableFeedOrder(
   return ordered
 }
 
-// A generous, fixed cap on how many *unwatched* candidates the query
-// considers per page — no longer a correctness bound (retention above
-// doesn't depend on it), just a sanity limit on per-query work. As the user
-// watches through the current page, those ids drop out of the "unwatched"
-// filter, and the query naturally surfaces the next page of unwatched
-// content on its own — a moving window driven by watched status rather
-// than an arbitrary rank cutoff or ever-growing scroll-depth window.
+// A generous, fixed cap on how many cached candidates the query considers
+// per page. Watched items stay in the query window so returning/reloading
+// keeps navigable history above the restored position instead of rebuilding
+// the feed from only not-yet-seen videos.
 const FEED_QUERY_LIMIT = 300
+const RESUME_CONTEXT_BEFORE = 150
+const RESUME_CONTEXT_AFTER = 300
 
 export function isUnwatched(data: Record<string, unknown>): boolean {
   return !(data.userState as { watched?: boolean } | undefined)?.watched
@@ -115,6 +111,7 @@ interface UseFeedVideosInput {
   filterTag: string | null
   refreshKey: number
   deeplinkVideoId?: string | null
+  resumeVideoId?: string | null
 }
 
 interface UseFeedVideosOutput {
@@ -125,36 +122,37 @@ interface UseFeedVideosOutput {
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
-  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId } = input
+  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, resumeVideoId } = input
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
   const _allShapes = useGraphQuery(async () => {
     try {
-      let shapes: VideoShape[]
-      if (filterTag) {
-        const nodes = graph.whereType('video_shape')
-          .filter(n => {
-            const tags = (n.data.hashtags as string[]) ?? []
-            return tags.some(t => t.toLowerCase() === filterTag.toLowerCase()) && isUnwatched(n.data)
-          })
-          .sort((a, b) => ((b.data.insertOrder as number) ?? 0) - ((a.data.insertOrder as number) ?? 0))
-          .slice(0, FEED_QUERY_LIMIT)
-        shapes = nodes.map(n => n.data as unknown as VideoShape)
-      } else {
-        const nodes = graph.whereType('video_shape')
-          .filter(n => isUnwatched(n.data))
-          .sort((a, b) => ((b.data.insertOrder as number) ?? 0) - ((a.data.insertOrder as number) ?? 0))
-          .slice(0, FEED_QUERY_LIMIT)
-        shapes = nodes.map(n => n.data as unknown as VideoShape)
+      const nodes = graph.whereType('video_shape')
+        .filter(n => {
+          if (!filterTag) return true
+          const tags = (n.data.hashtags as string[]) ?? []
+          return tags.some(t => t.toLowerCase() === filterTag.toLowerCase())
+        })
+        .sort((a, b) => ((b.data.insertOrder as number) ?? 0) - ((a.data.insertOrder as number) ?? 0))
+
+      let windowed = nodes.slice(0, FEED_QUERY_LIMIT)
+      if (resumeVideoId) {
+        const resumeIdx = nodes.findIndex(n => (n.data as unknown as VideoShape).id === resumeVideoId)
+        if (resumeIdx >= 0) {
+          const start = Math.max(0, resumeIdx - RESUME_CONTEXT_BEFORE)
+          const end = Math.min(nodes.length, resumeIdx + RESUME_CONTEXT_AFTER + 1)
+          windowed = nodes.slice(start, end)
+        }
       }
+      const shapes = windowed.map(n => n.data as unknown as VideoShape)
       const valid = shapes.filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
       return await mergeCountersIntoShapes(valid)
     } catch (err) {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag], 500, ['video_shape'])
+  }, [refreshKey, filterTag, resumeVideoId], 500, ['video_shape'])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
@@ -166,7 +164,6 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
         for (const n of graph.byPubkey(pk, 'video_shape')) allNodes.push(n)
       }
       let shapes = allNodes
-        .filter(n => isUnwatched(n.data))
         .map(n => n.data as unknown as VideoShape)
         .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
       if (filterTag) {
@@ -175,13 +172,24 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
         )
       }
       shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
-      shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      if (resumeVideoId) {
+        const resumeIdx = shapes.findIndex(s => s.id === resumeVideoId)
+        if (resumeIdx >= 0) {
+          const start = Math.max(0, resumeIdx - RESUME_CONTEXT_BEFORE)
+          const end = Math.min(shapes.length, resumeIdx + RESUME_CONTEXT_AFTER + 1)
+          shapes = shapes.slice(start, end)
+        } else {
+          shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+        }
+      } else {
+        shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      }
       return await mergeCountersIntoShapes(shapes)
     } catch (err) {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag], 500, ['video_shape'])
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId], 500, ['video_shape'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
@@ -228,7 +236,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
   }, [mutedPubkeys, mutedHashtags])
 
   // Direct existence/visibility check for an already-shown id that's absent
-  // from the latest (unwatched-only) query batch — used by useStableFeedOrder
+  // from the latest query window — used by useStableFeedOrder
   // to tell "watched, still valid" apart from "actually deleted/hidden/muted".
   //
   // The hot cache is a shared, capped LRU across every node type, so an
@@ -254,6 +262,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
   }, [mutedPubkeys, mutedHashtags])
 
   const isStillVisible = useCallback((id: string): boolean => {
+    void restoreVersion
     if (knownGoneRef.current.has(id)) return false
     const node = graph.getNode(`shp:${id}`)
     if (node) return isNodeDataVisible(node.data as Record<string, unknown>)

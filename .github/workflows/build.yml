@@ -145,10 +145,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios-sim
 
       - name: Add iOS target
-        run: rustup target add aarch64-apple-ios
+        run: rustup target add aarch64-apple-ios-sim
 
       - name: Install dependencies
         run: npm ci
@@ -163,12 +163,14 @@ jobs:
         run: |
           sed -i '' 's/objectVersion = 77;/objectVersion = 56;/g' src-tauri/gen/apple/scrollstr.xcodeproj/project.pbxproj
 
-      - name: Build iOS app
+      - name: Build unsigned iOS simulator app
         run: |
           xcodebuild -workspace gen/apple/scrollstr.xcodeproj/project.xcworkspace \
             -scheme scrollstr_iOS \
-            -sdk iphoneos \
-            -configuration debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -derivedDataPath gen/apple/DerivedData \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -178,9 +180,9 @@ jobs:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
           IPHONEOS_DEPLOYMENT_TARGET: "14.0"
 
-      - name: Upload IPA
+      - name: Upload iOS app
         uses: actions/upload-artifact@v4
         with:
-          name: scrollstr-ios
-          path: src-tauri/gen/apple/build/**/*.ipa
+          name: scrollstr-ios-simulator
+          path: src-tauri/gen/apple/DerivedData/Build/Products/Debug-iphonesimulator/*.app
           if-no-files-found: ignore
