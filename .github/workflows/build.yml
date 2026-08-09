@@ -163,12 +163,6 @@ jobs:
         run: |
           sed -i '' 's/objectVersion = 77;/objectVersion = 56;/g' src-tauri/gen/apple/scrollstr.xcodeproj/project.pbxproj
 
-      - name: Build Rust for iOS
-        run: cargo build --target aarch64-apple-ios --lib
-        working-directory: src-tauri
-        env:
-          IPHONEOS_DEPLOYMENT_TARGET: "14.0"
-
       - name: Build iOS app
         run: |
           xcodebuild -workspace gen/apple/scrollstr.xcodeproj/project.xcworkspace \
@@ -182,6 +176,7 @@ jobs:
         working-directory: src-tauri
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+          IPHONEOS_DEPLOYMENT_TARGET: "14.0"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
