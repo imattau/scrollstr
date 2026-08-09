@@ -13,7 +13,7 @@
     "postinstall": "bash scripts/copy-ffmpeg-core.sh",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run build:tauri && tauri build"
   },
   "dependencies": {
     "@0xx0lostcause0xx0/polypack": "^2.5.0",
