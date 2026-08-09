@@ -159,11 +159,9 @@ jobs:
       - name: Init iOS project
         run: npx tauri ios init
 
-      - name: Debug generated project
+      - name: Patch project format for Xcode 15
         run: |
-          ls -la src-tauri/gen/apple/
-          ls -la src-tauri/gen/apple/scrollstr.xcodeproj/ 2>/dev/null || echo "No xcodeproj"
-          ls -la src-tauri/gen/apple/scrollstr.xcodeproj/project.xcworkspace/ 2>/dev/null || echo "No workspace"
+          sed -i '' 's/objectVersion = 77;/objectVersion = 56;/g' src-tauri/gen/apple/scrollstr.xcodeproj/project.pbxproj
 
       - name: Build Rust for iOS
         run: cargo build --target aarch64-apple-ios --lib
@@ -173,26 +171,15 @@ jobs:
 
       - name: Build iOS app
         run: |
-          cd src-tauri
-          if [ -d "gen/apple/scrollstr.xcodeproj/project.xcworkspace" ]; then
-            xcodebuild -workspace gen/apple/scrollstr.xcodeproj/project.xcworkspace \
-              -scheme scrollstr_iOS \
-              -sdk iphoneos \
-              -configuration debug \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              build
-          else
-            xcodebuild -project gen/apple/scrollstr.xcodeproj \
-              -scheme scrollstr_iOS \
-              -sdk iphoneos \
-              -configuration debug \
-              CODE_SIGN_IDENTITY="" \
-              CODE_SIGNING_REQUIRED=NO \
-              CODE_SIGNING_ALLOWED=NO \
-              build
-          fi
+          xcodebuild -workspace gen/apple/scrollstr.xcodeproj/project.xcworkspace \
+            -scheme scrollstr_iOS \
+            -sdk iphoneos \
+            -configuration debug \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+        working-directory: src-tauri
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
 
