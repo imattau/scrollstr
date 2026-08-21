@@ -39,6 +39,9 @@ export class ScrollstrGraph extends PolyGraph {
         : new BinaryStoreAdapter({ storeDir: DB_NAME })),
       HOT_CACHE_MAX,
     )
+    // Nodes are built from unauthenticated relay content — bound payload/vector
+    // size so a hostile or misbehaving relay can't inflate memory via one event.
+    this.setResourceLimits({ maxNodePayloadBytes: 256 * 1024, maxVectorDimensions: 32 })
   }
 
   protected override onNodeIndex(node: PolyNode): void {
