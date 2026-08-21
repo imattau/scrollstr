@@ -604,8 +604,7 @@ async function recordMediaEdge(url: string, eventId: string, pubkey: string): Pr
   const canonicalId = data.canonicalShapeId as string | null
 
   if (canonicalId && canonicalId !== eventId) {
-    const prevCount = (data.sharerCount as number) ?? 1
-    graph.updateNode(mediaNodeId, { sharerCount: prevCount + 1, updatedAt: Date.now() })
+    graph.patchNode(mediaNodeId, { increment: { sharerCount: 1 }, set: { updatedAt: Date.now() } })
     return canonicalId
   }
 
