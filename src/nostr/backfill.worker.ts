@@ -187,7 +187,7 @@ async function handleStartProfileBackfill(relayUrls: string[], pubkeys: string[]
   }
 }
 
-async function handleStartBackfill(relayUrls: string[]) {
+export async function handleStartBackfill(relayUrls: string[]) {
   if (isBackfillRunning) return
   isBackfillRunning = true
 
