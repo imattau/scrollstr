@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -32,10 +36,10 @@ jobs:
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - platform: macos-x86_64
-            os: macos-13
+            os: macos-15-intel
             target: x86_64-apple-darwin
           - platform: macos-aarch64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
           - platform: windows-x86_64
             os: windows-2022
@@ -68,7 +72,7 @@ jobs:
         run: npm run build:tauri
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -146,7 +150,7 @@ jobs:
 
   ios:
     needs: release
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
