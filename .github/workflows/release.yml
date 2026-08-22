@@ -5,8 +5,25 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
+  release:
+    name: Create GitHub release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Create release entry
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Scrollstr ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
   desktop:
+    needs: release
     strategy:
       fail-fast: false
       matrix:
@@ -59,8 +76,10 @@ jobs:
         with:
           args: --target ${{ matrix.target }}
           tagName: ${{ github.ref_name }}
+          releaseName: Scrollstr ${{ github.ref_name }}
 
   android:
+    needs: release
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -122,9 +141,11 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           files: src-tauri/gen/android/app/build/outputs/apk/release/*.apk
 
   ios:
+    needs: release
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -158,4 +179,5 @@ jobs:
       - name: Upload IPA to release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           files: src-tauri/gen/apple/build/**/*.ipa
