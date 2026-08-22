@@ -7,6 +7,8 @@ const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
 const VIDEO_KINDS = [1, 21, 22, 34236]
 const AUTHOR_FILTER_BATCH_SIZE = 20
+const LIVE_VIDEO_WINDOW_SECONDS = 15 * 60
+const COLD_VIDEO_WINDOW_SECONDS = 60 * 60 * 24 * 30
 
 function authorScopedVideoFilters(pubkeys: string[], extra: Record<string, unknown>) {
   const filters = []
@@ -95,7 +97,7 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     }
   }, [sessionPubkey])
 
-  // Backfill: follow + user-video + general cache (once per session)
+  // Backfill user-specific data once per signed-in session.
   useEffect(() => {
     if (!sessionPubkey || relayUrls.length === 0) return
     if (initialBackfillsFiredRef.current) return
@@ -104,13 +106,18 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     console.log('[VideoFeed] Firing follow & user-video backfills')
     maybeResumeFollowBackfill(relayUrls, [sessionPubkey])
     maybeResumeUserVideoBackfill(relayUrls, [sessionPubkey])
+  }, [sessionPubkey, relayUrls, refreshKey])
 
-    const generalTimer = setTimeout(() => {
+  // General history is useful for guests too. The worker advances its
+  // timestamp cursor batch by batch, so this continues through older 30-day
+  // periods instead of stopping after the first small page of history.
+  useEffect(() => {
+    if (relayUrls.length === 0) return
+    const timer = setTimeout(() => {
       void maybeResumeBackfill(relayUrls)
     }, 500)
-
-    return () => clearTimeout(generalTimer)
-  }, [sessionPubkey, relayUrls, refreshKey])
+    return () => clearTimeout(timer)
+  }, [relayUrls, refreshKey])
 
   // Profile + followed-video backfills when followingPubkeys resolves
   useEffect(() => {
@@ -133,15 +140,22 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     if (relayUrls.length === 0) return
     if (feedType === 'following' && (!sessionPubkey || followingPubkeys.length === 0)) return
 
-    console.log('[VideoFeed] Fetching videos...')
+    // Once Polypack has feed data, only ask relays for the live tail. Historical
+    // content is already local and is filled by the backfill/load-more paths.
+    // A cold cache retains the wider window so a guest session still hydrates.
+    const cacheIsWarm = feedType === 'following'
+      ? followingPubkeys.some((pubkey) => graph.byPubkey(pubkey, 'video_shape').length > 0)
+      : graph.whereType('video_shape').length > 0
+    const windowSeconds = cacheIsWarm ? LIVE_VIDEO_WINDOW_SECONDS : COLD_VIDEO_WINDOW_SECONDS
+    console.log(`[VideoFeed] Fetching videos (${cacheIsWarm ? 'live tail' : 'cold-start window'})...`)
     const filters = feedType === 'following'
       ? authorScopedVideoFilters(followingPubkeys, {
-          since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30,
+          since: Math.floor(Date.now() / 1000) - windowSeconds,
           limit: PAGE_SIZE,
         })
       : [{
           kinds: VIDEO_KINDS,
-          since: Math.floor(Date.now() / 1000) - 60 * 60 * 24 * 30,
+          since: Math.floor(Date.now() / 1000) - windowSeconds,
         }]
     const unsub = subscribeToRelays(relayUrls, filters, 'high')
     return () => { unsub() }

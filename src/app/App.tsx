@@ -129,6 +129,15 @@ function AppContent() {
     localStorage.setItem('scrollstr_has_opened', 'true')
   }
 
+  const handleGuestBrowse = useCallback(() => {
+    // Guest mode is ready immediately; do not replace the closed login sheet
+    // with the first-run splash overlay.
+    isFirstRun.current = false
+    localStorage.setItem('scrollstr_has_opened', 'true')
+    setShowSplash(false)
+    setIsLoginOpen(false)
+  }, [])
+
   const handleLoginSuccess = useCallback(() => {
     setIsLoginOpen(false)
     if (isFirstRun.current) {
@@ -162,6 +171,7 @@ function AppContent() {
           isOpen={isLoginOpen}
           onClose={() => setIsLoginOpen(false)}
           onLoginSuccess={handleLoginSuccess}
+          onGuestBrowse={handleGuestBrowse}
         />
 
         {/* Comments bottom sheet */}

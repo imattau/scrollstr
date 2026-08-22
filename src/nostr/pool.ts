@@ -43,6 +43,10 @@ export let activeRelays: string[] = [...DEFAULT_RELAYS]
 let indexWritesDeferred = false
 let pendingSubscriptionBatch: any[] = []
 let pendingBackfillBatch: any[] = []
+// Events can arrive from several relays or overlapping subscriptions. Nostr
+// event IDs are immutable, so coalesce repeats in the current batch before
+// they reach IndexedDB; the persistent cache remains the final dedupe guard.
+const subscriptionBatchEventIds = new Set<string>()
 
 export function setIndexWritesDeferred(deferred: boolean): void {
   if (indexWritesDeferred === deferred) return
@@ -229,6 +233,7 @@ function flushSubscriptionBatch(): void {
   subscriptionFlushTimer = null
   const batch = subscriptionBatch
   subscriptionBatch = []
+  subscriptionBatchEventIds.clear()
   if (batch.length === 0) return
 
   if (indexWritesDeferred) {
@@ -261,6 +266,10 @@ function flushSubscriptionBatch(): void {
 }
 
 function pushSubscriptionEvent(event: any, relay?: string): void {
+  if (event?.id) {
+    if (subscriptionBatchEventIds.has(event.id)) return
+    subscriptionBatchEventIds.add(event.id)
+  }
   subscriptionBatch.push(relay ? { event, relay } : event)
   if (subscriptionBatch.length >= SUBSCRIPTION_FLUSH_MAX) {
     if (subscriptionFlushTimer) {
@@ -575,8 +584,8 @@ export async function runPruneCache(): Promise<string[]> {
 // ── Main-thread cache management (persisted graph) ──────────────────────
 
 const VIDEO_KINDS = new Set([1, 21, 22, 34236])
-const PRUNE_MAX_VIDEOS = 10000
-const PRUNE_MAX_EVENT_NODES = 30000
+const PRUNE_MAX_VIDEOS = 25000
+const PRUNE_MAX_EVENT_NODES = 75000
 
 async function queryPersistedNodesByType(type: string): Promise<any[]> {
   const nodes = await graph.persistence.queryNodes?.({ nodeTypes: [type] })
@@ -719,6 +728,9 @@ export async function runVectorSearch(
   const vectors = await graph.persistence.getAllVectors()
   const results: Array<{ id: string; score: number }> = []
   for (const { id, vector } of vectors) {
+    // The cache may contain legacy event vectors alongside semantic vectors.
+    // They are different spaces and must never be compared.
+    if (vector.length !== queryVec.length) continue
     const score = cosineSimilarity(queryVec, vector)
     if (score >= threshold) results.push({ id, score })
   }

@@ -1,5 +1,6 @@
 import { verifyEvent } from 'nostr-tools'
 import { graph, computeEventVector } from '../graph'
+import { indexVideoEmbedding } from '../graph/semantic-embedding'
 import type { NodeType, PolyNode } from '../graph'
 import { runPruneCache } from './pool'
 
@@ -64,6 +65,8 @@ export interface VideoShape {
   mediaStatus?: "unknown" | "available" | "failed" | "too_large" | "unsupported";
   isFailed?: boolean;
   contentWarning?: string;
+  embeddingVersion?: string;
+  embeddingInputHash?: string;
   hidden?: boolean;
   hiddenAt?: number;
   userState?: {
@@ -416,8 +419,8 @@ export const db = new CacheDB()
 
 // ── Helpers (unchanged logic, graph-backed) ──
 
-export const MAX_VIDEOS = 10000
-const MAX_EVENT_NODES = 30000
+export const MAX_VIDEOS = 25000
+const MAX_EVENT_NODES = 75000
 const PRUNE_INTERVAL = 30
 let _saveCounter = 0
 
@@ -694,6 +697,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
       }
 
       await db.videoShapes.put(shape)
+      await indexVideoEmbedding(shape)
       return shape
     }
 
@@ -773,6 +777,7 @@ export async function buildOrUpdateVideoShape(event: any): Promise<VideoShape | 
     }
 
     await db.videoShapes.put(shape)
+    await indexVideoEmbedding(shape)
     return shape
   } catch (err) {
     console.error('[Cache] Failed to build video shape:', err)

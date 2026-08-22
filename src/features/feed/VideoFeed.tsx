@@ -7,6 +7,7 @@ import { useUserRelayUrls } from '../../nostr/relays'
 import { graph, useGraphQuery } from '../../graph'
 import { useMuteList } from '../../nostr/useMuteList'
 import { subscribeToRelays, setIndexWritesDeferred, flushIndexWrites } from '../../nostr/pool'
+import { updateMediaStatus } from '../../nostr/cache'
 import { useFeedVideos } from './useFeedVideos'
 import { useFeedPosition, scrollToIndex, readSavedFeedState } from './useFeedPosition'
 import { useFeedSubscriptions } from './useFeedSubscriptions'
@@ -278,6 +279,16 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const activeVideo = videos[activeIndex]
   useProfile(activeVideo?.creator.pubkey || '')
 
+  // react-media-stack reports media failures through its internal overlay, but
+  // does not expose an error callback. Capture the native video error here so
+  // a permanently unavailable URL is remembered and filtered on later loads.
+  const handleMediaError = useCallback((event: React.SyntheticEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof HTMLVideoElement)) return
+    const url = target.dataset.mediaSrc || target.currentSrc || target.src
+    if (url) void updateMediaStatus(url, 'failed')
+  }, [])
+
   // Derive active video for error overlay
   const activeVideoError = useMemo(() => {
     if (!activeVideo) return null
@@ -343,7 +354,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   }
 
   return (
-    <div className="w-full h-full relative overflow-hidden">
+    <div className="w-full h-full relative overflow-hidden" onErrorCapture={handleMediaError}>
       {/* Feed type toggles — positioned inline with MediaStack overlay */}
       <div className="absolute top-0 left-0 right-0 z-40 pointer-events-auto">
         <div className="flex gap-1.5 pt-3 px-4">

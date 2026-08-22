@@ -33,7 +33,7 @@ const CommentRow: React.FC<{ comment: any }> = ({ comment }) => {
       </div>
       <div className="flex flex-col gap-1">
         <p className="text-[12px] font-medium text-[#a1a1aa]">@{profile.displayName || profile.name}</p>
-        <p className="w-[285px] text-[13px] font-normal leading-normal text-[#f7f7f8] break-words">{comment.content}</p>
+        <p className="w-[285px] text-[13px] font-normal leading-normal text-[#f7f7f8] break-words">{comment.event?.content ?? comment.content ?? ''}</p>
         <p className="text-[11px] font-medium text-[#71717a]">
           {new Date(comment.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </p>

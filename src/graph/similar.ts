@@ -1,5 +1,6 @@
-import { graph, computeEventVector } from './polygraph'
+import { graph } from './polygraph'
 import type { VideoShape } from '../nostr/cache'
+import { embedVideo } from './semantic-embedding'
 
 async function vectorSearch(queryVec: number[], topK: number, threshold: number) {
   const { runVectorSearch: search } = await import('../nostr/pool')
@@ -12,26 +13,14 @@ export async function findSimilarVideos(
   threshold = 0.3,
   excludeIds?: Set<string>
 ): Promise<VideoShape[]> {
-  const refNode = graph.getNode(`evt:${videoId}`)
+  const refNode = graph.getNode(`shp:${videoId}`)
   if (!refNode) return []
 
-  const kind = refNode.data.kind as number | undefined
-  if (!kind || ![1, 21, 22, 34236].includes(kind)) return []
+  const video = refNode.data as unknown as VideoShape
+  if (!video.videoUrl) return []
+  const { vector } = await embedVideo(video)
 
-  const eTags = (refNode.data.eTags as string[]) ?? []
-  const pTags = (refNode.data.pTags as string[]) ?? []
-  const hashtags = (refNode.data.hashtags as string[]) ?? []
-  const pubkey = refNode.data.pubkey as string
-  const created_at = refNode.data.created_at as number
-
-  const queryVec = computeEventVector({
-    kind, pubkey, created_at,
-    eTagsCount: eTags.length,
-    pTagsCount: pTags.length,
-    hashtags,
-  })
-
-  const results = await vectorSearch(queryVec, topK + 1, threshold)
+  const results = await vectorSearch([...vector], topK + 1, threshold)
   if (results.length === 0) return []
 
   const shapes: VideoShape[] = []
@@ -59,7 +48,7 @@ export async function findVideosSimilarToAuthor(
     if (data.videoUrl) {
       const rawId = node.id.includes(':') ? node.id.slice(node.id.indexOf(':') + 1) : node.id
       const vec = graph.vectors.get(rawId)
-      if (vec) authorVectors.push([...vec])
+      if (vec && vec.length === 384) authorVectors.push([...vec])
     }
   }
   if (authorVectors.length === 0) return []

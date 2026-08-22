@@ -81,8 +81,12 @@ const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
   poster: shape.thumbnailUrl,
   creator: {
     pubkey: shape.pubkey,
-    name: shape.authorName || shape.pubkey.slice(0, 8),
-    picture: shape.authorPicture
+    name: shape.authorName ||
+      ((graph.getNode(`pro:${shape.pubkey}`)?.data as { displayName?: string; name?: string } | undefined)?.displayName) ||
+      ((graph.getNode(`pro:${shape.pubkey}`)?.data as { name?: string } | undefined)?.name) ||
+      shape.pubkey.slice(0, 8),
+    picture: shape.authorPicture ||
+      ((graph.getNode(`pro:${shape.pubkey}`)?.data as { picture?: string } | undefined)?.picture)
   },
   hashtags: shape.hashtags || [],
   likesCount: shape.reactionCount || 0,
@@ -152,7 +156,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag, resumeVideoId], 500, ['video_shape'])
+  }, [refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
@@ -189,7 +193,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId], 500, ['video_shape'])
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
@@ -211,7 +215,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error fetching deep-linked video shape:', err)
       return undefined
     }
-  }, [deeplinkVideoId], 200, ['video_shape'])
+  }, [deeplinkVideoId], 200, ['video_shape', 'profile'])
 
   const injectDeeplink = useCallback((list: VideoItemData[]) => {
     if (!deeplinkVideoId || !_deeplinkShape) return list

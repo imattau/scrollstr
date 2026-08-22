@@ -6,7 +6,7 @@ import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
 import { VideoShape, saveEventToCache } from '../../nostr/cache'
-import { graph, useGraphQuery, useLiveQuery } from '../../graph'
+import { graph, useGraphQuery, useLiveQuery, enableSemanticEmbeddings, semanticSearchVideos } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
@@ -129,6 +129,8 @@ export const DiscoverPage: React.FC = () => {
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [isSearchingRelays, setIsSearchingRelays] = useState(false)
   const [accumulatedResults, setAccumulatedResults] = useState<VideoItemData[]>([])
+  const [semanticResults, setSemanticResults] = useState<VideoItemData[]>([])
+  const [isSemanticSearching, setIsSemanticSearching] = useState(false)
   const [searchCursor, setSearchCursor] = useState<number | undefined>(undefined)
   const [isSearchExhausted, setIsSearchExhausted] = useState(false)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
@@ -536,6 +538,32 @@ export const DiscoverPage: React.FC = () => {
     return fuse.search(debouncedSearch).map(r => r.item)
   }, [debouncedSearch, fuse, searchCorpus.length])
 
+  // Upgrade local search to semantic retrieval when the browser can load the
+  // ONNX model. The deterministic Polypack feature-hash vectors remain active
+  // immediately, so search still works offline and on constrained devices.
+  useEffect(() => {
+    if (!debouncedSearch.trim() || searchCorpus.length === 0) {
+      setSemanticResults([])
+      return
+    }
+    let cancelled = false
+    setIsSemanticSearching(true)
+    const byId = new Map(searchCorpus.map(video => [video.id, video]))
+    enableSemanticEmbeddings()
+      .then(() => semanticSearchVideos(debouncedSearch, 50))
+      .then(ids => {
+        if (!cancelled) setSemanticResults(ids.map(id => byId.get(id)).filter(Boolean) as VideoItemData[])
+      })
+      .catch(error => {
+        console.warn('[Search] Semantic search unavailable:', error)
+        if (!cancelled) setSemanticResults([])
+      })
+      .finally(() => {
+        if (!cancelled) setIsSemanticSearching(false)
+      })
+    return () => { cancelled = true }
+  }, [debouncedSearch, searchCorpus])
+
   // Merge relay results (first) with local Fuse results, dedup by id
   const combinedResults = useMemo(() => {
     const seen = new Set<string>()
@@ -543,11 +571,14 @@ export const DiscoverPage: React.FC = () => {
     for (const item of accumulatedResults) {
       if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
     }
+    for (const item of semanticResults) {
+      if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
+    }
     for (const item of filteredVideos) {
       if (!seen.has(item.id)) { seen.add(item.id); merged.push(item) }
     }
     return merged
-  }, [accumulatedResults, filteredVideos])
+  }, [accumulatedResults, semanticResults, filteredVideos])
 
   // Cache search results so returning to a previous query is instant
   // Evicts oldest entries when cache exceeds 50 queries
@@ -671,8 +702,8 @@ export const DiscoverPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-[16px] font-semibold text-[#a1a1aa]">
                 Search Results ({combinedResults.length})
-                {isSearchingRelays && (
-                  <span className="ml-2 text-[12px] font-normal text-[#a78bfa]">· searching network...</span>
+                {(isSearchingRelays || isSemanticSearching) && (
+                  <span className="ml-2 text-[12px] font-normal text-[#a78bfa]">· searching...</span>
                 )}
               </h3>
               <button

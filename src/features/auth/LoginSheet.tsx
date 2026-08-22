@@ -9,6 +9,7 @@ interface LoginSheetProps {
   isOpen: boolean
   onClose: () => void
   onLoginSuccess: () => void
+  onGuestBrowse?: () => void
 }
 
 function OptionCard({
@@ -63,7 +64,7 @@ function OptionCard({
   )
 }
 
-export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess }) => {
+export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLoginSuccess, onGuestBrowse }) => {
   const { loginWithNip07, loginWithNip46, loginReadOnly, loginWithPasskey, registerPasskey, loginWithNative, registerNative } = useNostr()
   const [npub, setNpub] = useState('')
   const [nsec, setNsec] = useState('')
@@ -163,6 +164,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
 
   const handleGuestBrowse = () => {
     setError('')
+    onGuestBrowse?.()
     onClose()
   }
 

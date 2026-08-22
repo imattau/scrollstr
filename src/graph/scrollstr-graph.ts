@@ -5,10 +5,10 @@ import type { PolyNode, NodeType } from './types'
 
 const DB_NAME = 'scrollstr-polypack'
 // Shared LRU across every node type (events, profiles, reactions, zaps,
-// video shapes, edges, ...). Was capped well below polypack's own default
-// (50000), which caused frequent eviction of video_shape nodes under normal
+// video shapes, edges, ...). Keep it above Polypack's default working-set size
+// to avoid frequent eviction of video_shape nodes under normal
 // relay activity even when they were still on-screen.
-const HOT_CACHE_MAX = 50000
+const HOT_CACHE_MAX = 75000
 
 let testPersistenceFactory: ((storeDir: string) => PersistenceAdapter) | null = null
 
@@ -41,7 +41,24 @@ export class ScrollstrGraph extends PolyGraph {
     )
     // Nodes are built from unauthenticated relay content — bound payload/vector
     // size so a hostile or misbehaving relay can't inflate memory via one event.
-    this.setResourceLimits({ maxNodePayloadBytes: 256 * 1024, maxVectorDimensions: 32 })
+    // Semantic video embeddings are currently 384-dimensional. Keep the
+    // limit bounded, but large enough for the browser model and future local
+    // providers.
+    this.setResourceLimits({ maxNodePayloadBytes: 256 * 1024, maxVectorDimensions: 512 })
+  }
+
+  /**
+   * Polypack 3.1 validates provenance metadata on every update. Older
+   * persisted records may contain a serialized null memoryClass; normalize it
+   * away before an incremental update so legacy cache entries remain writable.
+   */
+  override updateNode(...args: Parameters<PolyGraph['updateNode']>): ReturnType<PolyGraph['updateNode']> {
+    const node = this.nodes.get(args[0])
+    if (node && (node as PolyNode & { memoryClass?: unknown }).memoryClass === null) {
+      delete (node as PolyNode & { memoryClass?: unknown }).memoryClass
+      this.markDirty(node.id)
+    }
+    return super.updateNode(...args)
   }
 
   protected override onNodeIndex(node: PolyNode): void {

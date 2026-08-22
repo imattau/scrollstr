@@ -1,6 +1,6 @@
 import { SimplePool, type Filter, verifyEvent } from 'nostr-tools'
 
-const MAX_VIDEOS = 10000
+const MAX_VIDEOS = 25000
 const VIDEO_KINDS = new Set([1, 21, 22, 34236])
 
 interface CacheStats {
@@ -32,7 +32,10 @@ const searchedIdsAborted = new Set<string>()
 
 const BACKFILL_BATCH_SIZE = 100
 const BATCH_DELAY_MS = 800
-const MAX_BATCHES = 30
+// Keep walking the timestamp cursor until the cache is full or relays return
+// no older events. This replaces the old ~3,000-event ceiling and lets the
+// enlarged cache extend naturally into older history.
+const MAX_BATCHES = Math.ceil(MAX_VIDEOS / BACKFILL_BATCH_SIZE)
 
 const PROFILE_BATCH_SIZE = 50
 const PROFILE_BATCH_DELAY_MS = 300
