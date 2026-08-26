@@ -642,6 +642,17 @@ async function prunePersistedCache(): Promise<string[]> {
     await graph.persistence.deleteNode(id)
     removedIds.push(id)
   }
+  // Pruning deletes straight from persistence, bypassing PolyGraph's own
+  // removeNode (which would clean this up). Vectors are keyed by the raw
+  // video id, not the `shp:` node id, so removeNode's own id-linked vector
+  // cleanup couldn't reach them anyway — drop both the in-memory index entry
+  // and the durable vector record for each pruned video explicitly, or they
+  // outlive their shapes indefinitely (warm() rehydrates every persisted
+  // vector on every future startup).
+  graph.vectors.removeMany([...oldestIdSet])
+  for (const id of oldestIdSet) {
+    await graph.persistence.deleteVector(id)
+  }
 
   const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
   const rejections = await queryPersistedNodesByType('rejection')

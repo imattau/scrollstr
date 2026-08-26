@@ -1,5 +1,5 @@
 import { verifyEvent } from 'nostr-tools'
-import { graph, computeEventVector } from '../graph'
+import { graph } from '../graph'
 import { indexVideoEmbedding } from '../graph/semantic-embedding'
 import type { NodeType, PolyNode } from '../graph'
 import { runPruneCache } from './pool'
@@ -1183,15 +1183,6 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
 
     // Record relay observation if the origin relay is known.
     if (relay) recordRelayObservation(id, relay)
-
-    const vec = computeEventVector({
-      kind, pubkey, created_at,
-      eTagsCount: eTags.length,
-      pTagsCount: pTags.length,
-      hashtags: event.tags?.filter((t: any) => t[0] === 't').map((t: any) => t[1]) ?? [],
-    })
-    graph.vectors.add(id, vec)
-    graph.markVectorDirty(id)
 
     if (isVideo) {
       await buildOrUpdateVideoShape(event)
