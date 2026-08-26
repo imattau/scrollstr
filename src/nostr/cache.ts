@@ -1038,6 +1038,7 @@ export async function bulkSaveEventsToCache(events: any[], relay?: string): Prom
   // Bulk-apply reaction counts
   if (reactionEvents.length > 0) {
     const counterMap = new Map<string, VideoCountersRecord>()
+    const weightByTarget = new Map<string, number>()
     for (const { eTag, event } of reactionEvents) {
       let entry = counterMap.get(eTag)
       if (!entry) {
@@ -1062,9 +1063,13 @@ export async function bulkSaveEventsToCache(events: any[], relay?: string): Prom
           } catch (_) {}
         }
       }
+      weightByTarget.set(eTag, (weightByTarget.get(eTag) ?? 0) + activationWeight(kind))
     }
     const counterRecords = Array.from(counterMap.values())
     for (const c of counterRecords) await db.videoCounters.put(c)
+    for (const [eTag, weight] of weightByTarget) {
+      if (weight > 0) await graph.reinforceNodeSafe(`shp:${eTag}`, weight, 'engagement')
+    }
   }
 
   if (profileEvents.length > 0) {
@@ -1211,6 +1216,19 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
   }
 }
 
+/**
+ * Engagement → Polypack activation-reinforcement weight, feeding the
+ * `topActivated`-driven trending ranking on the Discover page. A zap costs
+ * the sender real money, so it counts for more than a free reaction.
+ */
+function activationWeight(kind: number): number {
+  if (kind === 9735) return 3
+  if (kind === 6 || kind === 16) return 2
+  if (kind === 1111) return 2
+  if (kind === 7) return 1
+  return 0
+}
+
 async function incrementVideoCounts(videoId: string, reactionEvent: any): Promise<void> {
   const kind = reactionEvent.kind
   const existing = await db.videoCounters.get(videoId) ?? { id: videoId, reactionCount: 0, repostCount: 0, replyCount: 0, zapCount: 0, zapTotalSats: 0 }
@@ -1232,6 +1250,9 @@ async function incrementVideoCounts(videoId: string, reactionEvent: any): Promis
 
   await db.videoCounters.put(existing)
   graph.addEdge(`shp:${videoId}`, 'HAS_COUNTER', `cnt:${videoId}`, undefined, 'owned')
+
+  const weight = activationWeight(kind)
+  if (weight > 0) await graph.reinforceNodeSafe(`shp:${videoId}`, weight, 'engagement')
 }
 
 export async function mergeCountersIntoShape(shape: VideoShape): Promise<VideoShape> {

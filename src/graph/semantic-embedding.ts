@@ -1,7 +1,4 @@
-import {
-  FeatureHashEmbedding,
-  cosineSimilarity,
-} from '@0xx0lostcause0xx0/polypack'
+import { FeatureHashEmbedding } from '@0xx0lostcause0xx0/polypack'
 import { graph } from './polygraph'
 import type { VideoShape } from '../nostr/cache'
 
@@ -128,12 +125,13 @@ export async function reindexVideoEmbeddings(): Promise<void> {
 
 export async function semanticSearchVideos(query: string, topK = 50): Promise<string[]> {
   const queryVector = await provider.embed(query)
-  const vectors = await graph.persistence.getAllVectors()
-  return vectors
-    .filter(({ vector }) => vector.length === queryVector.length)
-    .map(({ id, vector }) => ({ id, score: cosineSimilarity(queryVector, vector) }))
+  // Query a wider candidate pool than topK: the index also holds
+  // lower-dimensional legacy event vectors (scored as unrelated by the
+  // graph's cross-space-safe distance function) and non-video_shape node
+  // types get filtered out below, so over-fetch to still land topK results.
+  const results = graph.vectors.query([...queryVector], topK + 50)
+  return results
     .filter(({ id }) => graph.getNode(`shp:${id}`)?.type === 'video_shape')
-    .sort((a, b) => b.score - a.score)
     .slice(0, topK)
     .map(({ id }) => id)
 }

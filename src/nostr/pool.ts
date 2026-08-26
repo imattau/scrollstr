@@ -1,7 +1,7 @@
 import { SimplePool, type NostrEvent } from 'nostr-tools'
 import { Observable } from 'rxjs'
 import type { NostrPool } from 'applesauce-signers'
-import { graph, cosineSimilarity } from '../graph'
+import { graph } from '../graph'
 import { saveEventToCache, bulkSaveEventsToCache } from './cache'
 import { getSearchRelays, getSearchOnlyRelays, addDiscoveredRelays, fetchRelayDirectory, sanitizeSearchQuery, setOnDiscoveredChange } from './search-relays'
 
@@ -715,7 +715,11 @@ async function prunePersistedCache(): Promise<string[]> {
 }
 
 /**
- * Cosine vector similarity search across the persisted graph store.
+ * Cosine vector similarity search across the persisted graph store, via
+ * Polypack's in-memory vector index (`ScrollstrGraph` hydrates it with every
+ * persisted vector on `warm()`, and installs a cross-space-safe distance
+ * function so mismatched embedding dimensions score as unrelated instead of
+ * throwing).
  * @param queryVec - the query vector to search with
  * @param topK - number of results to return
  * @param threshold - minimum similarity score
@@ -725,17 +729,7 @@ export async function runVectorSearch(
   topK = 10,
   threshold = 0.3
 ): Promise<Array<{ id: string; score: number }>> {
-  const vectors = await graph.persistence.getAllVectors()
-  const results: Array<{ id: string; score: number }> = []
-  for (const { id, vector } of vectors) {
-    // The cache may contain legacy event vectors alongside semantic vectors.
-    // They are different spaces and must never be compared.
-    if (vector.length !== queryVec.length) continue
-    const score = cosineSimilarity(queryVec, vector)
-    if (score >= threshold) results.push({ id, score })
-  }
-  results.sort((a, b) => b.score - a.score)
-  return results.slice(0, topK)
+  return graph.vectors.query(queryVec, topK, threshold)
 }
 
 /** Clean up all pool resources — call on logout / unmount */

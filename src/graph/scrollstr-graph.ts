@@ -1,4 +1,4 @@
-import { PolyGraph } from '@0xx0lostcause0xx0/polypack'
+import { PolyGraph, VectorIndex, cosineSimilarity } from '@0xx0lostcause0xx0/polypack'
 import { BinaryStoreAdapter } from '@0xx0lostcause0xx0/polypack/persistence/opfs'
 import type { PersistenceAdapter } from '@0xx0lostcause0xx0/polypack'
 import type { PolyNode, NodeType } from './types'
@@ -26,6 +26,17 @@ export function setPersistenceFactoryAsync(factory: () => PersistenceAdapter | P
   persistenceFactory = factory
 }
 
+/**
+ * The cache holds vectors from more than one embedding space (legacy event
+ * vectors alongside semantic video embeddings), which never have comparable
+ * dimensions. `cosineSimilarity` throws on a length mismatch, which would
+ * abort a `VectorIndex.query()` scan partway through; score mismatched pairs
+ * as unrelated instead so a mixed-dimension index can still be queried.
+ */
+function crossSpaceSimilarity(a: ArrayLike<number>, b: ArrayLike<number>): number {
+  return a.length === b.length ? cosineSimilarity(a, b) : -Infinity
+}
+
 export class ScrollstrGraph extends PolyGraph {
   private _byPubkey = new Map<string, Set<string>>()
   private _byKind = new Map<number, Set<string>>()
@@ -38,6 +49,9 @@ export class ScrollstrGraph extends PolyGraph {
         ? testPersistenceFactory(DB_NAME)
         : new BinaryStoreAdapter({ storeDir: DB_NAME })),
       HOT_CACHE_MAX,
+      undefined,
+      undefined,
+      (onChange) => new VectorIndex(onChange, crossSpaceSimilarity),
     )
     // Nodes are built from unauthenticated relay content — bound payload/vector
     // size so a hostile or misbehaving relay can't inflate memory via one event.

@@ -6,7 +6,8 @@ import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
 import { VideoShape, saveEventToCache } from '../../nostr/cache'
-import { graph, useGraphQuery, useLiveQuery, enableSemanticEmbeddings, semanticSearchVideos } from '../../graph'
+import { graph, useGraphQuery, useLiveQuery, useWorkingMemory, enableSemanticEmbeddings, semanticSearchVideos } from '../../graph'
+import type { PolyNode } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
 import { publishFollow } from '../../nostr/events'
@@ -16,6 +17,7 @@ import { useMuteList } from '../../nostr/useMuteList'
 import { useSimilarVideos } from './useSimilarVideos'
 
 const EMPTY_VIDEOS: any[] = []
+const EMPTY_NODES: PolyNode[] = []
 const VIDEO_KINDS = [1, 21, 22, 34236]
 const MAX_SEARCH_RESULTS = 200
 const MAX_SEARCH_PAGES = 10
@@ -258,21 +260,12 @@ export const DiscoverPage: React.FC = () => {
     ['video_shape'],
   ) ?? EMPTY_VIDEOS
 
-  // Query recent video shapes (last 48 hours) — for trending creators.
-  // Use created_at index with a hard limit so it stays memory-bounded.
-  const rawRecentVideoShapes = useGraphQuery(
-    () => {
-      if (!graph) return []
-      return graph.whereFieldRange('created_at', { above: Math.floor(Date.now() / 1000) - 48 * 3600 }, 'video_shape')
-        .slice(0, 1000)
-        .map(n => n.data as unknown as VideoShape)
-        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
-        .slice(0, 500)
-    },
-    [],
-    200,
-    ['video_shape'],
-  ) ?? EMPTY_VIDEOS
+  // Trending video shapes — Polypack's `topActivated` working-memory view,
+  // ranked by activation score. Videos are reinforced on engagement
+  // (reactions/reposts/replies/zaps, see `incrementVideoCounts` in
+  // nostr/cache.ts) and the score decays over ~24h, so this tracks current
+  // traction rather than raw upload volume in a fixed window.
+  const trendingVideoNodes = useWorkingMemory(300, [], ['video_shape']) ?? EMPTY_NODES
 
   const mapShapeToVideoItem = (shape: VideoShape): VideoItemData => ({
     id: shape.id,
@@ -320,15 +313,17 @@ export const DiscoverPage: React.FC = () => {
   )
   const authorProfileMap = useMemo(() => _authorProfileMap ?? {}, [_authorProfileMap])
 
-  // Only consider recent videos for trending computation
-  const recentVideos = useMemo(() => {
-    let mapped = (rawRecentVideoShapes as VideoShape[]).map(mapShapeToVideoItem)
+  // Trending video shapes, filtered to playable/visible and paired with each
+  // node's current activation score for ranking creators below.
+  const trendingVideos = useMemo(() => {
+    let mapped = (trendingVideoNodes as PolyNode[])
+      .map(n => ({ shape: n.data as unknown as VideoShape, score: graph.getActivation(n.id) }))
+      .filter(({ shape }) => shape.videoUrl && shape.mediaStatus !== 'failed' && !shape.hidden)
     if (mutedPubkeys.size > 0) {
-      mapped = mapped.filter(v => !mutedPubkeys.has(v.creator.pubkey))
+      mapped = mapped.filter(({ shape }) => !mutedPubkeys.has(shape.pubkey))
     }
-    const sorted = mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-    return sorted.slice(0, 300)
-  }, [rawRecentVideoShapes, mutedPubkeys])
+    return mapped
+  }, [trendingVideoNodes, mutedPubkeys])
 
   // Vector-similar videos based on the top cached video
   const referenceVideo = (videos as VideoItemData[])?.[0]
@@ -360,18 +355,23 @@ export const DiscoverPage: React.FC = () => {
     return compiled
   }, [videos, mutedHashtags])
 
-  // Extract active creators dynamically from recent videos
+  // Trending creators — ranked by summed Polypack activation score across
+  // their trending videos (see `trendingVideos` above) rather than raw
+  // upload count in a fixed window.
   const creators = useMemo(() => {
-    const creatorMap: Record<string, { pubkey: string; name: string; count: number }> = {}
-    recentVideos.forEach((v) => {
-      const pubkey = v.creator.pubkey
+    const creatorMap: Record<string, { pubkey: string; name: string; score: number; count: number }> = {}
+    trendingVideos.forEach(({ shape, score }) => {
+      const pubkey = shape.pubkey
+      if (!pubkey) return
       if (!creatorMap[pubkey]) {
         creatorMap[pubkey] = {
           pubkey,
-          name: v.creator.name,
+          name: shape.authorName || pubkey.slice(0, 8),
+          score: 0,
           count: 0,
         }
       }
+      creatorMap[pubkey].score += score
       creatorMap[pubkey].count += 1
     })
 
@@ -382,20 +382,20 @@ export const DiscoverPage: React.FC = () => {
     ]
 
     const compiled = Object.values(creatorMap)
-      .sort((a, b) => b.count - a.count)
+      .sort((a, b) => b.score - a.score)
       .slice(0, 5)
       .map((c, idx) => {
         const colors = ['#60a5fa', '#f05252', '#31c48d', '#a78bfa', '#f5b942']
         return {
           pubkey: c.pubkey,
           name: c.name,
-          subtitle: `${c.count} video${c.count > 1 ? 's' : ''} published`,
+          subtitle: `${c.count} trending video${c.count > 1 ? 's' : ''}`,
           color: colors[idx % colors.length],
         }
       })
 
     return compiled.length > 0 ? compiled : defaultCreators
-  }, [recentVideos])
+  }, [trendingVideos])
 
   // Subscribe to kind:0 only for creators whose profiles aren't already cached
   useEffect(() => {
