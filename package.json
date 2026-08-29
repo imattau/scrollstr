@@ -16,7 +16,7 @@
     "tauri:build": "npm run build:tauri && tauri build"
   },
   "dependencies": {
-    "@0xx0lostcause0xx0/polypack": "^3.1.0",
+    "@0xx0lostcause0xx0/polypack": "^3.4.1",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@hookform/resolvers": "^5.4.0",
@@ -41,7 +41,7 @@
     "react-dom": "^19.2.6",
     "react-hook-form": "^7.80.0",
     "react-hotkeys-hook": "^5.3.2",
-    "react-media-stack": "^1.0.35",
+    "react-media-stack": "^1.1.4",
     "react-router-dom": "^7.18.0",
     "rxjs": "^7.8.2",
     "serve": "^14.2.6",
