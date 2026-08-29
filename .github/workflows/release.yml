@@ -66,7 +66,7 @@ jobs:
             librsvg2-dev patchelf libssl-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
 
       - name: Install dependencies
-        run: npm ci
+        run: bash scripts/ci-install-dependencies.sh
 
       - name: Build frontend
         run: npm run build:tauri
@@ -123,7 +123,7 @@ jobs:
             librsvg2-dev patchelf libssl-dev
 
       - name: Install dependencies
-        run: npm ci
+        run: bash scripts/ci-install-dependencies.sh
 
       - name: Build frontend
         run: npm run build:tauri
@@ -161,13 +161,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios-sim
 
       - name: Add iOS target
-        run: rustup target add aarch64-apple-ios
+        run: rustup target add aarch64-apple-ios-sim
 
       - name: Install dependencies
-        run: npm ci
+        run: bash scripts/ci-install-dependencies.sh
 
       - name: Build frontend
         run: npm run build:tauri
@@ -175,13 +175,19 @@ jobs:
       - name: Init iOS project
         run: npx tauri ios init
 
-      - name: Build iOS
-        run: npx tauri ios build --debug
+      - name: Build unsigned iOS simulator app
+        run: npx tauri ios build --debug --target aarch64-sim
         env:
           DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
 
-      - name: Upload IPA to release
+      - name: Package iOS simulator app
+        run: |
+          app_path="$(find src-tauri/gen/apple/build -type d -name '*.app' -print -quit)"
+          test -n "$app_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" scrollstr-ios-simulator.zip
+
+      - name: Upload iOS simulator app to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: src-tauri/gen/apple/build/**/*.ipa
+          files: scrollstr-ios-simulator.zip
