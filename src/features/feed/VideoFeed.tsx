@@ -104,7 +104,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
   // Feed data: videos, filtering, sorting
-  const { videos, feedKey, videosRef } = useFeedVideos({
+  const { videos, feedKey, videosRef, trimOffset } = useFeedVideos({
     sessionPubkey: session?.pubkey,
     feedType,
     followingPubkeys,
@@ -115,7 +115,26 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     refreshKey,
     deeplinkVideoId: initialVideoId,
     resumeVideoId,
+    activeIndex,
   })
+
+  // The active list's session-stable order is bounded (see MAX_STABLE_ORDER
+  // in useFeedVideos) — once it trims stale entries from the front to cap
+  // memory, every later index shifts. Shift activeIndex by the same amount
+  // and jump the scroll position to match, so the same video stays in view
+  // instead of the feed appearing to jump to a different video.
+  const prevTrimOffsetRef = useRef(trimOffset)
+  useEffect(() => {
+    const delta = trimOffset - prevTrimOffsetRef.current
+    prevTrimOffsetRef.current = trimOffset
+    if (delta > 0) {
+      setActiveIndex((idx) => {
+        const next = Math.max(0, idx - delta)
+        scrollToIndex(next)
+        return next
+      })
+    }
+  }, [trimOffset])
 
   // Feed position: deep link, sessionStorage, initial scroll position
   const {

@@ -5,6 +5,24 @@ import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
 import { sortByInsertOrder, appendNewItems } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
+// A long scrolling session keeps appending to the stable order indefinitely
+// (see below), so it's bounded once it grows past a generous cap — trimmed
+// from the front (the oldest-appended, longest-scrolled-past entries) while
+// always keeping a safety margin behind the active item for scroll-back.
+// Only applied to whichever list is currently on screen (`activeIndex` is
+// null for the other feed types), since there's no safe anchor otherwise.
+const MAX_STABLE_ORDER = 500
+const RETENTION_BEHIND_ACTIVE = 150
+
+interface StableFeedOrderResult {
+  videos: VideoItemData[]
+  // Cumulative count of items ever trimmed from the front of this list.
+  // The caller diffs this against its previous value to shift its own
+  // active-index state by the same amount, keeping the same video in view
+  // across a trim (trimming the front shifts every later index).
+  trimOffset: number
+}
+
 /**
  * Session-stable, append-only ordering: once an item is showing, it never
  * moves — new items (newer live content or older backfilled content alike)
@@ -20,12 +38,14 @@ import type { VideoItemData } from './VideoFeedItem'
 function useStableFeedOrder(
   items: VideoItemData[],
   resetKey: string,
-  isStillVisible: (id: string) => boolean
-): VideoItemData[] {
+  isStillVisible: (id: string) => boolean,
+  activeIndex: number | null
+): StableFeedOrderResult {
   const orderRef = useRef<string[]>([])
   const dataRef = useRef<Map<string, VideoItemData>>(new Map())
   const prevResetKeyRef = useRef(resetKey)
   const [ordered, setOrdered] = useState<VideoItemData[]>([])
+  const [trimOffset, setTrimOffset] = useState(0)
 
   // Accumulate the session-stable ordering off the render path (refs must not
   // be read/written during render). useLayoutEffect runs before paint, so the
@@ -35,6 +55,7 @@ function useStableFeedOrder(
       prevResetKeyRef.current = resetKey
       orderRef.current = []
       dataRef.current = new Map()
+      setTrimOffset(0)
     }
 
     for (const v of items) dataRef.current.set(v.id, v)
@@ -46,15 +67,27 @@ function useStableFeedOrder(
       (id) => dataRef.current.has(id) && isStillVisible(id)
     )
 
+    let trimmed = 0
+    if (activeIndex != null && orderRef.current.length > MAX_STABLE_ORDER) {
+      const safeAnchor = Math.min(Math.max(activeIndex, 0), orderRef.current.length - 1)
+      const safeStart = Math.max(0, safeAnchor - RETENTION_BEHIND_ACTIVE)
+      const desiredStart = orderRef.current.length - MAX_STABLE_ORDER
+      trimmed = Math.min(desiredStart, safeStart)
+      if (trimmed > 0) {
+        orderRef.current = orderRef.current.slice(trimmed)
+      }
+    }
+
     const orderSet = new Set(orderRef.current)
     for (const id of dataRef.current.keys()) {
       if (!orderSet.has(id)) dataRef.current.delete(id)
     }
 
     setOrdered(orderRef.current.map((id) => dataRef.current.get(id)).filter((v): v is VideoItemData => !!v))
-  }, [items, resetKey, isStillVisible])
+    if (trimmed > 0) setTrimOffset((o) => o + trimmed)
+  }, [items, resetKey, isStillVisible, activeIndex])
 
-  return ordered
+  return { videos: ordered, trimOffset }
 }
 
 // A generous, fixed cap on how many cached candidates the query considers
@@ -117,6 +150,10 @@ interface UseFeedVideosInput {
   refreshKey: number
   deeplinkVideoId?: string | null
   resumeVideoId?: string | null
+  // Index into the currently displayed `videos` array. Used only to bound
+  // the active feed's session-stable order (see MAX_STABLE_ORDER) — pass
+  // null while it's not yet known (e.g. before the first video is active).
+  activeIndex: number | null
 }
 
 interface UseFeedVideosOutput {
@@ -124,10 +161,14 @@ interface UseFeedVideosOutput {
   isFeedLoading: boolean
   feedKey: string
   videosRef: React.MutableRefObject<VideoItemData[]>
+  // Cumulative count of items ever trimmed from the front of the currently
+  // active list. The caller shifts its own active-index state by the delta
+  // between renders so the same video stays in view across a trim.
+  trimOffset: number
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
-  const { sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, resumeVideoId } = input
+  const { sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, resumeVideoId, activeIndex } = input
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
@@ -335,22 +376,32 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     () => injectDeeplink(filterVideos(userShapes)),
     [userShapes, filterVideos, injectDeeplink]
   )
-  const exploreVideos = useStableFeedOrder(exploreVideosRaw, `explore:${refreshKey}:${filterTag ?? ''}`, isStillVisible)
-  const followingVideos = useStableFeedOrder(
+  const isUserActive = feedType === 'user' && !!filterUserPubkey
+  const isFollowingActive = feedType === 'following' && !!sessionPubkey
+
+  const exploreResult = useStableFeedOrder(
+    exploreVideosRaw,
+    `explore:${refreshKey}:${filterTag ?? ''}`,
+    isStillVisible,
+    !isUserActive && !isFollowingActive ? activeIndex : null
+  )
+  const followingResult = useStableFeedOrder(
     followingVideosRaw,
     `following:${sessionPubkey ?? ''}:${refreshKey}:${filterTag ?? ''}`,
-    isStillVisible
+    isStillVisible,
+    isFollowingActive ? activeIndex : null
   )
-  const userVideos = useStableFeedOrder(
+  const userResult = useStableFeedOrder(
     userVideosRaw,
     `user:${filterUserPubkey ?? ''}:${refreshKey}:${filterTag ?? ''}`,
-    isStillVisible
+    isStillVisible,
+    isUserActive ? activeIndex : null
   )
-  const videos = feedType === 'user' && filterUserPubkey
-    ? userVideos
-    : feedType === 'following' && sessionPubkey
-      ? followingVideos
-      : exploreVideos
+  const { videos, trimOffset } = isUserActive
+    ? { videos: userResult.videos, trimOffset: userResult.trimOffset }
+    : isFollowingActive
+      ? { videos: followingResult.videos, trimOffset: followingResult.trimOffset }
+      : { videos: exploreResult.videos, trimOffset: exploreResult.trimOffset }
 
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
@@ -360,5 +411,5 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     [videos]
   )
 
-  return { videos, isFeedLoading, feedKey, videosRef }
+  return { videos, isFeedLoading, feedKey, videosRef, trimOffset }
 }
