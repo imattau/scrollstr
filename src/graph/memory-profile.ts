@@ -4,7 +4,8 @@ import type { PolyNode } from './types'
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
 }
 
 interface GraphMemoryState {
@@ -72,6 +73,109 @@ export function printGraphMemoryState(): void {
   console.log(`byKindPubkey:${s.byKindPubkeyEntries.toLocaleString()} keys`)
   console.log(`Dirty:       ${s.dirtyNodes} nodes, ${s.removedNodeIds} removed pending flush`)
   console.log(`Subscribers: ${s.subscriberCount}`)
+  console.groupEnd()
+}
+
+interface NodeSizeStats {
+  count: number
+  totalBytes: number
+  avgBytes: number
+  maxBytes: number
+}
+
+interface MemorySizeReport {
+  timestamp: number
+  totalNodes: number
+  totalEstimatedBytes: number
+  byType: Record<string, NodeSizeStats>
+  largestNodes: Array<{ id: string; type: string; bytes: number }>
+  jsHeapUsedBytes?: number
+  jsHeapTotalBytes?: number
+}
+
+/**
+ * Estimates the in-memory payload size of every node currently resident in
+ * the hot cache, by `JSON.stringify(node.data).length` (a proxy for bytes —
+ * exact for ASCII-heavy JSON, an undercount for content with many multi-byte
+ * UTF-8 characters). Iterates `g.nodes` directly rather than `whereType()`,
+ * which deep-clones every node — unnecessary overhead for a read-only
+ * size estimate and would itself transiently double memory during profiling.
+ */
+export function estimateGraphMemorySizes(topN = 20): MemorySizeReport {
+  const g = graph as any
+  const byType: Record<string, { count: number; totalBytes: number; maxBytes: number }> = {}
+  const largest: Array<{ id: string; type: string; bytes: number }> = []
+  let totalBytes = 0
+
+  for (const [id, node] of g.nodes as Map<string, PolyNode>) {
+    let bytes = 0
+    try {
+      bytes = JSON.stringify(node.data).length
+    } catch {
+      bytes = 0
+    }
+    totalBytes += bytes
+
+    const t = node.type
+    const stats = byType[t] ?? (byType[t] = { count: 0, totalBytes: 0, maxBytes: 0 })
+    stats.count++
+    stats.totalBytes += bytes
+    if (bytes > stats.maxBytes) stats.maxBytes = bytes
+
+    largest.push({ id, type: t, bytes })
+  }
+
+  largest.sort((a, b) => b.bytes - a.bytes)
+
+  const byTypeFinal: Record<string, NodeSizeStats> = {}
+  for (const [t, s] of Object.entries(byType)) {
+    byTypeFinal[t] = {
+      count: s.count,
+      totalBytes: s.totalBytes,
+      avgBytes: s.count ? Math.round(s.totalBytes / s.count) : 0,
+      maxBytes: s.maxBytes,
+    }
+  }
+
+  const report: MemorySizeReport = {
+    timestamp: Date.now(),
+    totalNodes: g.nodes.size,
+    totalEstimatedBytes: totalBytes,
+    byType: byTypeFinal,
+    largestNodes: largest.slice(0, topN),
+  }
+
+  if (typeof performance !== 'undefined' && (performance as any).memory) {
+    const mem = (performance as any).memory
+    report.jsHeapUsedBytes = mem.usedJSHeapSize
+    report.jsHeapTotalBytes = mem.totalJSHeapSize
+  }
+
+  return report
+}
+
+export function printGraphMemorySizes(topN = 15): void {
+  const r = estimateGraphMemorySizes(topN)
+  console.group(`%c📦 Graph Node Size Estimate (${new Date(r.timestamp).toLocaleTimeString()})`, 'font-weight:bold;font-size:14px')
+  console.log(`Total nodes: ${r.totalNodes.toLocaleString()}`)
+  console.log(`Estimated total payload size: ${formatBytes(r.totalEstimatedBytes)} (JSON size of node.data, summed across every hot-cache-resident node)`)
+  console.table(
+    Object.fromEntries(
+      Object.entries(r.byType)
+        .sort((a, b) => b[1].totalBytes - a[1].totalBytes)
+        .map(([type, s]) => [type, {
+          count: s.count,
+          totalSize: formatBytes(s.totalBytes),
+          avgSize: formatBytes(s.avgBytes),
+          maxSize: formatBytes(s.maxBytes),
+        }])
+    )
+  )
+  console.log('Top largest individual nodes:')
+  console.table(r.largestNodes.map(n => ({ id: n.id, type: n.type, size: formatBytes(n.bytes) })))
+  if (r.jsHeapUsedBytes !== undefined) {
+    console.log(`JS heap: ${formatBytes(r.jsHeapUsedBytes)} used / ${formatBytes(r.jsHeapTotalBytes ?? 0)} total (Chrome only — includes everything on the page, not just the graph)`)
+  }
   console.groupEnd()
 }
 

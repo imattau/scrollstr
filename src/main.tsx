@@ -6,8 +6,14 @@ import 'react-media-stack/dist/index.css'
 import App from './app/App.tsx'
 import { initPerformanceObserver } from './lib/performance'
 import { isTauri } from './tauri/env'
+import * as memoryProfile from './graph/memory-profile'
 
 initPerformanceObserver()
+
+// Exposed for diagnosing memory usage from DevTools: run
+// `scrollstrDebug.printGraphMemorySizes()` in the console to see node counts
+// and estimated payload sizes per type in the graph's hot cache.
+;(globalThis as unknown as { scrollstrDebug: typeof memoryProfile }).scrollstrDebug = memoryProfile
 
 async function init() {
   if (isTauri()) {
