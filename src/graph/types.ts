@@ -17,7 +17,6 @@ export type NodeType =
   | 'media'
   | 'hashtag'
   | 'counter'
-  | 'rejection'
   | 'user_state'
   | 'relay'
 

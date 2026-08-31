@@ -14,6 +14,8 @@ import {
   pruneBlockedContent,
   markVideosSeen,
   getSeenVideoIds,
+  isKindOneRejected,
+  resetKindOneRejectionMemo,
 } from './cache'
 import type { VideoShape, CachedEvent, CreatorProfileRecord } from './cache'
 
@@ -37,6 +39,7 @@ const BOB = 'b'.repeat(64)
 beforeEach(async () => {
   graph.clear()
   await graph.persistence.clearAll()
+  resetKindOneRejectionMemo()
 })
 
 afterEach(async () => {
@@ -89,9 +92,7 @@ describe('Nostr event cache — realistic scenarios', () => {
 
     const cached = await db.cachedEvents.get('note-no-vid')
     expect(cached).toBeUndefined()
-    const rejection = await db.kindOneRejections.get('note-no-vid')
-    expect(rejection).toBeDefined()
-    expect(rejection!.reason).toBe('no_video_url')
+    expect(isKindOneRejected('note-no-vid')).toBe(true)
   })
 
   it('saves kind-1 events with video URLs', async () => {
@@ -407,9 +408,7 @@ describe('Nostr event cache — realistic scenarios', () => {
 
     const cachedNoVid = await db.cachedEvents.get('bulk-note-no-vid')
     expect(cachedNoVid).toBeUndefined()
-    const rejection = await db.kindOneRejections.get('bulk-note-no-vid')
-    expect(rejection).toBeDefined()
-    expect(rejection!.reason).toBe('no_video_url')
+    expect(isKindOneRejected('bulk-note-no-vid')).toBe(true)
 
     const cachedVid = await db.cachedEvents.get('bulk-note-vid')
     expect(cachedVid).toBeDefined()

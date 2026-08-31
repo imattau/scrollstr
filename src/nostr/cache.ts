@@ -118,10 +118,23 @@ export interface VideoCountersRecord {
   zapTotalSats: number
 }
 
-export interface KindOneRejectionRecord {
-  id: string
-  reason: string
-  checkedAt: number
+// Session-scoped memoization for kind-1 notes without a video URL — avoids
+// re-running the (cheap) content check when a relay re-delivers the same
+// note. Deliberately NOT a graph node type: routing these through
+// graph.addNode() gave each one full node/hot-cache/LRU overhead, and since
+// most relay traffic is ordinary text notes, they came to dominate the
+// shared hot-cache budget (over 70% of it in practice), crowding out
+// actually-useful cached content. A plain Set of raw ids costs a fraction
+// of that per entry — a miss here only costs a redundant, cheap re-check,
+// never a correctness bug, so there's no need for it to survive reloads.
+const rejectedKindOneIds = new Set<string>()
+
+export function isKindOneRejected(id: string): boolean {
+  return rejectedKindOneIds.has(id)
+}
+
+export function resetKindOneRejectionMemo(): void {
+  rejectedKindOneIds.clear()
 }
 
 // ── Graph-backed Table API ──
@@ -133,7 +146,6 @@ const NODE_TYPES: Record<string, NodeType> = {
   userVideoState: 'user_state',
   authorProfiles: 'profile',
   videoCounters: 'counter',
-  kindOneRejections: 'rejection',
 }
 
 const ID_PREFIXES: Record<string, string> = {
@@ -143,7 +155,6 @@ const ID_PREFIXES: Record<string, string> = {
   userVideoState: 'sta',
   authorProfiles: 'pro',
   videoCounters: 'cnt',
-  kindOneRejections: 'rej',
 }
 
 function prefixed(tableName: string, id: string): string {
@@ -412,7 +423,6 @@ class CacheDB {
   userVideoState = new Table<UserVideoStateRecord>('userVideoState')
   authorProfiles = new Table<CreatorProfileRecord>('authorProfiles')
   videoCounters = new Table<VideoCountersRecord>('videoCounters')
-  kindOneRejections = new Table<KindOneRejectionRecord>('kindOneRejections')
 }
 
 export const db = new CacheDB()
@@ -965,11 +975,10 @@ export async function bulkSaveEventsToCache(events: any[], relay?: string): Prom
     // no content filter) would fill cachedEvents with ordinary text notes.
     // Mirrors the check in saveEventToCache.
     if (kind === 1) {
-      const rejected = await db.kindOneRejections.get(id)
-      if (rejected) continue
+      if (rejectedKindOneIds.has(id)) continue
       const videoUrl = extractVideoUrlFromContent(event.content || '')
       if (!videoUrl) {
-        await db.kindOneRejections.put({ id, reason: 'no_video_url', checkedAt: Date.now() })
+        rejectedKindOneIds.add(id)
         continue
       }
     }
@@ -1121,11 +1130,10 @@ export async function saveEventToCache(event: any, trusted = false, relay?: stri
   graph.startBatch()
   try {
     if (kind === 1) {
-      const rejected = await db.kindOneRejections.get(id)
-      if (rejected) return
+      if (rejectedKindOneIds.has(id)) return
       const videoUrl = extractVideoUrlFromContent(event.content || '')
       if (!videoUrl) {
-        await db.kindOneRejections.put({ id, reason: 'no_video_url', checkedAt: Date.now() })
+        rejectedKindOneIds.add(id)
         return
       }
     }
