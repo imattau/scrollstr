@@ -27,6 +27,7 @@ interface UseFeedSubscriptionsInput {
   sessionPubkey?: string
   feedType: string
   followingPubkeys: string[]
+  filterUserPubkey?: string | null
   mutedPubkeys: Set<string>
   activeIndex: number
   videosLength: number
@@ -35,7 +36,7 @@ interface UseFeedSubscriptionsInput {
 }
 
 export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
-  const { relayUrls, sessionPubkey, feedType, followingPubkeys, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
+  const { relayUrls, sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
 
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const lastOlderFetchAtRef = useRef(0)
@@ -132,6 +133,15 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followingPubkeys, relayUrls, refreshKey])
 
+  // Backfill the single author's full video history when viewing their feed.
+  useEffect(() => {
+    if (feedType !== 'user' || !filterUserPubkey || relayUrls.length === 0) return
+    const timer = setTimeout(() => {
+      void maybeResumeUserVideoBackfill(relayUrls, [filterUserPubkey])
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [feedType, filterUserPubkey, relayUrls, refreshKey])
+
   // Feed subscription: fetch recent videos from relays into the cache.
   // The following feed must be author-scoped; otherwise it can only show
   // followed creators after some other view, such as Profile, has already
@@ -139,13 +149,16 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
   useEffect(() => {
     if (relayUrls.length === 0) return
     if (feedType === 'following' && (!sessionPubkey || followingPubkeys.length === 0)) return
+    if (feedType === 'user' && !filterUserPubkey) return
 
     // Once Polypack has feed data, only ask relays for the live tail. Historical
     // content is already local and is filled by the backfill/load-more paths.
     // A cold cache retains the wider window so a guest session still hydrates.
     const cacheIsWarm = feedType === 'following'
       ? followingPubkeys.some((pubkey) => graph.byPubkey(pubkey, 'video_shape').length > 0)
-      : graph.whereType('video_shape').length > 0
+      : feedType === 'user'
+        ? !!filterUserPubkey && graph.byPubkey(filterUserPubkey, 'video_shape').length > 0
+        : graph.whereType('video_shape').length > 0
     const windowSeconds = cacheIsWarm ? LIVE_VIDEO_WINDOW_SECONDS : COLD_VIDEO_WINDOW_SECONDS
     console.log(`[VideoFeed] Fetching videos (${cacheIsWarm ? 'live tail' : 'cold-start window'})...`)
     const filters = feedType === 'following'
@@ -153,13 +166,18 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
           since: Math.floor(Date.now() / 1000) - windowSeconds,
           limit: PAGE_SIZE,
         })
-      : [{
-          kinds: VIDEO_KINDS,
-          since: Math.floor(Date.now() / 1000) - windowSeconds,
-        }]
+      : feedType === 'user' && filterUserPubkey
+        ? authorScopedVideoFilters([filterUserPubkey], {
+            since: Math.floor(Date.now() / 1000) - windowSeconds,
+            limit: PAGE_SIZE,
+          })
+        : [{
+            kinds: VIDEO_KINDS,
+            since: Math.floor(Date.now() / 1000) - windowSeconds,
+          }]
     const unsub = subscribeToRelays(relayUrls, filters, 'high')
     return () => { unsub() }
-  }, [relayUrls, feedType, sessionPubkey, followingPubkeys, refreshKey])
+  }, [relayUrls, feedType, sessionPubkey, followingPubkeys, filterUserPubkey, refreshKey])
 
   // Load more older content when approaching the end of the feed
   useEffect(() => {
@@ -180,11 +198,16 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
           limit: PAGE_SIZE,
           until: oldestCreatedAt - 1,
         })
-      : [{
-          kinds: VIDEO_KINDS,
-          limit: PAGE_SIZE,
-          until: oldestCreatedAt - 1,
-        }]
+      : feedType === 'user' && filterUserPubkey
+        ? authorScopedVideoFilters([filterUserPubkey], {
+            limit: PAGE_SIZE,
+            until: oldestCreatedAt - 1,
+          })
+        : [{
+            kinds: VIDEO_KINDS,
+            limit: PAGE_SIZE,
+            until: oldestCreatedAt - 1,
+          }]
     const unsub = subscribeToRelays(relayUrls, filters, 'low')
     const doneTimer = setTimeout(() => setIsFetchingOlder(false), 3000)
 
@@ -193,5 +216,5 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
       clearTimeout(doneTimer)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIndex, videosLength, oldestCreatedAt, relayUrls, feedType, sessionPubkey, followingPubkeys])
+  }, [activeIndex, videosLength, oldestCreatedAt, relayUrls, feedType, sessionPubkey, followingPubkeys, filterUserPubkey])
 }

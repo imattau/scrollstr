@@ -31,12 +31,17 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const filterTag = searchParams.get('tag')
   const initialVideoId = searchParams.get('v')
   const feedType = searchParams.get('feed') || 'explore'
+  const filterUserPubkey = searchParams.get('user')
   const resumeVideoId = useMemo(() => {
     if (initialVideoId) return null
     const saved = readSavedFeedState()
-    if (saved?.feedType === feedType && saved.filterTag === filterTag) return saved.videoId
+    if (
+      saved?.feedType === feedType &&
+      saved.filterTag === filterTag &&
+      (saved.filterUserPubkey ?? null) === (filterUserPubkey ?? null)
+    ) return saved.videoId
     return null
-  }, [initialVideoId, feedType, filterTag])
+  }, [initialVideoId, feedType, filterTag, filterUserPubkey])
 
   const [activeIndex, setActiveIndex] = useState(0)
   const mediaStackRef = useRef<MediaStackRef>(null)
@@ -103,6 +108,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     sessionPubkey: session?.pubkey,
     feedType,
     followingPubkeys,
+    filterUserPubkey,
     mutedPubkeys,
     mutedHashtags,
     filterTag,
@@ -120,6 +126,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     initialVideoId,
     feedType,
     filterTag,
+    filterUserPubkey,
     videos,
     activeIndex,
     setActiveIndex,
@@ -148,6 +155,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     sessionPubkey: session?.pubkey,
     feedType,
     followingPubkeys,
+    filterUserPubkey,
     mutedPubkeys,
     activeIndex,
     videosLength: videos.length,
@@ -257,27 +265,34 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     return () => window.removeEventListener('scrollstr:home', handler)
   }, [])
 
-  // Jump to start when navigating home (tag or deep-link cleared from URL)
+  // Jump to start when navigating home (tag, user filter, or deep-link cleared from URL)
   const prevFilterTag = useRef(filterTag)
   const prevInitialVideoId = useRef(initialVideoId)
+  const prevFilterUserPubkey = useRef(filterUserPubkey)
   useEffect(() => {
     const shouldReset =
       (prevFilterTag.current && !filterTag) ||
-      (prevInitialVideoId.current && !initialVideoId)
+      (prevInitialVideoId.current && !initialVideoId) ||
+      (prevFilterUserPubkey.current !== filterUserPubkey)
 
     prevFilterTag.current = filterTag
     prevInitialVideoId.current = initialVideoId
+    prevFilterUserPubkey.current = filterUserPubkey
 
     if (shouldReset) {
       scrollToIndex(0)
       setActiveIndex(0)
     }
-  }, [filterTag, initialVideoId])
+  }, [filterTag, initialVideoId, filterUserPubkey])
 
   // Fetch profile for active video — triggers kind:0 relay subscription which
   // updates videoShapes with authorName/authorPicture, flowing into mediaItems.
   const activeVideo = videos[activeIndex]
   useProfile(activeVideo?.creator.pubkey || '')
+
+  // Display name for the single-author feed header
+  const filterUserProfile = useProfile(filterUserPubkey || '')
+  const filterUserName = filterUserProfile.displayName || filterUserProfile.name || filterUserPubkey?.slice(0, 8) || ''
 
   // react-media-stack reports media failures through its internal overlay, but
   // does not expose an error callback. Capture the native video error here so
@@ -326,6 +341,16 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
             <p className="text-[14px] font-semibold text-[#f7f7f8]">No videos from followed creators.</p>
             <p className="text-[12px] text-[#71717a]">Try following more accounts or switch to Explore feed!</p>
           </div>
+        ) : feedType === 'user' && filterUserPubkey ? (
+          <div className="space-y-3">
+            <p className="text-[14px] font-semibold text-[#f7f7f8]">No videos from this creator yet.</p>
+            <button
+              onClick={() => navigate(`/profile/${filterUserPubkey}`)}
+              className="rounded-[16px] bg-[#8b5cf6] px-3 py-1.5 text-[12px] font-semibold text-white"
+            >
+              Back to profile
+            </button>
+          </div>
         ) : (
           <p className="text-[14px]">Connecting to relays and loading videos...</p>
         )}
@@ -358,26 +383,37 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       {/* Feed type toggles — positioned inline with MediaStack overlay */}
       <div className="absolute top-0 left-0 right-0 z-40 pointer-events-auto">
         <div className="flex gap-1.5 pt-3 px-4">
-          <Link
-            to={`/?feed=following${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
-            className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
-              feedType === 'following'
-                ? 'bg-purple-500 text-white'
-                : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
-            }`}
-          >
-            Following
-          </Link>
-          <Link
-            to={`/?feed=explore${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
-            className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
-              feedType === 'explore'
-                ? 'bg-purple-500 text-white'
-                : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
-            }`}
-          >
-            Explore
-          </Link>
+          {feedType === 'user' && filterUserPubkey ? (
+            <button
+              onClick={() => navigate(`/profile/${filterUserPubkey}`)}
+              className="flex items-center gap-1 rounded-[16px] bg-purple-500 px-3 py-1.5 text-[11px] font-semibold text-white whitespace-nowrap"
+            >
+              ← @{filterUserName}'s videos
+            </button>
+          ) : (
+            <>
+              <Link
+                to={`/?feed=following${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
+                className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                  feedType === 'following'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
+                }`}
+              >
+                Following
+              </Link>
+              <Link
+                to={`/?feed=explore${filterTag ? `&tag=${encodeURIComponent(filterTag)}` : ''}`}
+                className={`rounded-[16px] px-3 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                  feedType === 'explore'
+                    ? 'bg-purple-500 text-white'
+                    : 'bg-black/40 text-neutral-300 backdrop-blur-sm border border-white/10 hover:bg-black/60'
+                }`}
+              >
+                Explore
+              </Link>
+            </>
+          )}
         </div>
       </div>
 

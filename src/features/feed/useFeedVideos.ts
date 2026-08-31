@@ -110,6 +110,7 @@ interface UseFeedVideosInput {
   sessionPubkey?: string
   feedType: string
   followingPubkeys: string[]
+  filterUserPubkey?: string | null
   mutedPubkeys: Set<string>
   mutedHashtags: Set<string>
   filterTag: string | null
@@ -126,7 +127,7 @@ interface UseFeedVideosOutput {
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
-  const { sessionPubkey, feedType, followingPubkeys, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, resumeVideoId } = input
+  const { sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, mutedHashtags, filterTag, refreshKey, deeplinkVideoId, resumeVideoId } = input
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
@@ -196,6 +197,41 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
   }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
+
+  // Single-author feed (e.g. "view this creator's videos as a feed" from
+  // Profile) — same shape as followedShapes, scoped to one pubkey.
+  const _userShapes = useGraphQuery(async () => {
+    if (!filterUserPubkey) return []
+    try {
+      let shapes = graph.byPubkey(filterUserPubkey, 'video_shape')
+        .map(n => n.data as unknown as VideoShape)
+        .filter(s => s.videoUrl && s.mediaStatus !== 'failed' && !s.hidden)
+      if (filterTag) {
+        shapes = shapes.filter(s =>
+          s.hashtags?.some(t => t.toLowerCase() === filterTag.toLowerCase())
+        )
+      }
+      shapes.sort((a, b) => (b.insertOrder ?? 0) - (a.insertOrder ?? 0))
+      if (resumeVideoId) {
+        const resumeIdx = shapes.findIndex(s => s.id === resumeVideoId)
+        if (resumeIdx >= 0) {
+          const start = Math.max(0, resumeIdx - RESUME_CONTEXT_BEFORE)
+          const end = Math.min(shapes.length, resumeIdx + RESUME_CONTEXT_AFTER + 1)
+          shapes = shapes.slice(start, end)
+        } else {
+          shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+        }
+      } else {
+        shapes = shapes.slice(0, FEED_QUERY_LIMIT)
+      }
+      return await mergeCountersIntoShapes(shapes)
+    } catch (err) {
+      console.error('[VideoFeed] Error in user video query:', err)
+      return []
+    }
+  }, [filterUserPubkey, refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
+
+  const userShapes = useMemo(() => _userShapes ?? [], [_userShapes])
 
   // Deep-linked videos (from Profile/Discover) are frequently already
   // watched or outside the unwatched-window query above, so they'd never
@@ -295,13 +331,26 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     () => injectDeeplink(filterVideos(followedShapes)),
     [followedShapes, filterVideos, injectDeeplink]
   )
+  const userVideosRaw = useMemo(
+    () => injectDeeplink(filterVideos(userShapes)),
+    [userShapes, filterVideos, injectDeeplink]
+  )
   const exploreVideos = useStableFeedOrder(exploreVideosRaw, `explore:${refreshKey}:${filterTag ?? ''}`, isStillVisible)
   const followingVideos = useStableFeedOrder(
     followingVideosRaw,
     `following:${sessionPubkey ?? ''}:${refreshKey}:${filterTag ?? ''}`,
     isStillVisible
   )
-  const videos = feedType === 'following' && sessionPubkey ? followingVideos : exploreVideos
+  const userVideos = useStableFeedOrder(
+    userVideosRaw,
+    `user:${filterUserPubkey ?? ''}:${refreshKey}:${filterTag ?? ''}`,
+    isStillVisible
+  )
+  const videos = feedType === 'user' && filterUserPubkey
+    ? userVideos
+    : feedType === 'following' && sessionPubkey
+      ? followingVideos
+      : exploreVideos
 
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])

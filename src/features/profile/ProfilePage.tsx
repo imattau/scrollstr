@@ -691,7 +691,7 @@ export const ProfilePage: React.FC = () => {
                       {videos.map((video) => (
                         <div
                           key={video.id}
-                          onClick={() => navigate(`/?v=${video.id}`)}
+                          onClick={() => navigate(`/?feed=user&user=${targetPubkey}&v=${video.id}`)}
                           className="relative aspect-[9/16] cursor-pointer overflow-hidden rounded-[8px] bg-[#18181d] transition-all hover:scale-[1.03]"
                         >
                           {video.poster ? (

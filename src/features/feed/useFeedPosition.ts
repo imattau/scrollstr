@@ -9,6 +9,7 @@ export interface SavedFeedState {
   videoId: string
   feedType: string
   filterTag: string | null
+  filterUserPubkey?: string | null
 }
 
 export function readSavedFeedState(): SavedFeedState | null {
@@ -24,6 +25,7 @@ interface UseFeedPositionInput {
   initialVideoId: string | null
   feedType: string
   filterTag: string | null
+  filterUserPubkey?: string | null
   videos: VideoItemData[]
   activeIndex: number
   setActiveIndex: (index: number) => void
@@ -48,7 +50,7 @@ export function scrollToIndex(index: number, smooth = false) {
 }
 
 export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOutput {
-  const { initialVideoId, feedType, filterTag, videos, activeIndex, setActiveIndex } = input
+  const { initialVideoId, feedType, filterTag, filterUserPubkey, videos, activeIndex, setActiveIndex } = input
 
   const [deeplinkFailed, setDeeplinkFailed] = useState(false)
   const deeplinkFoundRef = useRef(false)
@@ -112,7 +114,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
   // it's flushed on unmount / tab hide, not just after the debounce fires.
   const currentVideoId = videos[activeIndex]?.id
   const feedStateTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const pendingFeedStateRef = useRef<{ videoId: string; feedType: string; filterTag: string | null } | null>(null)
+  const pendingFeedStateRef = useRef<SavedFeedState | null>(null)
 
   useEffect(() => {
     // When a deep-link resolves (initialVideoId transitions from truthy to null),
@@ -123,7 +125,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
     prevInitialVideoIdRef.current = initialVideoId
 
     if (!currentVideoId || initialVideoId) return
-    const state = { videoId: currentVideoId, feedType, filterTag }
+    const state = { videoId: currentVideoId, feedType, filterTag, filterUserPubkey: filterUserPubkey ?? null }
     pendingFeedStateRef.current = state
     clearTimeout(feedStateTimer.current)
     feedStateTimer.current = setTimeout(() => {
@@ -131,7 +133,7 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
       pendingFeedStateRef.current = null
     }, 1000)
     return () => clearTimeout(feedStateTimer.current)
-  }, [currentVideoId, feedType, filterTag, initialVideoId])
+  }, [currentVideoId, feedType, filterTag, filterUserPubkey, initialVideoId])
 
   useEffect(() => {
     const flushFeedState = () => {
@@ -204,18 +206,21 @@ export function useFeedPosition(input: UseFeedPositionInput): UseFeedPositionOut
       return idx >= 0 ? idx : null
     }
     const saved = readSavedFeedState()
-    if (saved?.videoId && saved.feedType === feedType && saved.filterTag === filterTag) {
+    const savedMatches = saved?.feedType === feedType
+      && saved.filterTag === filterTag
+      && (saved.filterUserPubkey ?? null) === (filterUserPubkey ?? null)
+    if (saved?.videoId && savedMatches) {
       const idx = videos.findIndex(v => v.id === saved.videoId)
       if (idx >= 0) return idx
     }
     // Fallback: the exact saved video isn't in the loaded window anymore —
     // resume at the first not-yet-seen video instead of starting from 0.
-    if (saved?.feedType === feedType && saved?.filterTag === filterTag && seenIds) {
+    if (savedMatches && seenIds) {
       const idx = videos.findIndex(v => !seenIds.has(v.id))
       if (idx > 0) return idx
     }
     return null
-  }, [videos, initialVideoId, feedType, filterTag, seenIds])
+  }, [videos, initialVideoId, feedType, filterTag, filterUserPubkey, seenIds])
 
   // Scroll to initial target on mount (deep link or session restore)
   useEffect(() => {
