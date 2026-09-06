@@ -436,22 +436,12 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
         </div>
       </div>
 
-      {/*
-       * Disable react-media-stack's whole-file prefetcher for now. Its
-       * implementation has no explicit opt-out, so 0 is used instead of a
-       * negative window: as of 1.1.x, preFetchAhead/preFetchBehind also
-       * gate whether an item's <video> element loads at all (shouldLoad =
-       * index in [active - behind, active + ahead]), so a negative ahead
-       * window excludes even the active item and no video ever plays.
-       * With 0/0 only the active item loads/prefetches, which still
-       * prevents stale fetches from piling up when a user swipes quickly.
-       */}
       <MediaStack
         ref={mediaStackRef}
         items={mediaItems}
+        cacheStrategy="stream"
         preFetchAhead={0}
         preFetchBehind={0}
-        cacheLimit={4}
         direction="vertical"
         autoPlay
         muted={isMuted}

@@ -1,7 +1,7 @@
 {
   "name": "scrollstr",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "build:tauri": "cross-env TAURI_ENV=true tsc -b && cross-env TAURI_ENV=true vite build",
     "test": "vitest run",
     "lint": "eslint .",
+    "test:memory": "node scripts/memory-profile.mjs",
     "preview": "vite preview",
     "postinstall": "bash scripts/copy-ffmpeg-core.sh",
     "tauri": "tauri",
@@ -41,7 +42,7 @@
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.86.0",
     "react-hotkeys-hook": "^5.3.3",
-    "react-media-stack": "^1.1.4",
+    "react-media-stack": "^1.2.0",
     "react-router-dom": "^7.18.3",
     "rxjs": "^7.8.2",
     "serve": "^14.2.6",

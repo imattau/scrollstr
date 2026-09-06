@@ -1,7 +1,8 @@
-import { PolyGraph, VectorIndex, cosineSimilarity } from '@0xx0lostcause0xx0/polypack'
+import { PolyGraph, cosineSimilarity } from '@0xx0lostcause0xx0/polypack'
 import { BinaryStoreAdapter } from '@0xx0lostcause0xx0/polypack/persistence/opfs'
 import type { PersistenceAdapter } from '@0xx0lostcause0xx0/polypack'
 import type { PolyNode, NodeType } from './types'
+import { BoundedVectorIndex } from './bounded-vector-index'
 
 const DB_NAME = 'scrollstr-polypack'
 // Shared LRU across every node type (events, profiles, reactions, zaps,
@@ -9,6 +10,7 @@ const DB_NAME = 'scrollstr-polypack'
 // to avoid frequent eviction of video_shape nodes under normal
 // relay activity even when they were still on-screen.
 const HOT_CACHE_MAX = 75000
+export const VECTOR_WORKING_SET_MAX = 5000
 
 let testPersistenceFactory: ((storeDir: string) => PersistenceAdapter) | null = null
 
@@ -51,7 +53,7 @@ export class ScrollstrGraph extends PolyGraph {
       HOT_CACHE_MAX,
       undefined,
       undefined,
-      (onChange) => new VectorIndex(onChange, crossSpaceSimilarity),
+      (onChange) => new BoundedVectorIndex(VECTOR_WORKING_SET_MAX, onChange, crossSpaceSimilarity),
     )
     // Nodes are built from unauthenticated relay content — bound payload/vector
     // size so a hostile or misbehaving relay can't inflate memory via one event.
@@ -188,11 +190,21 @@ export class ScrollstrGraph extends PolyGraph {
     return true
   }
 
-  /** Restore persisted vectors too — the app keys vectors by event id, not node id, so the base warm's hot-cache-only hydration would drop them. */
+  /** Restore only the newest durable video vectors into the bounded working set. */
   override async warm(): Promise<void> {
     await super.warm()
-    const allVectors = await this.persistence.getAllVectors()
-    for (const { id, vector } of allVectors) {
+    const shapes = await this.persistence.queryNodes?.({
+      nodeTypes: ['video_shape'],
+      orderBy: { field: 'insertOrder', direction: 'desc' },
+      limit: VECTOR_WORKING_SET_MAX,
+    })
+    if (!shapes?.length) return
+
+    const ids = shapes.map((shape) => shape.id.startsWith('shp:') ? shape.id.slice(4) : shape.id)
+    const vectors = this.persistence.getVectors
+      ? await this.persistence.getVectors(ids)
+      : (await this.persistence.getAllVectors()).filter(({ id }) => ids.includes(id))
+    for (const { id, vector } of vectors) {
       if (!this.vectors.has(id)) this.vectors.hydrate(id, vector)
     }
   }

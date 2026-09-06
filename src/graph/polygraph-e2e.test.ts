@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { PolyGraph, graph, computeEventVector, ScrollstrGraph } from './polygraph'
+import { VECTOR_WORKING_SET_MAX } from './scrollstr-graph'
 import { VectorIndex } from './vector-index'
 import type { PolyNode, NodeType, EdgeType } from './types'
 import { MemoryAdapter } from '@0xx0lostcause0xx0/polypack'
@@ -791,7 +792,7 @@ describe('PolyGraph E2E — stress test with 10K events', () => {
       pg.vectors.add(`s-${i}`, [...node.vector!])
     }
     expect(pg.size).toBe(COUNT)
-    expect(pg.vectors.size).toBe(COUNT)
+    expect(pg.vectors.size).toBe(VECTOR_WORKING_SET_MAX)
 
     // Add some edges
     for (let i = 0; i < 1000; i++) {
@@ -817,7 +818,7 @@ describe('PolyGraph E2E — stress test with 10K events', () => {
     const start = performance.now()
     const results = pg.vectors.query(queryVec, 10, 0.5)
     const elapsed = performance.now() - start
-    // Vector query over 10K entries should be fast (< 50ms)
+    // Vector query over the bounded working set should be fast (< 50ms)
     expect(elapsed).toBeLessThan(50)
     expect(results.length).toBeGreaterThanOrEqual(1)
   })

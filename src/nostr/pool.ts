@@ -576,9 +576,28 @@ export async function searchRelays(
  * graph must be flushed before calling so persistence is consistent.
  * Returns the list of node IDs removed from persistence.
  */
+let prunePromise: Promise<string[]> | null = null
+
+async function runPersistedPrune(flushFirst: boolean): Promise<string[]> {
+  if (prunePromise) return prunePromise
+  prunePromise = (async () => {
+    if (flushFirst) await graph.flush()
+    return prunePersistedCache()
+  })()
+  try {
+    return await prunePromise
+  } finally {
+    prunePromise = null
+  }
+}
+
 export async function runPruneCache(): Promise<string[]> {
-  await graph.flush()
-  return prunePersistedCache()
+  return runPersistedPrune(true)
+}
+
+/** Run persisted maintenance before graph.warm() hydrates obsolete nodes. */
+export async function preparePersistedCache(): Promise<string[]> {
+  return runPersistedPrune(false)
 }
 
 // ── Main-thread cache management (persisted graph) ──────────────────────
@@ -609,120 +628,124 @@ async function getCacheStats(): Promise<{ videoCount: number; oldestTs: number |
   return { videoCount, oldestTs }
 }
 
-async function prunePersistedCache(): Promise<string[]> {
-  const removedIds: string[] = []
+const REACTION_KINDS = new Set([7, 16, 9735, 1111])
+const DELETE_BATCH_SIZE = 500
+
+function rawNodeId(id: string): string {
+  const colon = id.indexOf(':')
+  return colon === -1 ? id : id.slice(colon + 1)
+}
+
+async function bulkDeleteInChunks(
+  ids: string[],
+  remove: (chunk: string[]) => Promise<void>,
+): Promise<void> {
+  for (let i = 0; i < ids.length; i += DELETE_BATCH_SIZE) {
+    await remove(ids.slice(i, i + DELETE_BATCH_SIZE))
+  }
+}
+
+export async function prunePersistedCache(limits: { maxVideos?: number; maxEvents?: number } = {}): Promise<string[]> {
+  const maxVideos = limits.maxVideos ?? PRUNE_MAX_VIDEOS
+  const maxEvents = limits.maxEvents ?? PRUNE_MAX_EVENT_NODES
+  const removeNodeIds = new Set<string>()
+  const removeVectorIds = new Set<string>()
 
   const shapes = (await queryPersistedNodesByType('video_shape'))
-    .map((n: any) => ({ id: n.id, data: n.data }))
     .sort((a: any, b: any) => (a.data.insertOrder ?? 0) - (b.data.insertOrder ?? 0))
+  const excessShapes = Math.max(0, shapes.length - maxVideos)
+  const prunedShapes = shapes.slice(0, excessShapes)
+  const keptShapes = shapes.slice(excessShapes)
+  const prunedVideoIds = new Set(prunedShapes.map(shape => rawNodeId(shape.id)))
+  const keptVideoIds = new Set(keptShapes.map(shape => rawNodeId(shape.id)))
+  const keptVideoUrls = new Set(
+    keptShapes.map(shape => shape.data.videoUrl as string | undefined).filter((url): url is string => Boolean(url)),
+  )
 
-  const excess = shapes.length - PRUNE_MAX_VIDEOS
-  if (excess <= 0) {
-    return removedIds
+  for (const shape of prunedShapes) {
+    const rawId = rawNodeId(shape.id)
+    removeNodeIds.add(shape.id)
+    removeNodeIds.add(`evt:${rawId}`)
+    removeNodeIds.add(`sta:${rawId}`)
+    removeNodeIds.add(`cnt:${rawId}`)
+    removeVectorIds.add(rawId)
   }
 
-  const oldestShapes = shapes.slice(0, excess)
-  const oldestIdSet = new Set(oldestShapes.map((s: any) => s.id.replace('shp:', '')))
-  const videoUrls = oldestShapes.filter((s: any) => s.data.videoUrl).map((s: any) => s.data.videoUrl)
+  // Legacy rejection nodes are obsolete: current builds use a session Set.
+  // This must run even when the video count is below its cap.
+  for (const node of await queryPersistedNodesByType('rejection')) {
+    removeNodeIds.add(node.id)
+  }
 
   const events = await queryPersistedNodesByType('event')
-  const reactionIds: string[] = []
   for (const node of events) {
     const kind = node.data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = (node.data.eTags as string[]) ?? []
-      if (eTags.some((eid: string) => oldestIdSet.has(eid))) {
-        reactionIds.push(node.id)
-      }
+    if (!kind || !REACTION_KINDS.has(kind)) continue
+    const eTags = (node.data.eTags as string[]) ?? []
+    if (eTags.some(id => prunedVideoIds.has(id)) || (eTags.length > 0 && !eTags.some(id => keptVideoIds.has(id)))) {
+      removeNodeIds.add(node.id)
     }
   }
 
-  const toRemove = [...reactionIds, ...oldestShapes.map((s: any) => s.id)]
-  for (const id of toRemove) {
-    await graph.persistence.deleteNode(id)
-    removedIds.push(id)
-  }
-  // Pruning deletes straight from persistence, bypassing PolyGraph's own
-  // removeNode (which would clean this up). Vectors are keyed by the raw
-  // video id, not the `shp:` node id, so removeNode's own id-linked vector
-  // cleanup couldn't reach them anyway — drop both the in-memory index entry
-  // and the durable vector record for each pruned video explicitly, or they
-  // outlive their shapes indefinitely (warm() rehydrates every persisted
-  // vector on every future startup).
-  graph.vectors.removeMany([...oldestIdSet])
-  for (const id of oldestIdSet) {
-    await graph.persistence.deleteVector(id)
+  // The global event bound is independent of video pruning. Prefer retaining
+  // original events for kept shapes while evicting equally-old auxiliaries.
+  const retainedEvents = events.filter(node => !removeNodeIds.has(node.id))
+  if (retainedEvents.length > maxEvents) {
+    retainedEvents
+      .sort((a: any, b: any) => {
+        const aOriginal = keptVideoIds.has(rawNodeId(a.id)) ? 1 : 0
+        const bOriginal = keptVideoIds.has(rawNodeId(b.id)) ? 1 : 0
+        return aOriginal - bOriginal || (a.updatedAt ?? 0) - (b.updatedAt ?? 0)
+      })
+      .slice(0, retainedEvents.length - maxEvents)
+      .forEach(node => removeNodeIds.add(node.id))
   }
 
-  const oldThreshold = Date.now() - 30 * 24 * 60 * 60 * 1000
-  const rejections = await queryPersistedNodesByType('rejection')
-  for (const node of rejections) {
-    const checkedAt = node.data.checkedAt as number | undefined
-    if (checkedAt !== undefined && checkedAt < oldThreshold) {
-      await graph.persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
+  for (const node of await queryPersistedNodesByType('media')) {
+    const url = (node.data.url as string | undefined) ?? rawNodeId(node.id)
+    if (!keptVideoUrls.has(url)) removeNodeIds.add(node.id)
+  }
+  for (const node of await queryPersistedNodesByType('user_state')) {
+    if (!keptVideoIds.has(rawNodeId(node.id))) removeNodeIds.add(node.id)
+  }
+  for (const node of await queryPersistedNodesByType('counter')) {
+    if (!keptVideoIds.has(rawNodeId(node.id))) removeNodeIds.add(node.id)
   }
 
-  const urlSet = new Set(videoUrls)
-  const mediaNodes = await queryPersistedNodesByType('media')
-  for (const node of mediaNodes) {
-    if (urlSet.has(node.id)) {
-      await graph.persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
+  const retainedPubkeys = new Set<string>()
+  for (const shape of keptShapes) {
+    if (shape.data.pubkey) retainedPubkeys.add(shape.data.pubkey as string)
+  }
+  for (const node of retainedEvents) {
+    if (!removeNodeIds.has(node.id) && node.data.pubkey) retainedPubkeys.add(node.data.pubkey as string)
+  }
+  for (const node of await queryPersistedNodesByType('profile')) {
+    const pubkey = (node.data.pubkey as string | undefined) ?? rawNodeId(node.id)
+    if (!retainedPubkeys.has(pubkey)) removeNodeIds.add(node.id)
   }
 
-  const remainingPubkeys = new Set<string>()
-  for (const s of shapes) {
-    if (s.data.pubkey) remainingPubkeys.add(s.data.pubkey)
+  // Direct persistence deletion bypasses PolyGraph's ownership cleanup, so
+  // remove every edge attached to either a canonical node id or the raw ids
+  // used by older HAS_MEDIA/AUTHORED_BY edges.
+  const removedAliases = new Set<string>()
+  for (const id of removeNodeIds) {
+    removedAliases.add(id)
+    removedAliases.add(rawNodeId(id))
   }
-  for (const node of events) {
-    if (node.data.pubkey) remainingPubkeys.add(node.data.pubkey)
-  }
-  const profiles = await queryPersistedNodesByType('profile')
-  for (const node of profiles) {
-    if (!remainingPubkeys.has(node.data.pubkey as string)) {
-      await graph.persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
+  const edges = await graph.persistence.getAllEdges()
+  const edgeIds = edges
+    .filter(edge => removedAliases.has(edge.source) || removedAliases.has(edge.target))
+    .map(edge => edge.id)
 
-  const remainingShapeIds = new Set(shapes.map((s: any) => s.id))
-  for (const node of events) {
-    const kind = node.data.kind as number | undefined
-    if (kind && [7, 16, 9735, 1111].includes(kind)) {
-      const eTags = (node.data.eTags as string[]) ?? []
-      if (eTags.length && !eTags.some((eid: string) => remainingShapeIds.has(`shp:${eid}`))) {
-        await graph.persistence.deleteNode(node.id)
-        removedIds.push(node.id)
-      }
-    }
-  }
+  const nodeIds = [...removeNodeIds]
+  await bulkDeleteInChunks(edgeIds, chunk => graph.persistence.bulkDeleteEdges(chunk))
+  await bulkDeleteInChunks(nodeIds, chunk => graph.persistence.bulkDeleteNodes(chunk))
+  await bulkDeleteInChunks([...removeVectorIds], async chunk => {
+    graph.vectors.removeMany(chunk)
+    await Promise.all(chunk.map(id => graph.persistence.deleteVector(id)))
+  })
 
-  const allEventIds = await graph.persistence.allNodeIds()
-  const allEventNodes = await graph.persistence.getNodes(allEventIds)
-  const typedEventNodes = allEventNodes.filter(n => n.type === 'event')
-  if (typedEventNodes.length > PRUNE_MAX_EVENT_NODES) {
-    const excessEvents = typedEventNodes
-      .sort((a: any, b: any) => (a.updatedAt ?? 0) - (b.updatedAt ?? 0))
-      .slice(0, typedEventNodes.length - PRUNE_MAX_EVENT_NODES)
-    for (const node of excessEvents) {
-      await graph.persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  const userStates = await queryPersistedNodesByType('user_state')
-  for (const node of userStates) {
-    const rawId = node.id.startsWith('sta:') ? node.id.slice(4) : node.id
-    if (!remainingShapeIds.has(`shp:${rawId}`)) {
-      await graph.persistence.deleteNode(node.id)
-      removedIds.push(node.id)
-    }
-  }
-
-  return removedIds
+  return nodeIds
 }
 
 /**

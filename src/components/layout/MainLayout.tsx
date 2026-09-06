@@ -45,35 +45,9 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     <>
       {immersive ? (
         <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
-        <div className="md:hidden h-dvh bg-[#1b1327] relative">
-          <div className="absolute inset-0 bottom-16 overflow-hidden">
-            {children}
-          </div>
-          {/* Mobile Navigation (Bottom) */}
-          <nav className="absolute bottom-0 left-0 right-0 h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-4 z-50">
-            {mobileNavItems.map((item) => {
-              const Icon = item.icon
-              const active = isActive(item.path)
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
-                  className={`flex flex-col items-center justify-center w-12 h-12 rounded-xl transition-colors ${
-                    active ? 'text-purple-400' : 'text-neutral-400'
-                  }`}
-                >
-                  <Icon className="w-5 h-5" />
-                  <span className="text-[10px] mt-1">{item.path === '/profile/me' ? (session ? 'My Profile' : 'Profile') : item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-        </div>
-
-        <div className="hidden md:flex min-h-screen justify-center overflow-hidden bg-[#09090b]">
-          <div className="flex h-screen w-full max-w-[1440px] overflow-hidden rounded-none">
-            <aside className="flex w-[248px] shrink-0 flex-col justify-between border-r border-[#111115] bg-[#111115] p-6">
+        <div className="flex h-dvh justify-center overflow-hidden bg-[#09090b] pb-16 md:min-h-screen md:pb-0">
+          <div className="flex h-full w-full max-w-[1440px] overflow-hidden rounded-none md:h-screen">
+            <aside className="hidden w-[248px] shrink-0 flex-col justify-between border-r border-[#111115] bg-[#111115] p-6 md:flex">
               <div className="space-y-8">
                 <div className="space-y-2">
                   <div className="text-xl font-bold tracking-wide">NOSTR CLIPS</div>
@@ -127,13 +101,13 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
               </div>
             </aside>
 
-            <main className="flex h-screen w-[720px] shrink-0 flex-col overflow-hidden bg-[#09090b]">
+            <main className="flex h-full w-full shrink-0 flex-col overflow-hidden bg-[#09090b] md:h-screen md:w-[720px]">
               <div className="relative flex flex-1 justify-center overflow-hidden">
                 {children}
               </div>
             </main>
 
-            <aside className="flex w-[472px] shrink-0 flex-col overflow-y-auto bg-[#111115] p-6">
+            <aside className="hidden w-[472px] shrink-0 flex-col overflow-y-auto bg-[#111115] p-6 md:flex">
               {rightPanel || (
                 <div className="space-y-4">
                   <div>
@@ -167,6 +141,25 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
             </aside>
           </div>
         </div>
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-around border-t border-neutral-900 bg-neutral-950/80 px-4 backdrop-blur-lg md:hidden">
+          {mobileNavItems.map((item) => {
+            const Icon = item.icon
+            const active = isActive(item.path)
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={item.path === '/' ? () => { sessionStorage.removeItem('scrollstr-feed-state'); window.dispatchEvent(new CustomEvent('scrollstr:home')) } : undefined}
+                className={`flex h-12 w-12 flex-col items-center justify-center rounded-xl transition-colors ${
+                  active ? 'text-purple-400' : 'text-neutral-400'
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <span className="mt-1 text-[10px]">{item.path === '/profile/me' ? (session ? 'My Profile' : 'Profile') : item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
       </div>
     ) : (
       <div className="h-dvh bg-neutral-950 text-neutral-100 flex flex-col selection:bg-purple-600 selection:text-white">

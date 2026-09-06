@@ -7,6 +7,7 @@ export { findSimilarVideos, findVideosSimilarToAuthor } from './similar'
 export { semanticSearchVideos, reindexVideoEmbeddings } from './semantic-embedding'
 export { findThread } from './threads'
 export { ScrollstrGraph } from './scrollstr-graph'
+export { BoundedVectorIndex } from './bounded-vector-index'
 export type * from './types'
 
 import type { PolyNode } from './types'

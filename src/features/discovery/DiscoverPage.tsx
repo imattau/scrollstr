@@ -6,7 +6,7 @@ import { useToast } from '../../components/feedback/Toast'
 import { subscribeToRelays, searchRelays, addDiscoveredRelays, fetchRelayDirectory } from '../../nostr/pool'
 import { DEFAULT_SEARCH_LIMIT } from '../../nostr/search-relays'
 import { VideoShape, saveEventToCache } from '../../nostr/cache'
-import { graph, useGraphQuery, useLiveQuery, useWorkingMemory, enableSemanticEmbeddings, semanticSearchVideos } from '../../graph'
+import { graph, useGraphQuery, useLiveQuery, useWorkingMemory, disposeSemanticEmbeddings, enableSemanticEmbeddings, semanticSearchVideos } from '../../graph'
 import type { PolyNode } from '../../graph'
 import { VideoItemData } from '../feed/VideoFeedItem'
 import { useProfile } from '../../nostr/profile'
@@ -152,6 +152,8 @@ export const DiscoverPage: React.FC = () => {
       }
     }
   }, [])
+
+  useEffect(() => () => disposeSemanticEmbeddings(), [])
   const relayUrls = useUserRelayUrls(session?.pubkey)
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
@@ -549,7 +551,14 @@ export const DiscoverPage: React.FC = () => {
     let cancelled = false
     setIsSemanticSearching(true)
     const byId = new Map(searchCorpus.map(video => [video.id, video]))
-    enableSemanticEmbeddings()
+    const semanticCorpus = searchCorpus.map(video => ({
+      id: video.id,
+      title: video.title,
+      summary: video.description,
+      hashtags: video.hashtags,
+      authorName: video.displayName || video.creator.name,
+    }))
+    enableSemanticEmbeddings(semanticCorpus)
       .then(() => semanticSearchVideos(debouncedSearch, 50))
       .then(ids => {
         if (!cancelled) setSemanticResults(ids.map(id => byId.get(id)).filter(Boolean) as VideoItemData[])
