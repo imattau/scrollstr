@@ -203,6 +203,26 @@ jobs:
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
           fail_on_unmatched_files: true
 
+      - name: Install zsp
+        run: go install github.com/zapstore/zsp/cmd/zsp@latest
+
+      - name: Validate Zapstore config
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          zsp publish --check zapstore.yaml
+
+      # Only broadcasts to Nostr relays on a real tag push, never on a
+      # workflow_dispatch repair run, so re-running this workflow against an
+      # old tag can't re-announce a release that's already been published.
+      - name: Publish to Zapstore
+        if: github.event_name == 'push'
+        env:
+          SIGN_WITH: ${{ secrets.ZAPSTORE_NSEC }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          zsp publish --quiet --skip-preview zapstore.yaml
+
   ios:
     needs: release
     if: github.event_name == 'push'

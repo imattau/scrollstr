@@ -1,0 +1,12 @@
+repository: https://github.com/imattau/scrollstr
+name: Nostr Clips
+summary: A short-form video feed client for Nostr
+description: |
+  Nostr Clips (Scrollstr) is a swipeable, short-form video feed built on the
+  Nostr protocol. Discover and post video clips, comment, zap creators, and
+  follow the people you care about — all backed by the open Nostr network
+  instead of a centralized platform.
+license: MIT
+website: https://github.com/imattau/scrollstr
+icon: src-tauri/icons/icon.png
+release_source: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
