@@ -26,7 +26,7 @@ body {
   /* New events pill badge */
   .new-events-pill {
     position: absolute;
-    top: 16px;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 50;
