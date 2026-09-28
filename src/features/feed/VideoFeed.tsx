@@ -401,7 +401,10 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     <div className="w-full h-full relative overflow-hidden" onErrorCapture={handleMediaError}>
       {/* Feed type toggles — positioned inline with MediaStack overlay */}
       <div className="absolute top-0 left-0 right-0 z-40 pointer-events-auto">
-        <div className="flex gap-1.5 pt-3 px-4">
+        <div
+          className="flex gap-1.5 px-4"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+        >
           {feedType === 'user' && filterUserPubkey ? (
             <button
               onClick={() => navigate(`/profile/${filterUserPubkey}`)}

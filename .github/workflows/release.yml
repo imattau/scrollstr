@@ -151,6 +151,9 @@ jobs:
       - name: Init Android project
         run: npx tauri android init
 
+      - name: Apply Android launcher icons
+        run: cp -r src-tauri/icons/android/. src-tauri/gen/android/app/src/main/res/
+
       - name: Set up Android signing
         run: |
           base64 -d <<< "$ANDROID_KEYSTORE_BASE64" > "$RUNNER_TEMP/release.keystore"
