@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      export_keystore:
+        description: One-off: upload the Android signing keystore, encrypted, as a build artifact
+        required: false
+        type: boolean
+        default: false
 
 env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
@@ -194,6 +199,29 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      # One-off export so a human can run the zsp identity wizard locally
+      # (it requires the actual keystore file and refuses to run
+      # non-interactively). Encrypted because this repo is public and
+      # workflow artifacts on public repos are downloadable by anyone with
+      # a GitHub account, not just collaborators.
+      - name: Export encrypted keystore artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.export_keystore == true
+        run: |
+          openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in "$RUNNER_TEMP/release.keystore" \
+            -out "$RUNNER_TEMP/release.keystore.enc" \
+            -pass env:KEYSTORE_EXPORT_PASSPHRASE
+        env:
+          KEYSTORE_EXPORT_PASSPHRASE: ${{ secrets.KEYSTORE_EXPORT_PASSPHRASE }}
+
+      - name: Upload encrypted keystore artifact
+        if: github.event_name == 'workflow_dispatch' && inputs.export_keystore == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-keystore-encrypted
+          path: ${{ runner.temp }}/release.keystore.enc
+          retention-days: 1
 
       - name: Build Android release
         run: |
