@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to repair with an Android build
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -20,14 +29,15 @@ jobs:
       - name: Create release entry
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Scrollstr ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Scrollstr ${{ env.RELEASE_TAG }}
           generate_release_notes: true
           draft: false
           prerelease: false
 
   desktop:
     needs: release
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -79,8 +89,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --target ${{ matrix.target }}
-          tagName: ${{ github.ref_name }}
-          releaseName: Scrollstr ${{ github.ref_name }}
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Scrollstr ${{ env.RELEASE_TAG }}
 
   android:
     needs: release
@@ -145,11 +155,13 @@ jobs:
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          files: src-tauri/gen/android/app/build/outputs/apk/release/*.apk
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          fail_on_unmatched_files: true
 
   ios:
     needs: release
+    if: github.event_name == 'push'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -189,5 +201,5 @@ jobs:
       - name: Upload iOS simulator app to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
           files: scrollstr-ios-simulator.zip
