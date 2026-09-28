@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       export_keystore:
-        description: One-off: upload the Android signing keystore, encrypted, as a build artifact
+        description: "One-off: upload the Android signing keystore, encrypted, as a build artifact"
         required: false
         type: boolean
         default: false
