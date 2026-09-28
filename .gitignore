@@ -30,3 +30,9 @@ memory-profile-report-*.json
 
 # Local package tarballs (e.g. npm pack output)
 *.tgz
+
+# Local secrets (e.g. SIGN_WITH for zsp) and decrypted signing material
+.env
+release.keystore
+release.p12
+release.keystore.enc
