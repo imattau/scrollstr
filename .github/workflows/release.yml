@@ -10,6 +10,11 @@ on:
         description: Existing release tag to repair with an Android build
         required: true
         type: string
+      publish_to_zapstore:
+        description: Also broadcast this release to Zapstore relays
+        required: false
+        type: boolean
+        default: false
 
 env:
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
@@ -211,11 +216,12 @@ jobs:
           export PATH="$(go env GOPATH)/bin:$PATH"
           zsp publish --check zapstore.yaml
 
-      # Only broadcasts to Nostr relays on a real tag push, never on a
-      # workflow_dispatch repair run, so re-running this workflow against an
-      # old tag can't re-announce a release that's already been published.
+      # Broadcasts to Nostr relays on a real tag push, or on a
+      # workflow_dispatch repair run when explicitly opted in via
+      # publish_to_zapstore, so repairing an old tag never re-announces a
+      # release unless that's asked for.
       - name: Publish to Zapstore
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || inputs.publish_to_zapstore == true
         env:
           SIGN_WITH: ${{ secrets.ZAPSTORE_NSEC }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
