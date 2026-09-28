@@ -327,6 +327,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
                 </div>
                 )}
 
+                {!isTauri() && (
                 <div className="order-1 md:order-2">
                   {hasPasskey ? (
                     <OptionCard
@@ -382,6 +383,7 @@ export const LoginSheet: React.FC<LoginSheetProps> = ({ isOpen, onClose, onLogin
                     </div>
                   )}
                 </div>
+                )}
 
                 <div className="order-2 md:order-3">
                   <div className="overflow-hidden rounded-[20px] border border-[#2a2a31] bg-[#18181d]">
