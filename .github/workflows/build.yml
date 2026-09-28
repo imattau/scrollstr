@@ -124,6 +124,9 @@ jobs:
       - name: Init Android project
         run: npx tauri android init
 
+      - name: Apply Android launcher icons
+        run: cp -r src-tauri/icons/android/. src-tauri/gen/android/app/src/main/res/
+
       - name: Build Android
         run: |
           export ANDROID_HOME=$HOME/Android/Sdk
