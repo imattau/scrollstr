@@ -276,7 +276,7 @@ export const PostWizard: React.FC = () => {
 
   return (
     <div className="flex min-h-full flex-col bg-[#09090b] text-[#f7f7f8]">
-      <div className="flex h-[56px] items-center justify-between px-4">
+      <div className="flex h-[56px] items-center justify-between px-4 safe-top">
         <h2 className="text-[18px] font-bold">Post video</h2>
         <button className="text-[22px] leading-none" onClick={() => navigate(-1)}>×</button>
       </div>

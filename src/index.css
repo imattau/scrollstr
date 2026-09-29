@@ -23,6 +23,23 @@ body {
 }
 
 @layer utilities {
+  /* Top padding for full-screen pages, clearing the status bar / camera cutout */
+  .safe-top {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+  }
+
+  /* Fixed bottom nav: push its content up clear of the home indicator while
+     the background keeps extending down to the true screen edge. */
+  .mobile-nav-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Spacer matching mobile-nav-safe's actual rendered height, so page content
+     isn't hidden behind the nav on devices with a bottom safe-area inset. */
+  .mobile-nav-spacer {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  }
+
   /* New events pill badge */
   .new-events-pill {
     position: absolute;

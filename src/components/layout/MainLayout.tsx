@@ -45,7 +45,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     <>
       {immersive ? (
         <div className="min-h-dvh bg-[#09090b] text-[#f7f7f8] selection:bg-fuchsia-500 selection:text-white">
-        <div className="flex h-dvh justify-center overflow-hidden bg-[#09090b] pb-16 md:min-h-screen md:pb-0">
+        <div className="flex h-dvh justify-center overflow-hidden bg-[#09090b] mobile-nav-spacer md:min-h-screen md:pb-0">
           <div className="flex h-full w-full max-w-[1440px] overflow-hidden rounded-none md:h-screen">
             <aside className="hidden w-[248px] shrink-0 flex-col justify-between border-r border-[#111115] bg-[#111115] p-6 md:flex">
               <div className="space-y-8">
@@ -141,7 +141,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
             </aside>
           </div>
         </div>
-        <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-center justify-around border-t border-neutral-900 bg-neutral-950/80 px-4 backdrop-blur-lg md:hidden">
+        <nav className="fixed bottom-0 left-0 right-0 z-50 flex min-h-16 items-center justify-around border-t border-neutral-900 bg-neutral-950/80 px-4 backdrop-blur-lg md:hidden mobile-nav-safe">
           {mobileNavItems.map((item) => {
             const Icon = item.icon
             const active = isActive(item.path)
@@ -164,7 +164,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
     ) : (
       <div className="h-dvh bg-neutral-950 text-neutral-100 flex flex-col selection:bg-purple-600 selection:text-white">
       {/* Mobile content area (takes remaining space, scrolls) */}
-      <div className="flex-1 min-h-0 overflow-y-auto md:flex md:justify-center pb-16 md:pb-0">
+      <div className="flex-1 min-h-0 overflow-y-auto md:flex md:justify-center mobile-nav-spacer md:pb-0">
         {/* Container */}
         <div className="w-full max-w-[1250px] md:flex">
           
@@ -253,7 +253,7 @@ export const MainLayout = React.memo<MainLayoutProps>(({ children, rightPanel, i
       </div>
 
       {/* Mobile Navigation (Bottom) */}
-      <nav className="fixed bottom-0 left-0 right-0 md:hidden h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50">
+      <nav className="fixed bottom-0 left-0 right-0 md:hidden min-h-16 bg-neutral-950/80 backdrop-blur-lg border-t border-neutral-900 flex items-center justify-around px-2 z-50 mobile-nav-safe">
         {mobileNavItems.map((item) => {
           const Icon = item.icon
           const active = isActive(item.path)

@@ -293,7 +293,7 @@ export const SettingsPage: React.FC = () => {
 
   if (!session) {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8] items-center justify-center">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 safe-top text-[#f7f7f8] items-center justify-center">
         <p className="text-[14px] text-[#a1a1aa] mb-4">Please log in to manage your Nostr settings lists.</p>
       </div>
     )
@@ -302,7 +302,7 @@ export const SettingsPage: React.FC = () => {
   // Render Sub-view layouts
   if (activeSubView === 'identity') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline font-medium"
@@ -347,7 +347,7 @@ export const SettingsPage: React.FC = () => {
 
   if (activeSubView === 'wallet') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline font-medium"
@@ -381,7 +381,7 @@ export const SettingsPage: React.FC = () => {
 
   if (activeSubView === 'relays') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
@@ -446,7 +446,7 @@ export const SettingsPage: React.FC = () => {
 
   if (activeSubView === 'blossom') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
@@ -496,7 +496,7 @@ export const SettingsPage: React.FC = () => {
 
   if (activeSubView === 'nip96') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
@@ -546,7 +546,7 @@ export const SettingsPage: React.FC = () => {
 
   if (activeSubView === 'mute') {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 pt-4 text-[#f7f7f8]">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-6 safe-top text-[#f7f7f8]">
         <button
           onClick={() => setActiveSubView('main')}
           className="flex items-center gap-2 text-[14px] font-semibold text-[#a78bfa] mb-6 hover:underline"
@@ -636,7 +636,7 @@ export const SettingsPage: React.FC = () => {
 
   // Render Main Settings Menu
   return (
-    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
+    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 safe-top text-[#f7f7f8]">
       <div className="flex h-[56px] items-center">
         <h2 className="text-[18px] font-bold">Settings</h2>
       </div>

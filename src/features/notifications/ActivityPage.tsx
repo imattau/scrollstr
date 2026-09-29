@@ -184,7 +184,7 @@ export const ActivityPage: React.FC = () => {
 
   if (!session) {
     return (
-      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8] items-center justify-center">
+      <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 safe-top text-[#f7f7f8] items-center justify-center">
         <p className="text-[14px] text-[#a1a1aa] mb-4">Please log in to view your activity feed.</p>
         <button
           onClick={() => navigate('/')}
@@ -197,7 +197,7 @@ export const ActivityPage: React.FC = () => {
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
+    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 safe-top text-[#f7f7f8]">
       <div className="flex h-[56px] items-center">
         <h2 className="text-[18px] font-bold">Activity</h2>
       </div>

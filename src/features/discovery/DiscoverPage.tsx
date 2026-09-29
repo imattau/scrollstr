@@ -675,7 +675,7 @@ export const DiscoverPage: React.FC = () => {
   }, [session, signEvent, myContactListEvent, toast])
 
   return (
-    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 pt-4 text-[#f7f7f8]">
+    <div className="flex min-h-full flex-col bg-[#09090b] px-4 pb-4 safe-top text-[#f7f7f8]">
       <div className="flex h-[56px] items-center justify-between">
         <h2 className="text-[18px] font-bold">Discover</h2>
         <button
