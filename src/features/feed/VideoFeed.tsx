@@ -104,7 +104,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
   const { mutedPubkeys, mutedHashtags } = useMuteList(session?.pubkey)
 
   // Feed data: videos, filtering, sorting
-  const { videos, feedKey, videosRef, trimOffset } = useFeedVideos({
+  const { videos, feedKey, videosRef, trimOffset, prependOffset, earliestCreatedAt } = useFeedVideos({
     sessionPubkey: session?.pubkey,
     feedType,
     followingPubkeys,
@@ -135,6 +135,25 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
       })
     }
   }, [trimOffset])
+
+  // Mirror of the trim shift above, in the opposite direction: when scrolling
+  // back near the start of the feed pulls in older history (see
+  // useFeedSubscriptions' scroll-back fetch), those videos are prepended
+  // ahead of everything already shown, pushing every later index forward.
+  // Shift activeIndex to match so the same video stays in view instead of
+  // the feed appearing to jump.
+  const prevPrependOffsetRef = useRef(prependOffset)
+  useEffect(() => {
+    const delta = prependOffset - prevPrependOffsetRef.current
+    prevPrependOffsetRef.current = prependOffset
+    if (delta > 0) {
+      setActiveIndex((idx) => {
+        const next = idx + delta
+        scrollToIndex(next)
+        return next
+      })
+    }
+  }, [prependOffset])
 
   // Feed position: deep link, sessionStorage, initial scroll position
   const {
@@ -179,6 +198,7 @@ export const VideoFeed = React.memo<VideoFeedProps>(({ onActionTrigger, onVideoC
     activeIndex,
     videosLength: videos.length,
     oldestCreatedAt,
+    earliestCreatedAt,
     refreshKey,
   })
 

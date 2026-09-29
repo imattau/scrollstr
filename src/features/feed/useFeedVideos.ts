@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } fr
 import { graph, useGraphQuery } from '../../graph'
 import type { NodeType, PolyNode } from '../../graph'
 import { VideoShape, mergeCountersIntoShapes } from '../../nostr/cache'
-import { sortByInsertOrder, appendNewItems } from './feedSort'
+import { sortByInsertOrder, appendNewItems, prependOlderItems } from './feedSort'
 import type { VideoItemData } from './VideoFeedItem'
 
 // A long scrolling session keeps appending to the stable order indefinitely
@@ -21,6 +21,17 @@ interface StableFeedOrderResult {
   // active-index state by the same amount, keeping the same video in view
   // across a trim (trimming the front shifts every later index).
   trimOffset: number
+  // Cumulative count of items ever prepended to the front of this list (see
+  // prependOlderItems below). Same shift contract as trimOffset, but in the
+  // opposite direction: the caller increases its active-index state by the
+  // delta so the same video stays in view when older history is inserted
+  // before it.
+  prependOffset: number
+  // The oldest createdAt currently known across the whole list (not just its
+  // current front/back, since the append-only order doesn't guarantee either
+  // end is chronologically extreme). Used as the `until` cursor for fetching
+  // further backward history. Undefined until at least one item is loaded.
+  earliestCreatedAt: number | undefined
 }
 
 /**
@@ -46,6 +57,8 @@ function useStableFeedOrder(
   const prevResetKeyRef = useRef(resetKey)
   const [ordered, setOrdered] = useState<VideoItemData[]>([])
   const [trimOffset, setTrimOffset] = useState(0)
+  const [prependOffset, setPrependOffset] = useState(0)
+  const [earliestCreatedAt, setEarliestCreatedAt] = useState<number | undefined>(undefined)
 
   // Accumulate the session-stable ordering off the render path (refs must not
   // be read/written during render). useLayoutEffect runs before paint, so the
@@ -56,20 +69,44 @@ function useStableFeedOrder(
       orderRef.current = []
       dataRef.current = new Map()
       setTrimOffset(0)
+      setPrependOffset(0)
+    }
+
+    // Snapshot the oldest createdAt among items already shown *before*
+    // merging this batch in — anything older than this belongs before them,
+    // not after (see prependOlderItems below).
+    let earliestKnown = Infinity
+    for (const id of orderRef.current) {
+      const createdAt = dataRef.current.get(id)?.createdAt
+      if (createdAt != null && createdAt < earliestKnown) earliestKnown = createdAt
     }
 
     for (const v of items) dataRef.current.set(v.id, v)
 
+    const knownIds = new Set(orderRef.current)
+    const olderItems = orderRef.current.length > 0 && Number.isFinite(earliestKnown)
+      ? items.filter((v) => !knownIds.has(v.id) && v.createdAt != null && v.createdAt < earliestKnown)
+      : []
+    const olderIds = new Set(olderItems.map((v) => v.id))
+    const regularItems = olderIds.size > 0 ? items.filter((v) => !olderIds.has(v.id)) : items
+
     orderRef.current = appendNewItems(
       orderRef.current,
-      items,
+      regularItems,
       sortByInsertOrder,
       (id) => dataRef.current.has(id) && isStillVisible(id)
     )
 
+    let prepended = 0
+    if (olderItems.length > 0) {
+      const before = orderRef.current.length
+      orderRef.current = prependOlderItems(orderRef.current, olderItems, sortByInsertOrder)
+      prepended = orderRef.current.length - before
+    }
+
     let trimmed = 0
     if (activeIndex != null && orderRef.current.length > MAX_STABLE_ORDER) {
-      const safeAnchor = Math.min(Math.max(activeIndex, 0), orderRef.current.length - 1)
+      const safeAnchor = Math.min(Math.max(activeIndex + prepended, 0), orderRef.current.length - 1)
       const safeStart = Math.max(0, safeAnchor - RETENTION_BEHIND_ACTIVE)
       const desiredStart = orderRef.current.length - MAX_STABLE_ORDER
       trimmed = Math.min(desiredStart, safeStart)
@@ -83,11 +120,22 @@ function useStableFeedOrder(
       if (!orderSet.has(id)) dataRef.current.delete(id)
     }
 
+    let minCreatedAt = Infinity
+    for (const v of dataRef.current.values()) {
+      if (v.createdAt != null && v.createdAt < minCreatedAt) minCreatedAt = v.createdAt
+    }
+
     setOrdered(orderRef.current.map((id) => dataRef.current.get(id)).filter((v): v is VideoItemData => !!v))
+    // trimOffset and prependOffset are applied as two independent shifts by
+    // the caller (via separate functional setState updates), so they must
+    // each carry their own full delta rather than a net value — applying
+    // -trimmed and +prepended separately already nets out correctly.
     if (trimmed > 0) setTrimOffset((o) => o + trimmed)
+    if (prepended > 0) setPrependOffset((o) => o + prepended)
+    setEarliestCreatedAt(Number.isFinite(minCreatedAt) ? minCreatedAt : undefined)
   }, [items, resetKey, isStillVisible, activeIndex])
 
-  return { videos: ordered, trimOffset }
+  return { videos: ordered, trimOffset, prependOffset, earliestCreatedAt }
 }
 
 // A generous, fixed cap on how many cached candidates the query considers
@@ -165,6 +213,14 @@ interface UseFeedVideosOutput {
   // active list. The caller shifts its own active-index state by the delta
   // between renders so the same video stays in view across a trim.
   trimOffset: number
+  // Cumulative count of items ever prepended to the front of the currently
+  // active list (older history backfilled in from a scroll-back fetch). The
+  // caller shifts its own active-index state by the delta, in the opposite
+  // direction to trimOffset, so the same video stays in view.
+  prependOffset: number
+  // Oldest createdAt currently loaded across the active list — the `until`
+  // cursor for fetching further backward history. Undefined until loaded.
+  earliestCreatedAt: number | undefined
 }
 
 export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
@@ -397,11 +453,11 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     isStillVisible,
     isUserActive ? activeIndex : null
   )
-  const { videos, trimOffset } = isUserActive
-    ? { videos: userResult.videos, trimOffset: userResult.trimOffset }
+  const { videos, trimOffset, prependOffset, earliestCreatedAt } = isUserActive
+    ? userResult
     : isFollowingActive
-      ? { videos: followingResult.videos, trimOffset: followingResult.trimOffset }
-      : { videos: exploreResult.videos, trimOffset: exploreResult.trimOffset }
+      ? followingResult
+      : exploreResult
 
   const videosRef = useRef(videos)
   useEffect(() => { videosRef.current = videos }, [videos])
@@ -411,5 +467,5 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     [videos]
   )
 
-  return { videos, isFeedLoading, feedKey, videosRef, trimOffset }
+  return { videos, isFeedLoading, feedKey, videosRef, trimOffset, prependOffset, earliestCreatedAt }
 }

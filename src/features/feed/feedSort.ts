@@ -24,6 +24,26 @@ export function sortByInsertOrder(a: VideoItemData, b: VideoItemData): number {
  * membership entirely — only a `false` from `isStillValid` (or its absence)
  * drops an item.
  */
+/**
+ * Prepend items that are strictly older than everything already shown.
+ * Used when the user scrolls back toward the start of the session's stable
+ * order and a backward backfill fetch turns up history from before it —
+ * unlike `appendNewItems`, these are placed *before* `prevOrder` rather than
+ * after, since they belong earlier in time than anything currently loaded.
+ * Already-known ids are filtered out so this stays safe to call with a
+ * batch that overlaps `prevOrder`.
+ */
+export function prependOlderItems<T extends { id: string }>(
+  prevOrder: string[],
+  olderItems: T[],
+  sortNew: (a: T, b: T) => number
+): string[] {
+  const known = new Set(prevOrder)
+  const fresh = olderItems.filter((v) => !known.has(v.id)).sort(sortNew)
+  if (fresh.length === 0) return prevOrder
+  return [...fresh.map((v) => v.id), ...prevOrder]
+}
+
 export function appendNewItems<T extends { id: string }>(
   prevOrder: string[],
   items: T[],
