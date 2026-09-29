@@ -1,6 +1,6 @@
 [package]
 name = "scrollstr"
-version = "0.3.7"
+version = "0.3.8"
 description = "Consumption-first Nostr vertical short-form video client"
 authors = ["scrollstr"]
 license = "MIT"
