@@ -59,7 +59,15 @@ class TauriFileIO implements FileIO {
 
 async function supportsOPFS(): Promise<boolean> {
   try {
-    return typeof navigator?.storage?.getDirectory === 'function'
+    // The `getDirectory` function can exist on the API surface even where it
+    // doesn't actually work — notably on Android, where Tauri serves the app
+    // from http://tauri.localhost, which Android WebView does not treat as a
+    // secure context, and OPFS strictly requires one. Calling it (rather
+    // than just feature-detecting the function reference) is the only way
+    // to catch that: it throws there instead of resolving.
+    if (typeof navigator?.storage?.getDirectory !== 'function') return false
+    await navigator.storage.getDirectory()
+    return true
   } catch {
     return false
   }
