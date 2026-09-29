@@ -5,6 +5,7 @@ import { maybeResumeBackfill, maybeResumeProfileBackfill, maybeResumeFollowedVid
 
 const PAGE_SIZE = 50
 const LOAD_MORE_THRESHOLD = 5
+const LOAD_OLDER_BACK_THRESHOLD = 5
 const VIDEO_KINDS = [1, 21, 22, 34236]
 const AUTHOR_FILTER_BATCH_SIZE = 20
 const LIVE_VIDEO_WINDOW_SECONDS = 15 * 60
@@ -32,14 +33,17 @@ interface UseFeedSubscriptionsInput {
   activeIndex: number
   videosLength: number
   oldestCreatedAt: number | undefined
+  earliestCreatedAt: number | undefined
   refreshKey: number
 }
 
 export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
-  const { relayUrls, sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, refreshKey } = input
+  const { relayUrls, sessionPubkey, feedType, followingPubkeys, filterUserPubkey, mutedPubkeys, activeIndex, videosLength, oldestCreatedAt, earliestCreatedAt, refreshKey } = input
 
   const [isFetchingOlder, setIsFetchingOlder] = useState(false)
   const lastOlderFetchAtRef = useRef(0)
+  const [isFetchingOlderBack, setIsFetchingOlderBack] = useState(false)
+  const lastOlderBackFetchAtRef = useRef(0)
   const initialBackfillsFiredRef = useRef(false)
   const prevRefreshKeyRef = useRef(refreshKey)
 
@@ -217,4 +221,48 @@ export function useFeedSubscriptions(input: UseFeedSubscriptionsInput): void {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIndex, videosLength, oldestCreatedAt, relayUrls, feedType, sessionPubkey, followingPubkeys, filterUserPubkey])
+
+  // Load older content when scrolling back toward the start of the session's
+  // stable order — mirrors the "load more" effect above, but fetches history
+  // from *before* the oldest video currently loaded (across the whole list,
+  // not just its current front) and gets prepended rather than appended (see
+  // useFeedVideos' useStableFeedOrder). Without this, scrolling back past the
+  // first video ever shown this session just hits a wall.
+  useEffect(() => {
+    if (videosLength === 0) return
+    if (activeIndex > LOAD_OLDER_BACK_THRESHOLD) return
+    if (isFetchingOlderBack) return
+
+    if (!earliestCreatedAt) return
+
+    const now = Date.now()
+    if (now - lastOlderBackFetchAtRef.current < 1500) return
+    lastOlderBackFetchAtRef.current = now
+    setIsFetchingOlderBack(true)
+
+    console.log(`Loading older videos (scroll-back) before ${earliestCreatedAt}...`)
+    const filters = feedType === 'following' && sessionPubkey
+      ? authorScopedVideoFilters(followingPubkeys, {
+          limit: PAGE_SIZE,
+          until: earliestCreatedAt - 1,
+        })
+      : feedType === 'user' && filterUserPubkey
+        ? authorScopedVideoFilters([filterUserPubkey], {
+            limit: PAGE_SIZE,
+            until: earliestCreatedAt - 1,
+          })
+        : [{
+            kinds: VIDEO_KINDS,
+            limit: PAGE_SIZE,
+            until: earliestCreatedAt - 1,
+          }]
+    const unsub = subscribeToRelays(relayUrls, filters, 'low')
+    const doneTimer = setTimeout(() => setIsFetchingOlderBack(false), 3000)
+
+    return () => {
+      unsub()
+      clearTimeout(doneTimer)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex, videosLength, earliestCreatedAt, relayUrls, feedType, sessionPubkey, followingPubkeys, filterUserPubkey])
 }
