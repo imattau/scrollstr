@@ -228,7 +228,18 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
 
   const [isFeedLoading, setIsFeedLoading] = useState(true)
 
+  const isUserActive = feedType === 'user' && !!filterUserPubkey
+  const isFollowingActive = feedType === 'following' && !!sessionPubkey
+  const isExploreActive = !isUserActive && !isFollowingActive
+
+  // Only the currently-displayed feed's query does its full graph scan —
+  // the other two skip straight to an empty result (and unsubscribe from
+  // graph mutations via an empty nodeTypes list) so switching feed types
+  // doesn't pay for three O(n) scans on every mute/tag/refresh change.
+  // useStableFeedOrder retains each list's already-shown items independently
+  // of query freshness, so a paused feed doesn't lose its place while hidden.
   const _allShapes = useGraphQuery(async () => {
+    if (!isExploreActive) return []
     try {
       const nodes = graph.whereType('video_shape')
         .filter(n => {
@@ -254,12 +265,12 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in video query:', err)
       return []
     }
-  }, [refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
+  }, [refreshKey, filterTag, resumeVideoId, isExploreActive], 500, isExploreActive ? ['video_shape', 'profile'] : [])
 
   const allShapes = useMemo(() => _allShapes ?? [], [_allShapes])
 
   const _followedShapes = useGraphQuery(async () => {
-    if (!sessionPubkey || followingPubkeys.length === 0) return []
+    if (!isFollowingActive || !sessionPubkey || followingPubkeys.length === 0) return []
     try {
       const allNodes: PolyNode[] = []
       for (const pk of followingPubkeys) {
@@ -291,14 +302,14 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in following video query:', err)
       return []
     }
-  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
+  }, [sessionPubkey, followingPubkeys, refreshKey, filterTag, resumeVideoId, isFollowingActive], 500, isFollowingActive ? ['video_shape', 'profile'] : [])
 
   const followedShapes = useMemo(() => _followedShapes ?? [], [_followedShapes])
 
   // Single-author feed (e.g. "view this creator's videos as a feed" from
   // Profile) — same shape as followedShapes, scoped to one pubkey.
   const _userShapes = useGraphQuery(async () => {
-    if (!filterUserPubkey) return []
+    if (!isUserActive || !filterUserPubkey) return []
     try {
       let shapes = graph.byPubkey(filterUserPubkey, 'video_shape')
         .map(n => n.data as unknown as VideoShape)
@@ -326,7 +337,7 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
       console.error('[VideoFeed] Error in user video query:', err)
       return []
     }
-  }, [filterUserPubkey, refreshKey, filterTag, resumeVideoId], 500, ['video_shape', 'profile'])
+  }, [filterUserPubkey, refreshKey, filterTag, resumeVideoId, isUserActive], 500, isUserActive ? ['video_shape', 'profile'] : [])
 
   const userShapes = useMemo(() => _userShapes ?? [], [_userShapes])
 
@@ -432,8 +443,6 @@ export function useFeedVideos(input: UseFeedVideosInput): UseFeedVideosOutput {
     () => injectDeeplink(filterVideos(userShapes)),
     [userShapes, filterVideos, injectDeeplink]
   )
-  const isUserActive = feedType === 'user' && !!filterUserPubkey
-  const isFollowingActive = feedType === 'following' && !!sessionPubkey
 
   const exploreResult = useStableFeedOrder(
     exploreVideosRaw,

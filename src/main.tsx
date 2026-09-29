@@ -16,15 +16,22 @@ initPerformanceObserver()
 ;(globalThis as unknown as { scrollstrDebug: typeof memoryProfile }).scrollstrDebug = memoryProfile
 
 async function init() {
-  if (isTauri()) {
-    const { createPersistenceAdapter } = await import('./tauri/graph-adapter')
-    const { swapGraphPersistence } = await import('./graph/polygraph')
-    try {
-      const adapter = await createPersistenceAdapter()
-      await swapGraphPersistence(adapter)
-    } catch (err) {
-      console.warn('[tauri] Failed to set up Tauri persistence adapter:', err)
-    }
+  // The graph's default persistence (set synchronously at module load, see
+  // ScrollstrGraph's constructor) assumes OPFS works without probing it —
+  // true on Tauri/desktop, but not guaranteed on the plain web/PWA path
+  // either (non-HTTPS deployments, some embedded WebViews). Swap in a
+  // verified adapter for every environment before anything reads/writes.
+  const { createPersistenceAdapter } = await import('./tauri/graph-adapter')
+  const { swapGraphPersistence } = await import('./graph/polygraph')
+  try {
+    const adapter = await createPersistenceAdapter()
+    await swapGraphPersistence(adapter)
+  } catch (err) {
+    console.warn(`[${isTauri() ? 'tauri' : 'web'}] Failed to set up persistence adapter:`, err)
+  }
+
+  if (navigator.storage?.persist) {
+    navigator.storage.persist().catch(() => { /* best-effort */ })
   }
 
   createRoot(document.getElementById('root')!).render(

@@ -79,7 +79,16 @@ export async function createPersistenceAdapter(): Promise<PersistenceAdapter> {
   if (_adapter) return _adapter
 
   if (!isTauri()) {
-    _adapter = new BinaryStoreAdapter({ storeDir: DB_NAME })
+    // Same false-positive risk as the Tauri/Android case below: the browser
+    // can expose `navigator.storage.getDirectory` without OPFS actually
+    // working (non-HTTPS deployments, some embedded WebViews), which would
+    // otherwise surface as writes failing deep inside BinaryStoreAdapter's
+    // I/O path instead of a clean fallback here.
+    if (await supportsOPFS()) {
+      _adapter = new BinaryStoreAdapter({ storeDir: DB_NAME })
+      return _adapter
+    }
+    _adapter = new MemoryAdapter()
     return _adapter
   }
 
